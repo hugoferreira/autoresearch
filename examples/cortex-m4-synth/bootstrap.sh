@@ -19,6 +19,33 @@ if [ ! -f src/dsp_fir.c ] || [ ! -f Makefile ]; then
     exit 1
 fi
 
+# Resolve the binary: if $AR is an executable path use it directly,
+# otherwise make sure it's on $PATH. Claude Code subagents spawn Bash
+# which looks up executables in $PATH, so "it works for the bootstrap"
+# is not sufficient — it must also resolve for the main session.
+if ! command -v "$AR" >/dev/null 2>&1 && [ ! -x "$AR" ]; then
+    cat >&2 <<'EOF'
+bootstrap.sh: cannot find `autoresearch` on $PATH.
+
+Install it from the autoresearch source tree:
+
+    cd /path/to/autoresearch && make install
+
+That runs `go install ./cmd/autoresearch`, dropping the binary in
+$GOPATH/bin. Make sure $GOPATH/bin is on your $PATH — that's where
+the research subagents will look for the binary when the main Claude
+Code session invokes them.
+
+Alternatively, pass AR=/absolute/path/to/autoresearch:
+
+    AR=/path/to/autoresearch ./bootstrap.sh
+
+but note: the Claude Code subagents won't see that env var, so they
+will still need `autoresearch` on $PATH at run time.
+EOF
+    exit 1
+fi
+
 if [ ! -d .git ]; then
     echo "=> initializing git repo"
     git init --initial-branch=main -q
