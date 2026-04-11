@@ -244,20 +244,32 @@ suite.`,
 				return fmt.Errorf("install subagents: %w", err)
 			}
 
+			// Merge autoresearch's Bash allow entry into .claude/settings.json
+			// so the main session can invoke autoresearch verbs without the
+			// permission prompt firing on every call.
+			settingsRes, err := integration.EnsureClaudeSettings(
+				globalProjectDir,
+				[]string{integration.AutoresearchAllowEntry},
+			)
+			if err != nil {
+				return fmt.Errorf("update claude settings: %w", err)
+			}
+
 			return w.Emit(
-				fmt.Sprintf("initialized .research/ at %s\ngitignore: %s\nwrote %s\nwrote %d subagent prompt(s) to %s\n(to load the reference into Claude Code's main session, add `@.claude/autoresearch.md` to your CLAUDE.md)",
-					s.DirPath(), describeGitignoreAction(gi), claudePath, agentRes.Count, agentRes.Dir),
+				fmt.Sprintf("initialized .research/ at %s\ngitignore: %s\nwrote %s\nwrote %d subagent prompt(s) to %s\nsettings: %s\n(to load the reference into Claude Code's main session, add `@.claude/autoresearch.md` to your CLAUDE.md)",
+					s.DirPath(), describeGitignoreAction(gi), claudePath, agentRes.Count, agentRes.Dir, describeClaudeSettingsAction(settingsRes)),
 				map[string]any{
-					"status":          "ok",
-					"root":            s.Root(),
-					"dir":             s.DirPath(),
-					"build":           "ok",
-					"test":            "ok",
-					"claude_doc":      claudePath,
-					"gitignore":       gitignoreResultToMap(gi),
-					"subagents_dir":   agentRes.Dir,
-					"subagent_files":  agentRes.Written,
-					"subagent_count":  agentRes.Count,
+					"status":         "ok",
+					"root":           s.Root(),
+					"dir":            s.DirPath(),
+					"build":          "ok",
+					"test":           "ok",
+					"claude_doc":     claudePath,
+					"gitignore":      gitignoreResultToMap(gi),
+					"subagents_dir":  agentRes.Dir,
+					"subagent_files": agentRes.Written,
+					"subagent_count": agentRes.Count,
+					"settings":       claudeSettingsResultToMap(settingsRes),
 				},
 			)
 		},

@@ -49,6 +49,7 @@ measurable goals. It is not a feature-delivery or program-synthesis tool.`,
 		claudeCommands(),
 		budgetCommands(),
 		conclusionCommands(),
+		dashboardCommands(),
 	}
 	for _, g := range groups {
 		for _, c := range g {

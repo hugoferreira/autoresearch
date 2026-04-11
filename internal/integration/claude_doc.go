@@ -359,8 +359,32 @@ the main store from a worktree context, pass ` + "`-C <project-root>`" + ` expli
     conclusion.write       → C-XXXX; experiment: measured → analyzed; hypothesis: open → {supported|refuted|inconclusive}
     conclusion.downgrade   → same as write, but the conclusion records what was downgraded and why
 
+## Watching the loop
+
+When you want to see what's happening across the whole research state without
+spamming four separate verbs:
+
+    autoresearch dashboard              # one-shot composite snapshot
+    autoresearch dashboard --refresh 2  # live, auto-refreshes every 2 seconds
+    autoresearch log --follow           # tail events.jsonl as new events land
+
+The dashboard composes goal + budget + hypothesis tree + frontier + in-flight
+experiments + recent events into one frame. It is **read-only**: it works
+while the store is paused and it is not a steering surface. Humans steer by
+talking to the main session, which translates intent into CLI calls; leave
+` + "`autoresearch dashboard --refresh 2`" + ` running in a second terminal or tmux
+pane while you drive research.
+
+` + "`autoresearch dashboard --json`" + ` emits a structured snapshot for external
+tooling (` + "`--refresh`" + ` is refused in JSON mode — use a polling loop
+externally).
+
+` + "`autoresearch log --follow --json`" + ` emits JSONL (one event per line) as
+new events arrive.
+
 ## When you're stuck
 
+- ` + "`autoresearch dashboard`" + ` for a composite snapshot
 - ` + "`autoresearch status`" + ` for current counters and pause state
 - ` + "`autoresearch log --tail 40`" + ` for what just happened
 - ` + "`autoresearch tree`" + ` for the hypothesis graph

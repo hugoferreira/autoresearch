@@ -108,20 +108,73 @@ your edits will be lost on the next refresh.`,
 			if err != nil {
 				return err
 			}
+
+			entries := []string{integration.AutoresearchAllowEntry}
+			var settingsRes integration.ClaudeSettingsResult
+			if globalDryRun {
+				settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
+			} else {
+				settingsRes, err = integration.EnsureClaudeSettings(globalProjectDir, entries)
+			}
+			if err != nil {
+				return fmt.Errorf("update claude settings: %w", err)
+			}
+
 			payload := map[string]any{
-				"status": "ok",
-				"path":   wrote,
+				"status":   "ok",
+				"path":     wrote,
+				"settings": claudeSettingsResultToMap(settingsRes),
 			}
 			if globalDryRun {
 				payload["status"] = "dry-run"
-				return w.Emit(fmt.Sprintf("[dry-run] would write %s", wrote), payload)
+				return w.Emit(
+					fmt.Sprintf("[dry-run] would write %s\n[dry-run] settings: %s",
+						wrote, describeClaudeSettingsAction(settingsRes)),
+					payload,
+				)
 			}
-			return w.Emit(fmt.Sprintf("wrote %s", wrote), payload)
+			return w.Emit(
+				fmt.Sprintf("wrote %s\nsettings: %s", wrote, describeClaudeSettingsAction(settingsRes)),
+				payload,
+			)
 		},
 	}
 	c.Flags().BoolVar(&force, "force", false, "overwrite the file even if it exists (default: yes — this file is always managed)")
 	_ = force // currently unconditional overwrite; flag reserved for a future "refuse if modified" mode
 	return c
+}
+
+// describeClaudeSettingsAction is the one-line human-readable summary of what
+// EnsureClaudeSettings did, used in text output from `init` and
+// `claude install`.
+func describeClaudeSettingsAction(r integration.ClaudeSettingsResult) string {
+	switch {
+	case r.Created:
+		return fmt.Sprintf("created %s with %d allow entry (entries=%v)", r.Path, len(r.Added), r.Added)
+	case r.Updated:
+		return fmt.Sprintf("added %d allow entry to %s (entries=%v)", len(r.Added), r.Path, r.Added)
+	case r.AlreadyOK:
+		return fmt.Sprintf("%s already has the autoresearch allow entry", r.Path)
+	default:
+		return "no change to " + r.Path
+	}
+}
+
+func claudeSettingsResultToMap(r integration.ClaudeSettingsResult) map[string]any {
+	action := "unchanged"
+	switch {
+	case r.Created:
+		action = "created"
+	case r.Updated:
+		action = "updated"
+	case r.AlreadyOK:
+		action = "already_ok"
+	}
+	return map[string]any{
+		"path":   r.Path,
+		"action": action,
+		"added":  r.Added,
+	}
 }
 
 // installClaudeDoc writes .claude/autoresearch.md under projectDir. The file
