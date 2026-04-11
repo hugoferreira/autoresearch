@@ -1,0 +1,68 @@
+// Package worktree wraps the git CLI for worktree lifecycle operations.
+// Shelling out to git is intentional — it avoids a heavy go-git dependency and
+// keeps behavior identical to what a human operator would see.
+package worktree
+
+import (
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
+func run(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// IsRepo reports whether dir is inside a git work tree.
+func IsRepo(dir string) bool {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
+// ResolveRef returns the full SHA for a ref (HEAD, main, a short SHA, etc.).
+func ResolveRef(dir, ref string) (string, error) {
+	return run(dir, "rev-parse", ref)
+}
+
+// Add creates a new git worktree at path, checking out a new branch off baseline.
+func Add(projectDir, path, branch, baseline string) error {
+	_, err := run(projectDir, "worktree", "add", "-b", branch, path, baseline)
+	return err
+}
+
+// Remove deletes a worktree (but not the backing branch).
+func Remove(projectDir, path string) error {
+	_, err := run(projectDir, "worktree", "remove", "--force", path)
+	return err
+}
+
+// RenameBranch renames a branch that is not currently checked out in any worktree.
+// Used by `experiment reset` to preserve an abandoned attempt under a timestamped name.
+func RenameBranch(projectDir, oldName, newName string) error {
+	_, err := run(projectDir, "branch", "-m", oldName, newName)
+	return err
+}
+
+// List returns the absolute paths of all worktrees known to the repo.
+func List(projectDir string) ([]string, error) {
+	out, err := run(projectDir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			paths = append(paths, strings.TrimPrefix(line, "worktree "))
+		}
+	}
+	return paths, nil
+}

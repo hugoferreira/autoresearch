@@ -1,0 +1,12 @@
+# Compiled binary (built via `go build -o autoresearch ./cmd/autoresearch`)
+/autoresearch
+
+# Go test + coverage artifacts
+*.test
+*.out
+coverage.txt
+
+# OS / editor junk
+.DS_Store
+.idea/
+.vscode/
