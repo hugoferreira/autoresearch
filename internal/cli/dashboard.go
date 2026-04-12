@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
@@ -133,14 +134,11 @@ type dashboardInFlight struct {
 const dashboardRecentEventsSummaryLimit = 10
 
 // readDashboardRecentEvents returns a descending slice of events, starting
-// from the newest event and paging backward by `offsetNewest`.
-func readDashboardRecentEvents(s *store.Store, offsetNewest, limit int) ([]store.Event, bool, error) {
-	all, err := s.Events(0)
-	if err != nil {
-		return nil, false, err
-	}
+// from the newest event and paging backward by `offsetNewest`. Operates on
+// a pre-loaded slice to avoid redundant reads.
+func readDashboardRecentEvents(all []store.Event, offsetNewest, limit int) ([]store.Event, bool) {
 	if limit <= 0 || len(all) == 0 || offsetNewest >= len(all) {
-		return []store.Event{}, true, nil
+		return []store.Event{}, true
 	}
 	if offsetNewest < 0 {
 		offsetNewest = 0
@@ -154,7 +152,7 @@ func readDashboardRecentEvents(s *store.Store, offsetNewest, limit int) ([]store
 	for i := end - 1; i >= start; i-- {
 		out = append(out, all[i])
 	}
-	return out, start == 0, nil
+	return out, start == 0
 }
 
 // captureDashboard gathers everything the dashboard renders. All reads go
@@ -216,6 +214,13 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		snap.StalledFor = stalled
 	}
 
+	// Load events once — used for both in-flight timestamps and the
+	// recent-events panel (avoids N+1 full reads of events.jsonl).
+	allEvents, err := s.Events(0)
+	if err != nil {
+		return nil, err
+	}
+
 	exps, err := s.ListExperiments()
 	if err != nil {
 		return nil, err
@@ -224,11 +229,6 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		if e.Status != entity.ExpImplemented && e.Status != entity.ExpMeasured {
 			continue
 		}
-		// A baseline experiment stays at `measured` forever because
-		// `conclude` only flips the candidate, not the comparator. Any
-		// experiment a conclusion has already referenced as a baseline
-		// has finished its loop-visible job — drop it from in-flight so
-		// stuck comparators don't clutter the dashboard.
 		if len(e.ReferencedAsBaselineBy) > 0 {
 			continue
 		}
@@ -238,7 +238,7 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 			Status:      e.Status,
 			Instruments: append([]string{}, e.Instruments...),
 		}
-		if impAt := findImplementedAt(s, e.ID); impAt != nil {
+		if impAt := findImplementedAt(allEvents, e.ID); impAt != nil {
 			row.ImplementedAt = impAt
 			row.ElapsedS = time.Since(*impAt).Seconds()
 		}
@@ -258,17 +258,12 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		return a.After(*b)
 	})
 
-	// Recent lessons: pull up to 5 most-recently-created active lessons so
-	// the reader sees the notebook's leading edge without having to jump
-	// to the lesson list. Superseded lessons are excluded — the dashboard
-	// should show what currently applies, not the history.
 	if lessons, err := s.ListLessons(); err == nil {
 		active := make([]*entity.Lesson, 0, len(lessons))
 		for _, l := range lessons {
-			if l.Status == entity.LessonStatusSuperseded {
-				continue
+			if l.Status != entity.LessonStatusSuperseded {
+				active = append(active, l)
 			}
-			active = append(active, l)
 		}
 		sort.SliceStable(active, func(i, j int) bool {
 			return active[i].CreatedAt.After(active[j].CreatedAt)
@@ -279,20 +274,14 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		snap.RecentLessons = active
 	}
 
-	events, _, err := readDashboardRecentEvents(s, 0, dashboardRecentEventsSummaryLimit)
-	if err != nil {
-		return nil, err
-	}
-	snap.RecentEvents = events
+	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
 
 	return snap, nil
 }
 
-func findImplementedAt(s *store.Store, expID string) *time.Time {
-	events, err := s.Events(0)
-	if err != nil {
-		return nil
-	}
+// findImplementedAt scans a pre-loaded event list for the experiment.implement
+// event matching expID and returns its timestamp.
+func findImplementedAt(events []store.Event, expID string) *time.Time {
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
 		if e.Subject == expID && e.Kind == "experiment.implement" {
@@ -363,6 +352,12 @@ func runDashboardLoop(s *store.Store, w io.Writer, refresh time.Duration, colors
 
 // ---- rendering ----
 
+// sectionHeader writes a bold title with a dim underline.
+func sectionHeader(w io.Writer, title string, a *ansi) {
+	fmt.Fprintln(w, " "+a.bold(title))
+	fmt.Fprintln(w, " "+a.dim(strings.Repeat("─", utf8.RuneCountInString(title))))
+}
+
 // renderDashboard is a pure function from snapshot to bytes. Kept separate
 // from capture so tests can feed synthetic snapshots. Pass a disabled ansi
 // (or one built against a non-TTY) for plain output.
@@ -376,7 +371,9 @@ func renderDashboard(w io.Writer, snap *dashboardSnapshot, width int, footerMode
 	fmt.Fprintln(w)
 	renderDashboardBudget(w, snap, a)
 	fmt.Fprintln(w)
-	renderDashboardTreeAndFrontier(w, snap, width, a)
+	renderDashboardTree(w, snap, a)
+	fmt.Fprintln(w)
+	renderDashboardFrontier(w, snap, a)
 	fmt.Fprintln(w)
 	if len(snap.InFlight) > 0 {
 		renderDashboardInFlight(w, snap, a)
@@ -403,7 +400,7 @@ func renderDashboardHeader(w io.Writer, snap *dashboardSnapshot, width int, a *a
 		rightPlain += "]"
 		rightColored = a.boldYellow(rightPlain)
 	}
-	gap := width - runeLen(leftPlain) - runeLen(rightPlain)
+	gap := width - utf8.RuneCountInString(leftPlain) - utf8.RuneCountInString(rightPlain)
 	if gap < 1 {
 		gap = 1
 	}
@@ -440,14 +437,12 @@ func renderDashboardGoal(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 }
 
 // meterColor picks a traffic-light color based on usage ratio. Below 50%:
-// green. 50–80%: yellow. At or above 80%: red. Kept here rather than on ansi
-// so the thresholds live next to the callers that know what "full" means.
+// green. 50–80%: yellow. At or above 80%: red.
 func meterColor(a *ansi, used, limit float64, s string) string {
 	if limit <= 0 {
 		return s
 	}
-	r := used / limit
-	switch {
+	switch r := used / limit; {
 	case r >= 0.8:
 		return a.red(s)
 	case r >= 0.5:
@@ -458,28 +453,20 @@ func meterColor(a *ansi, used, limit float64, s string) string {
 }
 
 func renderDashboardBudget(w io.Writer, snap *dashboardSnapshot, a *ansi) {
-	parts := []string{}
-	if snap.Budgets.Limits.MaxExperiments > 0 {
-		s := fmt.Sprintf("%d/%d experiments",
-			snap.Budgets.Usage.Experiments, snap.Budgets.Limits.MaxExperiments)
-		parts = append(parts, meterColor(a,
-			float64(snap.Budgets.Usage.Experiments),
-			float64(snap.Budgets.Limits.MaxExperiments), s))
+	var parts []string
+	if lim := snap.Budgets.Limits.MaxExperiments; lim > 0 {
+		s := fmt.Sprintf("%d/%d experiments", snap.Budgets.Usage.Experiments, lim)
+		parts = append(parts, meterColor(a, float64(snap.Budgets.Usage.Experiments), float64(lim), s))
 	} else {
 		parts = append(parts, fmt.Sprintf("%d experiments", snap.Budgets.Usage.Experiments))
 	}
-	if snap.Budgets.Limits.MaxWallTimeH > 0 {
-		s := fmt.Sprintf("%.1fh/%dh elapsed",
-			snap.Budgets.Usage.ElapsedH, snap.Budgets.Limits.MaxWallTimeH)
-		parts = append(parts, meterColor(a,
-			snap.Budgets.Usage.ElapsedH,
-			float64(snap.Budgets.Limits.MaxWallTimeH), s))
+	if lim := snap.Budgets.Limits.MaxWallTimeH; lim > 0 {
+		s := fmt.Sprintf("%.1fh/%dh elapsed", snap.Budgets.Usage.ElapsedH, lim)
+		parts = append(parts, meterColor(a, snap.Budgets.Usage.ElapsedH, float64(lim), s))
 	}
-	if snap.Budgets.Limits.FrontierStallK > 0 {
-		s := fmt.Sprintf("stalled %d/%d", snap.StalledFor, snap.Budgets.Limits.FrontierStallK)
-		parts = append(parts, meterColor(a,
-			float64(snap.StalledFor),
-			float64(snap.Budgets.Limits.FrontierStallK), s))
+	if lim := snap.Budgets.Limits.FrontierStallK; lim > 0 {
+		s := fmt.Sprintf("stalled %d/%d", snap.StalledFor, lim)
+		parts = append(parts, meterColor(a, float64(snap.StalledFor), float64(lim), s))
 	}
 	fmt.Fprintf(w, " %s %s\n", a.bold("Budget:"), strings.Join(parts, a.dim("  ·  ")))
 	fmt.Fprintf(w, " %s   %s\n", a.bold("Mode:"), snap.Mode)
@@ -488,22 +475,22 @@ func renderDashboardBudget(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		snap.Counts["hypotheses"], snap.Counts["experiments"], snap.Counts["observations"], snap.Counts["conclusions"])
 }
 
-func renderDashboardTreeAndFrontier(w io.Writer, snap *dashboardSnapshot, width int, a *ansi) {
-	fmt.Fprintln(w, " "+a.bold("Hypothesis tree"))
-	fmt.Fprintln(w, " "+a.dim("─────────────────"))
+func renderDashboardTree(w io.Writer, snap *dashboardSnapshot, a *ansi) {
+	sectionHeader(w, "Hypothesis tree", a)
 	if len(snap.Tree) == 0 {
 		fmt.Fprintln(w, "   "+a.dim("(no hypotheses)"))
-	} else {
-		roots, children := treeJSONToHypothesisForest(snap.Tree)
-		var tbuf bytes.Buffer
-		renderForestToWriter(&tbuf, roots, children, 72, a)
-		for _, line := range strings.Split(strings.TrimRight(tbuf.String(), "\n"), "\n") {
-			fmt.Fprintln(w, " "+line)
-		}
+		return
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, " "+a.bold("Frontier"))
-	fmt.Fprintln(w, " "+a.dim("────────"))
+	roots, children := treeJSONToHypothesisForest(snap.Tree)
+	var tbuf bytes.Buffer
+	renderForestToWriter(&tbuf, roots, children, 72, a)
+	for _, line := range strings.Split(strings.TrimRight(tbuf.String(), "\n"), "\n") {
+		fmt.Fprintln(w, " "+line)
+	}
+}
+
+func renderDashboardFrontier(w io.Writer, snap *dashboardSnapshot, a *ansi) {
+	sectionHeader(w, "Frontier", a)
 	if snap.Goal == nil {
 		fmt.Fprintln(w, "   "+a.dim("(no goal set)"))
 		return
@@ -520,9 +507,8 @@ func renderDashboardTreeAndFrontier(w io.Writer, snap *dashboardSnapshot, width 
 				marker, a.cyan(r.Conclusion), a.cyan(r.Hypothesis), snap.Goal.Objective.Instrument, r.Value)
 		}
 	}
-	if snap.Budgets.Limits.FrontierStallK > 0 {
-		fmt.Fprintf(w, "   %s\n",
-			a.dim(fmt.Sprintf("(stalled_for: %d of %d)", snap.StalledFor, snap.Budgets.Limits.FrontierStallK)))
+	if lim := snap.Budgets.Limits.FrontierStallK; lim > 0 {
+		fmt.Fprintf(w, "   %s\n", a.dim(fmt.Sprintf("(stalled_for: %d of %d)", snap.StalledFor, lim)))
 	} else {
 		fmt.Fprintf(w, "   %s\n", a.dim(fmt.Sprintf("(stalled_for: %d)", snap.StalledFor)))
 	}
@@ -557,14 +543,12 @@ func treeJSONToHypothesisForest(nodes []*treeNode) ([]*entity.Hypothesis, map[st
 }
 
 func renderDashboardInFlight(w io.Writer, snap *dashboardSnapshot, a *ansi) {
-	fmt.Fprintln(w, " "+a.bold("In flight"))
-	fmt.Fprintln(w, " "+a.dim("─────────"))
+	sectionHeader(w, "In flight", a)
 	for _, r := range snap.InFlight {
 		elapsed := "?"
 		if r.ImplementedAt != nil {
 			elapsed = formatElapsed(time.Duration(r.ElapsedS) * time.Second)
 		}
-		// Pad BEFORE coloring so ANSI escapes don't inflate column widths.
 		statusCell := fmt.Sprintf("%-12s", r.Status)
 		switch r.Status {
 		case entity.ExpImplemented:
@@ -578,8 +562,7 @@ func renderDashboardInFlight(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 }
 
 func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {
-	fmt.Fprintln(w, " "+a.bold(fmt.Sprintf("Recent lessons (last %d)", len(snap.RecentLessons))))
-	fmt.Fprintln(w, " "+a.dim("────────────────────────"))
+	sectionHeader(w, fmt.Sprintf("Recent lessons (last %d)", len(snap.RecentLessons)), a)
 	for _, l := range snap.RecentLessons {
 		scopeCell := fmt.Sprintf("%-10s", l.Scope)
 		switch l.Scope {
@@ -593,10 +576,7 @@ func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 	}
 }
 
-// eventKindColor colors an event kind token by its category prefix, so the
-// recent-events stream is scannable at a glance: cyan hypothesis moves,
-// yellow experiment moves, blue observations, green conclusions, magenta
-// pause/resume. Anything unrecognized is returned uncolored.
+// eventKindColor colors an event kind token by its category prefix.
 func eventKindColor(a *ansi, kindPadded, kindRaw string) string {
 	switch {
 	case strings.HasPrefix(kindRaw, "hypothesis."):
@@ -617,8 +597,7 @@ func eventKindColor(a *ansi, kindPadded, kindRaw string) string {
 }
 
 func renderDashboardRecent(w io.Writer, snap *dashboardSnapshot, a *ansi) {
-	fmt.Fprintf(w, " %s\n", a.bold(fmt.Sprintf("Recent events (last %d)", len(snap.RecentEvents))))
-	fmt.Fprintln(w, " "+a.dim("──────────────────────"))
+	sectionHeader(w, fmt.Sprintf("Recent events (last %d)", len(snap.RecentEvents)), a)
 	if len(snap.RecentEvents) == 0 {
 		fmt.Fprintln(w, "   "+a.dim("(no events yet)"))
 		return
@@ -648,10 +627,7 @@ func renderDashboardRecent(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 func termWidth() int {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-			if w > 200 {
-				return 200
-			}
-			return w
+			return min(w, 200)
 		}
 	}
 	if s := os.Getenv("COLUMNS"); s != "" {
@@ -662,20 +638,10 @@ func termWidth() int {
 	return 100
 }
 
-func runeLen(s string) int {
-	n := 0
-	for range s {
-		n++
-	}
-	return n
-}
-
 func formatElapsed(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
 	total := int(d.Seconds())
-	m := total / 60
-	sec := total - m*60
-	return fmt.Sprintf("%02d:%02d", m, sec)
+	return fmt.Sprintf("%02d:%02d", total/60, total%60)
 }

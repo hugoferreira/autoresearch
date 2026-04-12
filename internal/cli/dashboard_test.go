@@ -373,10 +373,12 @@ func TestReadDashboardRecentEvents_PagedNewestFirst(t *testing.T) {
 		}
 	}
 
-	first, allLoaded, err := readDashboardRecentEvents(s, 0, 5)
+	all, err := s.Events(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	first, allLoaded := readDashboardRecentEvents(all, 0, 5)
 	if allLoaded {
 		t.Fatalf("first page unexpectedly reported allLoaded")
 	}
@@ -390,10 +392,7 @@ func TestReadDashboardRecentEvents_PagedNewestFirst(t *testing.T) {
 		t.Fatalf("fifth event subject = %q, want %q", got, want)
 	}
 
-	second, allLoaded, err := readDashboardRecentEvents(s, 5, 5)
-	if err != nil {
-		t.Fatal(err)
-	}
+	second, allLoaded := readDashboardRecentEvents(all, 5, 5)
 	if allLoaded {
 		t.Fatalf("second page unexpectedly reported allLoaded")
 	}
@@ -404,10 +403,7 @@ func TestReadDashboardRecentEvents_PagedNewestFirst(t *testing.T) {
 		t.Fatalf("second page fifth subject = %q, want %q", got, want)
 	}
 
-	last, allLoaded, err := readDashboardRecentEvents(s, 10, 5)
-	if err != nil {
-		t.Fatal(err)
-	}
+	last, allLoaded := readDashboardRecentEvents(all, 10, 5)
 	if !allLoaded {
 		t.Fatalf("last page should report allLoaded")
 	}
@@ -419,13 +415,6 @@ func TestReadDashboardRecentEvents_PagedNewestFirst(t *testing.T) {
 	}
 	if got, want := last[1].Subject, "O-0000"; got != want {
 		t.Fatalf("last page second subject = %q, want %q", got, want)
-	}
-}
-
-// Sanity: runeLen and formatElapsed behave correctly.
-func TestRuneLen(t *testing.T) {
-	if runeLen("autoresearch — /tmp/fir") != 23 {
-		t.Errorf("runeLen of em-dash string wrong: %d", runeLen("autoresearch — /tmp/fir"))
 	}
 }
 

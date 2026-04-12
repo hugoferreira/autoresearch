@@ -472,12 +472,15 @@ func loadDashboardSnapshotCmd(s *store.Store) tea.Cmd {
 
 func loadDashboardEventsCmd(s *store.Store, offsetNewest, limit int, replace bool) tea.Cmd {
 	return func() tea.Msg {
-		list, allLoaded, err := readDashboardRecentEvents(s, offsetNewest, limit)
+		all, err := s.Events(0)
+		if err != nil {
+			return dashEventsLoadedMsg{err: err}
+		}
+		list, allLoaded := readDashboardRecentEvents(all, offsetNewest, limit)
 		return dashEventsLoadedMsg{
 			list:      list,
 			allLoaded: allLoaded,
 			replace:   replace,
-			err:       err,
 		}
 	}
 }
