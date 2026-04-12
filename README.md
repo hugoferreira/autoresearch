@@ -35,29 +35,38 @@ sequenceDiagram
     H ->> M: Define goal & constraints
     M ->> M: goal set / goal new
 
-    loop One hypothesis cycle (repeats until budget exhausted or frontier stalls)
+    loop Research loop (repeats until budget exhausted or frontier stalls)
         M ->> O: Run next cycle
 
         note right of O: Reads goal, lessons,<br/>frontier, tree, codebase
 
         O ->> O: hypothesis add → H-NNNN
-        O ->> O: experiment design → E-NNNN
-        O ->> O: experiment implement → worktree
 
-        O ->> C: Apply change in worktree
-        note right of C: Pure coder — reads<br/>.autoresearch-brief.json<br/>for context
-        C -->> O: commit SHA + build/test status
+        loop Experiments (one or more per hypothesis, until decisive)
+            O ->> O: experiment design → E-NNNN
+            O ->> O: experiment implement → worktree
 
-        O ->> O: observe (each instrument)
-        O ->> O: analyze + conclude → C-NNNN
-        note right of O: Strict firewall may<br/>downgrade "supported"<br/>→ "inconclusive"
+            O ->> C: Apply change in worktree
+            note right of C: Pure coder — reads<br/>.autoresearch-brief.json
+            C -->> O: commit SHA + build/test status
 
-        O -->> M: Verdict + summary
+            loop Observations (one per instrument, dependency-ordered)
+                O ->> O: observe E-NNNN --instrument X → O-NNNN
+            end
+
+            O ->> O: analyze E-NNNN
+            O ->> O: conclude H-NNNN → C-NNNN
+            note right of O: Strict firewall may<br/>downgrade "supported"<br/>→ "inconclusive"
+        end
 
         alt Verdict is supported or refuted
+            O ->> O: lesson add → L-NNNN
+            O -->> M: Verdict + summary
             M ->> GR: Review C-NNNN independently
             note right of GR: No orchestrator context —<br/>re-checks stats, artifacts,<br/>commit diff from scratch
             GR -->> M: Accept or downgrade
+        else Inconclusive
+            O -->> M: Inconclusive — next hypothesis
         end
     end
 
@@ -131,16 +140,13 @@ and fake-qemu instruments, a 20% reduction goal, and a 20-experiment budget.
 cp -r examples/cortex-m4-synth /tmp/my-fir
 cd /tmp/my-fir
 
-# Bootstrap: creates git repo, inits .research/, registers instruments, sets goal
+# Bootstrap: creates git repo, inits .research/, registers instruments, and sets an initial goal
 ./bootstrap.sh
 
-# Terminal 1 — watch the dashboard (read-only)
-autoresearch dashboard --refresh 2
+# Terminal 1 — watch the dashboard (interactive read-only TUI)
+autoresearch dashboard tui
 
-# Terminal 2 (optional) — tail the event log
-autoresearch log --follow
-
-# Terminal 3 — open Claude Code in the same directory and say:
+# Terminal 2 — open Claude Code/Codex in the same directory and say:
 ```
 
 ```text
@@ -296,10 +302,9 @@ you drive research from the main session.
 
 ```sh
 autoresearch dashboard                  # one-shot composite snapshot
+autoresearch dashboard tui              # interactive read-only TUI
 autoresearch dashboard --refresh 2      # live, auto-redraws every 2s (TTY only)
 autoresearch dashboard --json           # structured snapshot for tools
-watch -c autoresearch dashboard --color always   # alternate way to live-poll
-autoresearch dashboard tui              # interactive read-only TUI
 autoresearch log --follow               # tail events.jsonl as they arrive
 ```
 
@@ -356,8 +361,7 @@ The full research loop is operational: serialized multi-goal lifecycle,
 hypothesis → experiment → observe → analyze → conclude with strict-mode
 firewall, instrument dependencies, budgets, content-addressed artifacts,
 cumulative lesson layer, live dashboard + Bubble Tea TUI, and a two-agent
-model (orchestrator + independent gate reviewer) that replaces the original
-six-agent waterfall.
+model (orchestrator + independent gate reviewer).
 
 ## License
 
