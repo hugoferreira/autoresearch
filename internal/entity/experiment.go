@@ -33,7 +33,7 @@ type Experiment struct {
 	Budget      Budget    `yaml:"budget,omitempty"      json:"budget,omitempty"`
 	Author      string    `yaml:"author"                json:"author"`
 	CreatedAt   time.Time `yaml:"created_at"            json:"created_at"`
-	Body        string    `yaml:"-"                     json:"-"`
+	Body        string    `yaml:"-"                     json:"body,omitempty"`
 }
 
 type Baseline struct {

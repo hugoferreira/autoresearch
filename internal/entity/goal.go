@@ -10,7 +10,7 @@ type Goal struct {
 	SchemaVersion int          `yaml:"schema_version,omitempty" json:"schema_version,omitempty"`
 	Objective     Objective    `yaml:"objective"                json:"objective"`
 	Constraints   []Constraint `yaml:"constraints"              json:"constraints"`
-	Body          string       `yaml:"-"                        json:"-"`
+	Body          string       `yaml:"-"                        json:"body,omitempty"`
 }
 
 type Objective struct {

@@ -26,7 +26,7 @@ type Conclusion struct {
 	Author       string    `yaml:"author"                        json:"author"`
 	ReviewedBy   string    `yaml:"reviewed_by,omitempty"         json:"reviewed_by,omitempty"`
 	CreatedAt    time.Time `yaml:"created_at"                    json:"created_at"`
-	Body         string    `yaml:"-"                             json:"-"`
+	Body         string    `yaml:"-"                             json:"body,omitempty"`
 }
 
 type Effect struct {
