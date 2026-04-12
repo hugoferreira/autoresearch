@@ -87,33 +87,59 @@ reasons ("seemed iffy") are not acceptable.
 
 Not every downgrade deserves a lesson. Record one only when the
 downgrade reveals a **cross-cutting pattern** that should inform
-future generators:
+future generators. When you do, both `--claim` and `--body` are
+**required**; one-liners are not useful.
 
     autoresearch lesson add \
-        --claim "<one sentence: what pattern should be avoided or reconsidered>" \
+        --claim "<one sentence: the pattern>" \
+        --body "$(cat <<'EOF'
+    ## Evidence
+    ...
+
+    ## Mechanism
+    ...
+
+    ## Scope and counterexamples
+    ...
+
+    ## For the next generator (or next analyst)
+    ...
+    EOF
+    )" \
         --from <C-id>[,<other C-ids>] \
         --author agent:critic \
         --json
 
+The body must have the same four sections the analyst uses (see
+`.claude/agents/research-analyst.md`). For critic lessons, "evidence"
+usually cites the specific CIs, per-sample distributions, or diffs
+that show the pattern; "mechanism" names the statistical or
+methodological trap; "scope" lists the tiers / instruments / sample
+sizes the lesson applies to; "for the next generator / analyst" is
+the concrete rule they should follow to avoid repeating the mistake.
+
 Good critic lessons look like:
 
-- "Bootstrap CIs on <10 samples are unreliable for this instrument;
-  require n≥20 for supported verdicts on qemu_cycles."
-- "Any code change whose mechanism isn't visible in the diff should be
-  treated as inconclusive regardless of the numbers."
+- "Bootstrap CIs on n<20 are unreliable on qemu_cycles — the
+  per-sample distribution is bimodal from cold-cache outliers. Require
+  n≥20 before accepting a supported verdict."
+- "Any code change whose mechanism isn't visible in the commit diff
+  should be treated as inconclusive regardless of the numbers — the
+  mechanism may be an environmental artifact."
 - "Loop unrolling past 8× is cache-bound on this FIR tap count; don't
-  propose more of them."
+  propose more of them." (with evidence from three downgraded C-ids)
 
 If you are downgrading for a one-off reason (the analyst misread a
 CI, the wrong baseline was picked, a single outlier skewed the mean),
 leave it to the conclusion's `strict_check.reasons` and do not add a
 lesson. Lessons are for patterns that would cause the same mistake
-again.
+again, and a one-off cannot support four body sections honestly.
 
 If you notice a pattern contradicted by an existing lesson, supersede
-it rather than adding a conflicting one:
+it rather than adding a conflicting one — the new lesson's body
+should cite the specific evidence that contradicts the old one:
 
-    autoresearch lesson add --claim "<new claim>" --author agent:critic --json
+    autoresearch lesson add --claim "<new claim>" --body "..." --author agent:critic --json
     autoresearch lesson supersede L-old --by L-new --reason "<specific evidence>"
 
 ## What you don't do

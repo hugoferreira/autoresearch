@@ -57,7 +57,13 @@ func ParseLesson(data []byte) (*Lesson, error) {
 func (l *Lesson) Marshal() ([]byte, error) {
 	body := l.Body
 	if body == "" {
-		body = "# Lesson\n\n" + l.Claim + "\n"
+		// Honest placeholder: do NOT silently echo the claim as if the
+		// body were populated. A human reviewing a lesson file with this
+		// placeholder can see immediately that the agent skipped the
+		// --body flag and the lesson is underspecified.
+		body = "_No body provided — pass `--body` with Evidence, Mechanism, " +
+			"Scope, and For-the-next-generator sections. See " +
+			"`.claude/agents/research-analyst.md`._\n"
 	}
 	return WriteFrontmatter(l, body)
 }

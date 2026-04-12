@@ -225,6 +225,14 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		if e.Status != entity.ExpImplemented && e.Status != entity.ExpMeasured {
 			continue
 		}
+		// A baseline experiment stays at `measured` forever because
+		// `conclude` only flips the candidate, not the comparator. Any
+		// experiment a conclusion has already referenced as a baseline
+		// has finished its loop-visible job — drop it from in-flight so
+		// stuck comparators don't clutter the dashboard.
+		if len(e.ReferencedAsBaselineBy) > 0 {
+			continue
+		}
 		row := dashboardInFlight{
 			ID:          e.ID,
 			Hypothesis:  e.Hypothesis,

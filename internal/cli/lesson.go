@@ -157,7 +157,7 @@ research apparatus itself).`,
 	c.Flags().StringVar(&scope, "scope", "", "hypothesis | system (default: inferred from --from)")
 	c.Flags().StringSliceVar(&subjects, "from", nil, "H-/E-/C- ids this lesson was extracted from; may be repeated or comma-separated")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
-	c.Flags().StringVar(&body, "body", "", "optional prose expansion (persisted in lesson body under `# Lesson`)")
+	c.Flags().StringVar(&body, "body", "", "prose expansion of the claim — required for agents. Expected structure: `## Evidence`, `## Mechanism`, `## Scope and counterexamples`, `## For the next generator`. See the research-analyst subagent brief for a worked example. A lesson without a body is a one-liner the next generator cannot act on.")
 	c.Flags().StringVar(&author, "author", "", "author (default agent:analyst)")
 	return c
 }

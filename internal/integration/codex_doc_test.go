@@ -42,6 +42,14 @@ func TestCodexDoc_RewrittenForCodex(t *testing.T) {
 		"experiment design --design-notes",
 		"experiment implement --impl-notes",
 		"What have we learned so far?",
+		// Body-structure guidance must survive the rewriter and appear
+		// in the Codex reference doc so agents writing lessons have a
+		// top-level reminder of the required sections.
+		"`--body`",
+		"## Evidence",
+		"## Mechanism",
+		"## Scope and counterexamples",
+		"## For the next generator",
 	}
 	for _, s := range notebookInvariants {
 		if !strings.Contains(doc, s) {

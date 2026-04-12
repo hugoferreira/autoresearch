@@ -22,9 +22,10 @@ func TestExperimentRoundTrip(t *testing.T) {
 			WallTimeS:  600,
 			MaxSamples: 30,
 		},
-		Author:    "agent:designer",
-		CreatedAt: time.Date(2026, 4, 11, 14, 0, 0, 0, time.UTC),
-		Body:      "# Plan\n\nUnroll the inner loop.\n",
+		Author:                 "agent:designer",
+		CreatedAt:              time.Date(2026, 4, 11, 14, 0, 0, 0, time.UTC),
+		Body:                   "# Plan\n\nUnroll the inner loop.\n",
+		ReferencedAsBaselineBy: []string{"C-0002", "C-0005"},
 	}
 	data, err := e.Marshal()
 	if err != nil {
@@ -51,5 +52,10 @@ func TestExperimentRoundTrip(t *testing.T) {
 	}
 	if back.Body != e.Body {
 		t.Errorf("body round-trip:\n want: %q\n  got: %q", e.Body, back.Body)
+	}
+	if len(back.ReferencedAsBaselineBy) != 2 ||
+		back.ReferencedAsBaselineBy[0] != "C-0002" ||
+		back.ReferencedAsBaselineBy[1] != "C-0005" {
+		t.Errorf("referenced_as_baseline_by round-trip: got %+v", back.ReferencedAsBaselineBy)
 	}
 }

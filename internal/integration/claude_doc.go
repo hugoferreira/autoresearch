@@ -309,13 +309,37 @@ are meant to inform the next cycle. Two scopes:
 
 Verbs:
 
-    autoresearch lesson add --claim "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
+    autoresearch lesson add --claim "..." --body "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
     autoresearch lesson list [--scope ...] [--status ...] [--subject ...] [--tag ...]
     autoresearch lesson show <L-id>
     autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
 
 Scope is inferred from ` + "`--from`" + ` when not explicit: subjects given →
 ` + "`hypothesis`" + `; none → ` + "`system`" + `.
+
+**` + "`--body`" + ` is not optional for agents.** A lesson that is only a
+` + "`--claim`" + ` is a one-liner the next generator cannot act on; that
+defeats the point of the notebook layer. Every lesson written by an
+agent MUST have a body with these four sections, in this order:
+
+1. ` + "`## Evidence`" + ` — the specific numbers, cited with their C-id /
+   E-id / O-id. Include ` + "`delta_frac`" + `, CI, ` + "`p_value`" + `, and n for every
+   number.
+2. ` + "`## Mechanism`" + ` — *why* the claim is true. Link the code change
+   on the experiment branch to the measured effect. "Unrolling is
+   faster" is not a mechanism.
+3. ` + "`## Scope and counterexamples`" + ` — the conditions this applies
+   under (target metric, sizes, tier, compile flags) AND at least
+   one condition where it would NOT apply. Lessons without boundaries
+   turn into superstition.
+4. ` + "`## For the next generator`" + ` — one or two concrete suggestions a
+   future generator can pick up. "Keep investigating" is not actionable.
+
+If an agent cannot fill all four sections honestly, the claim was not
+decisive enough to be a lesson — mark the conclusion ` + "`inconclusive`" + `
+instead of writing a thin lesson. The subagent briefs under
+` + "`.claude/agents/research-{analyst,critic}.md`" + ` have a full worked
+example.
 
 **3. The reading contract.** Lessons are load-bearing, not decorative:
 

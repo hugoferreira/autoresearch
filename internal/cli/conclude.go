@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -190,6 +191,22 @@ downgraded since there is no comparator).`,
 					if exp.Status == entity.ExpMeasured {
 						exp.Status = entity.ExpAnalyzed
 						_ = s.WriteExperiment(exp)
+					}
+				}
+			}
+			// Back-reference: mark the baseline experiment as "done its job
+			// as a comparator" so the dashboard stops showing it as in-flight.
+			// The baseline's own status stays truthful — it was analyzed as a
+			// baseline, not as a candidate for some hypothesis — but the
+			// denormalized ReferencedAsBaselineBy list lets the dashboard
+			// filter on "has been referenced" without joining against every
+			// conclusion on every refresh. One baseline reused across N
+			// candidates accumulates N entries here over time.
+			if baselineExp != "" && baselineExp != candExp {
+				if base, err := s.ReadExperiment(baselineExp); err == nil {
+					if !slices.Contains(base.ReferencedAsBaselineBy, id) {
+						base.ReferencedAsBaselineBy = append(base.ReferencedAsBaselineBy, id)
+						_ = s.WriteExperiment(base)
 					}
 				}
 			}

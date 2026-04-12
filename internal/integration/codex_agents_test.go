@@ -61,9 +61,18 @@ func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
 		{"research-analyst", []string{
 			"--interpretation",
 			"autoresearch lesson add",
+			// Body-structure guidance must survive the rewriter so
+			// agents writing lessons don't fall back to one-liners.
+			"## Evidence",
+			"## Mechanism",
+			"## Scope and counterexamples",
+			"## For the next generator",
 		}},
 		{"research-critic", []string{
 			"autoresearch lesson add",
+			// Critic lessons must also carry the structured-body rule;
+			// thin critic lessons are the most common failure mode.
+			"both `--claim` and `--body` are",
 		}},
 	}
 	for _, c := range cases {

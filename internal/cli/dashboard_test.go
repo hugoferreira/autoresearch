@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,72 @@ import (
 	"github.com/bytter/autoresearch/internal/store"
 )
 
+// captureDashboardInFlight_ExcludesReferencedBaselines exercises the
+// dashboard's capture path against a real store to lock in the rule that
+// experiments already referenced as a baseline drop out of the "in flight"
+// panel regardless of their status.
+func TestCaptureDashboard_InFlightExcludesReferencedBaselines(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Create(dir, store.Config{
+		Build: store.CommandSpec{Command: "true"},
+		Test:  store.CommandSpec{Command: "true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	baseline := &entity.Experiment{
+		ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, Tier: "host",
+		Baseline:               entity.Baseline{Ref: "HEAD"},
+		Instruments:            []string{"host_timing"},
+		Author:                 "agent:designer",
+		CreatedAt:              now,
+		ReferencedAsBaselineBy: []string{"C-0001"},
+	}
+	candidate := &entity.Experiment{
+		ID: "E-0002", Hypothesis: "H-0001", Status: entity.ExpMeasured, Tier: "host",
+		Baseline:    entity.Baseline{Ref: "HEAD"},
+		Instruments: []string{"host_timing"},
+		Author:      "agent:designer",
+		CreatedAt:   now,
+	}
+	stuck := &entity.Experiment{
+		ID: "E-0003", Hypothesis: "H-0002", Status: entity.ExpImplemented, Tier: "host",
+		Baseline:    entity.Baseline{Ref: "HEAD"},
+		Instruments: []string{"host_timing"},
+		Author:      "agent:implementer",
+		CreatedAt:   now,
+	}
+	for _, e := range []*entity.Experiment{baseline, candidate, stuck} {
+		if err := s.WriteExperiment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snap, err := captureDashboard(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Baseline (E-0001) must be excluded — it has a back-reference.
+	// Candidate (E-0002) is still in-flight (no back-reference, status=measured).
+	// Implementer-abandoned (E-0003) is still in-flight (status=implemented).
+	ids := make(map[string]bool, len(snap.InFlight))
+	for _, r := range snap.InFlight {
+		ids[r.ID] = true
+	}
+	if ids["E-0001"] {
+		t.Error("E-0001 is a referenced baseline and should NOT appear in-flight")
+	}
+	if !ids["E-0002"] {
+		t.Error("E-0002 is an unreferenced measured candidate and SHOULD appear in-flight")
+	}
+	if !ids["E-0003"] {
+		t.Error("E-0003 is an unreferenced implemented experiment and SHOULD appear in-flight")
+	}
+}
+
 // Synthetic snapshot factory: avoids needing a real on-disk store for the
 // pure-rendering tests. The capture path is exercised separately via the
 // shell smoke tests where a real init + state is cheap.
@@ -17,14 +84,14 @@ import (
 func baseSnapshot() *dashboardSnapshot {
 	now := time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC)
 	return &dashboardSnapshot{
-		Project:    "/tmp/fir",
-		Mode:       "strict",
-		Counts:     map[string]int{"hypotheses": 0, "experiments": 0, "observations": 0, "conclusions": 0},
-		Tree:       []*treeNode{},
-		Frontier:   []frontierRow{},
-		InFlight:   []dashboardInFlight{},
+		Project:      "/tmp/fir",
+		Mode:         "strict",
+		Counts:       map[string]int{"hypotheses": 0, "experiments": 0, "observations": 0, "conclusions": 0},
+		Tree:         []*treeNode{},
+		Frontier:     []frontierRow{},
+		InFlight:     []dashboardInFlight{},
 		RecentEvents: []store.Event{},
-		CapturedAt: now,
+		CapturedAt:   now,
 	}
 }
 
@@ -291,6 +358,68 @@ func TestCaptureDashboard_PauseStateReflected(t *testing.T) {
 	}
 	if !snap.Paused || snap.PauseReason != "testing" {
 		t.Errorf("pause state not reflected: %+v", snap)
+	}
+}
+
+func TestReadDashboardRecentEvents_PagedNewestFirst(t *testing.T) {
+	s := newStoreWithBuiltins(t)
+	base := time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		if err := s.AppendEvent(store.Event{
+			Ts:      base.Add(time.Duration(i) * time.Second),
+			Kind:    "observation.record",
+			Subject: fmt.Sprintf("O-%04d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, allLoaded, err := readDashboardRecentEvents(s, 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allLoaded {
+		t.Fatalf("first page unexpectedly reported allLoaded")
+	}
+	if got, want := len(first), 5; got != want {
+		t.Fatalf("first page len = %d, want %d", got, want)
+	}
+	if got, want := first[0].Subject, "O-0011"; got != want {
+		t.Fatalf("newest event subject = %q, want %q", got, want)
+	}
+	if got, want := first[4].Subject, "O-0007"; got != want {
+		t.Fatalf("fifth event subject = %q, want %q", got, want)
+	}
+
+	second, allLoaded, err := readDashboardRecentEvents(s, 5, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allLoaded {
+		t.Fatalf("second page unexpectedly reported allLoaded")
+	}
+	if got, want := second[0].Subject, "O-0006"; got != want {
+		t.Fatalf("second page first subject = %q, want %q", got, want)
+	}
+	if got, want := second[4].Subject, "O-0002"; got != want {
+		t.Fatalf("second page fifth subject = %q, want %q", got, want)
+	}
+
+	last, allLoaded, err := readDashboardRecentEvents(s, 10, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allLoaded {
+		t.Fatalf("last page should report allLoaded")
+	}
+	if got, want := len(last), 2; got != want {
+		t.Fatalf("last page len = %d, want %d", got, want)
+	}
+	if got, want := last[0].Subject, "O-0001"; got != want {
+		t.Fatalf("last page first subject = %q, want %q", got, want)
+	}
+	if got, want := last[1].Subject, "O-0000"; got != want {
+		t.Fatalf("last page second subject = %q, want %q", got, want)
 	}
 }
 

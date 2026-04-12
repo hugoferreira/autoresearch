@@ -22,18 +22,26 @@ const (
 )
 
 type Experiment struct {
-	ID          string    `yaml:"id"                    json:"id"`
-	Hypothesis  string    `yaml:"hypothesis"            json:"hypothesis"`
-	Status      string    `yaml:"status"                json:"status"`
-	Tier        string    `yaml:"tier"                  json:"tier"`
-	Baseline    Baseline  `yaml:"baseline"              json:"baseline"`
-	Instruments []string  `yaml:"instruments"           json:"instruments"`
-	Worktree    string    `yaml:"worktree,omitempty"    json:"worktree,omitempty"`
-	Branch      string    `yaml:"branch,omitempty"      json:"branch,omitempty"`
-	Budget      Budget    `yaml:"budget,omitempty"      json:"budget,omitempty"`
-	Author      string    `yaml:"author"                json:"author"`
-	CreatedAt   time.Time `yaml:"created_at"            json:"created_at"`
-	Body        string    `yaml:"-"                     json:"body,omitempty"`
+	ID                    string    `yaml:"id"                                  json:"id"`
+	Hypothesis            string    `yaml:"hypothesis"                          json:"hypothesis"`
+	Status                string    `yaml:"status"                              json:"status"`
+	Tier                  string    `yaml:"tier"                                json:"tier"`
+	Baseline              Baseline  `yaml:"baseline"                            json:"baseline"`
+	Instruments           []string  `yaml:"instruments"                         json:"instruments"`
+	Worktree              string    `yaml:"worktree,omitempty"                  json:"worktree,omitempty"`
+	Branch                string    `yaml:"branch,omitempty"                    json:"branch,omitempty"`
+	Budget                Budget    `yaml:"budget,omitempty"                    json:"budget,omitempty"`
+	Author                string    `yaml:"author"                              json:"author"`
+	CreatedAt             time.Time `yaml:"created_at"                          json:"created_at"`
+	// ReferencedAsBaselineBy lists conclusion IDs that used this experiment
+	// as a baseline. Populated by `conclude` when it writes a new
+	// conclusion. Non-empty → this experiment has finished its job as a
+	// comparator and should drop out of the dashboard's "in flight" panel
+	// regardless of its own status field. This keeps `status` honest (it
+	// still means "was *this* experiment analyzed?") while letting the
+	// dashboard surface only experiments the loop can still act on.
+	ReferencedAsBaselineBy []string `yaml:"referenced_as_baseline_by,omitempty" json:"referenced_as_baseline_by,omitempty"`
+	Body                   string   `yaml:"-"                                   json:"body,omitempty"`
 }
 
 type Baseline struct {

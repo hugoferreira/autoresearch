@@ -66,29 +66,141 @@ After `conclude`, if the verdict is **decisive** — `supported`, or
 
     autoresearch lesson add \
         --claim "<one sentence another generator can reuse>" \
+        --body "$(cat <<'EOF'
+    ## Evidence
+    ...
+
+    ## Mechanism
+    ...
+
+    ## Scope and counterexamples
+    ...
+
+    ## For the next generator
+    ...
+    EOF
+    )" \
         --from <C-id>[,<H-id>,<E-id>,...] \
         [--tag ...] \
         --author agent:analyst \
         --json
 
-Rules for the `--claim`:
+**Both `--claim` AND `--body` are required on every call.** A lesson
+without a body is a one-liner the next generator cannot act on; that
+defeats the point of the notebook layer. If you only have one sentence
+to say, the conclusion was not decisive — mark it `inconclusive`
+instead of writing a thin lesson.
+
+### Rules for `--claim`
 
 - **One sentence**, grounded in what the experiment showed. No preamble.
 - **Reusable**: a future generator reading it should know whether this
   class of intervention is worth trying again. "Loop unroll past 8×
   shows no win on FIR_NTAPS=32 — cache line pressure dominates" is a
   lesson. "The experiment was inconclusive" is not.
-- **No speculation**: only what the measurement actually supports. If
-  you cannot write a reusable one-sentence claim, the conclusion was
-  not decisive and you should have requested `inconclusive` instead —
-  not `lesson add`.
+- **No speculation**: only what the measurement actually supports.
 
-`inconclusive` verdicts are **not** decisive. Do not write a lesson for
-them; they leave the question open. If an inconclusive result still
-surfaces a surprise about the system or the apparatus (e.g. "the test
-harness caches fixtures across runs"), record that separately with
-`--scope system` — it is a free-floating finding, not a verdict on
-any hypothesis.
+### Rules for `--body`
+
+The body is the part a future generator (and the critic) actually
+*uses*. It MUST have these four sections, in this order:
+
+1. **`## Evidence`** — the specific numbers that justify the claim,
+   cited with the exact C-id / E-id / O-id they came from. Include
+   `delta_frac`, CI, `p_value`, and `n` for every number you cite.
+   If the claim aggregates multiple experiments, list each row.
+2. **`## Mechanism`** — *why* the claim is true. Link the code change
+   on the experiment branch to the measured effect. "Loop unrolling
+   reduces branch cost and lets the compiler schedule multiply-adds
+   across iterations" is a mechanism; "unrolling is faster" is not.
+   If you cannot state the mechanism, say so explicitly and downgrade
+   the claim's confidence in the body — do not hand-wave.
+3. **`## Scope and counterexamples`** — what conditions this applies
+   under (target metric, target size, tier, compile flags, cache
+   size, etc.) AND at least one condition where it would NOT apply.
+   Lessons without boundaries turn into superstition. "Applies at
+   FIR_NTAPS=32 with -O2; does NOT apply past NTAPS=64 where the
+   working set overflows L1" is a boundary.
+4. **`## For the next generator`** — one or two concrete suggestions
+   a future generator can pick up. "Try strength reduction on the
+   address arithmetic next; don't propose more unroll variants on
+   this target" is actionable; "keep investigating" is not.
+
+### Good vs. bad example
+
+Bad (one-liner — do not write this):
+
+    autoresearch lesson add --claim "unrolling works" --from C-0003
+
+Good:
+
+    autoresearch lesson add \
+        --claim "Loop unroll by 4× cuts qemu_cycles ~14% on dsp_fir (FIR_NTAPS=32, -O2); gains plateau past 8×." \
+        --body "$(cat <<'EOF'
+    ## Evidence
+
+    C-0003 (E-0002 candidate vs E-0001 baseline, n=20/20):
+    - delta_frac = -0.143  CI [-0.181, -0.098]  p = 0.003
+
+    C-0005 (E-0007 candidate vs E-0001 baseline, n=20/20, unroll=8):
+    - delta_frac = -0.152  CI [-0.190, -0.110]  p = 0.002
+
+    C-0008 (E-0012 candidate vs E-0001 baseline, n=20/20, unroll=16):
+    - delta_frac = -0.149  CI [-0.188, -0.106]  p = 0.002
+
+    Effect plateaus between 8× and 16× — additional unrolling costs
+    I-cache without amortizing more loads.
+
+    ## Mechanism
+
+    At FIR_NTAPS=32 and FIR_NSAMPLES=1024, the inner tap loop is a
+    compile-time-constant bound that the compiler unrolls cleanly.
+    Each unrolled iteration eliminates a branch and lets the backend
+    schedule the multiply-accumulate chain across iterations. Past
+    8× the I-cache footprint grows without reducing load count.
+
+    ## Scope and counterexamples
+
+    - Applies to qemu_cycles on Cortex-M4 with -O2 and the naive
+      direct-form FIR.
+    - Does NOT apply if FIR_NTAPS grows past ~64 — cache pressure
+      changes character and larger unrolls bloat I-cache.
+    - Does NOT apply if the compiler vectorizes (requires re-measure).
+    - Does NOT speak to the fixed-point rewrite hypothesis; that's a
+      different axis.
+
+    ## For the next generator
+
+    Don't propose more unroll variants on this target. Try strength
+    reduction on the in[i+k] address arithmetic, or split into
+    pairs-of-pairs to exploit dual-issue. If NTAPS changes, re-measure
+    this lesson with `lesson supersede`.
+    EOF
+    )" \
+        --from C-0003,C-0005,C-0008 \
+        --tag unroll --tag cache \
+        --author agent:analyst \
+        --json
+
+### `inconclusive` and incidental findings
+
+`inconclusive` verdicts are **not** decisive. Do not write a
+hypothesis-scope lesson for them; they leave the question open.
+
+If an inconclusive result (or any other review of the artifacts)
+surfaces a surprise about the target codebase or the research
+apparatus itself — "the test harness caches fixtures across runs",
+"qemu_cycles has a bimodal distribution tied to thermal state" — that
+is a **system-scope** lesson. The same `--body` structure applies, but
+the scope shifts:
+
+- `## Evidence` — what you observed in the artifacts, not a conclusion.
+- `## Mechanism` — what you believe is causing it (can be tentative).
+- `## Scope and counterexamples` — which runs / tiers / conditions.
+- `## For the next generator` — what to do differently to avoid it.
+
+Record it with `--scope system` and omit `--from` (or cite an
+observation artifact, not a hypothesis).
 
 The critic sees your lesson; a future generator reads it before
 proposing. If the next analyst contradicts it, they will supersede it
