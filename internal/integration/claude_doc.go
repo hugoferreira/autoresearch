@@ -50,6 +50,7 @@ YAML authoring or file editing. When a human says:
 | "What's the current best?" | ` + "`autoresearch frontier`" + `, summarize |
 | "Show me the writeup for H-0001" | ` + "`autoresearch report H-0001`" + ` |
 | "What just happened?" | ` + "`autoresearch log --tail 30`" + ` |
+| "What have we learned so far?" | ` + "`autoresearch lesson list --status active`" + `, summarize |
 
 **Never** ask the human to author YAML or edit files under ` + "`.research/`" + ` or
 ` + "`goal.md`" + ` directly. They can if they want to, but you should not require it.
@@ -268,6 +269,78 @@ fix the input instead.
   Every downgrade is recorded in the conclusion's ` + "`strict_check`" + ` block and
   in ` + "`events.jsonl`" + ` as a ` + "`conclusion.downgrade`" + ` event. The conclusion still
   persists; the hypothesis moves to ` + "`inconclusive`" + `.
+
+## The notebook layer
+
+Beside the per-cycle artifacts (hypotheses, experiments, observations,
+conclusions), the store holds a **notebook** — prose that carries
+reasoning across cycles. Three kinds:
+
+**1. Per-entity rationale** — every mutation verb that produces a new
+entity takes a prose flag that lands on the entity's ` + "`body`" + ` field,
+readable via ` + "`<entity> show <id> --json | jq .body`" + `:
+
+- ` + "`hypothesis add --rationale \"...\"`" + ` — why this hypothesis, what
+  evidence or lesson led you here. Required on every call.
+- ` + "`experiment design --design-notes \"...\"`" + ` — why these instruments,
+  this tier, this baseline. Required on every call.
+- ` + "`experiment implement --impl-notes \"...\"`" + ` — what you noticed while
+  applying the change; trade-offs, edge cases, anything surprising.
+  Required on every call.
+- ` + "`conclude --interpretation \"...\"`" + ` — one paragraph grounded in the
+  observed numbers, linking mechanism to effect.
+
+The rationale lives on the entity record forever; the first ~200 chars
+also land on the event payload so ` + "`log --follow`" + ` watchers see the gist
+in-stream.
+
+**2. Lessons** (` + "`L-NNNN`" + `) — supersedable one-sentence claims the loop
+has learned. Unlike per-cycle artifacts, lessons sit *above* them and
+are meant to inform the next cycle. Two scopes:
+
+- ` + "`scope: hypothesis`" + ` — tied to one or more H-/E-/C- ids the lesson
+  was extracted from. Written by the analyst on decisive verdicts and
+  by the critic on cross-cutting downgrades.
+- ` + "`scope: system`" + ` — free-floating findings about the target codebase or
+  the research apparatus itself ("the test harness caches fixtures",
+  "qemu variance correlates with CPU temperature"). No hypothesis
+  reference required. Any agent that reviews observation artifacts can
+  record one.
+
+Verbs:
+
+    autoresearch lesson add --claim "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
+    autoresearch lesson list [--scope ...] [--status ...] [--subject ...] [--tag ...]
+    autoresearch lesson show <L-id>
+    autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
+
+Scope is inferred from ` + "`--from`" + ` when not explicit: subjects given →
+` + "`hypothesis`" + `; none → ` + "`system`" + `.
+
+**3. The reading contract.** Lessons are load-bearing, not decorative:
+
+- The **generator** MUST run ` + "`lesson list --status active --json`" + ` as
+  part of "read before speaking". Its ` + "`--rationale`" + ` must either cite a
+  lesson ID or explicitly note "no relevant lesson". This keeps the
+  notebook from rotting.
+- The **analyst** MUST call ` + "`lesson add`" + ` on any decisive conclusion
+  (supported, or cleanly refuted with a mechanism). If you cannot
+  state a one-sentence reusable claim, the verdict was not decisive —
+  mark it inconclusive instead.
+- The **critic** MAY call ` + "`lesson add`" + ` on downgrade, but only for
+  cross-cutting patterns. One-off reasons stay in
+  ` + "`conclusion.strict_check.reasons`" + `.
+- The **observer** NEVER writes prose of any kind. The
+  speculation/observation firewall applies. If something surprises the
+  observer, the analyst or critic picks it up from the artifacts and
+  records a ` + "`scope: system`" + ` lesson.
+
+Supersession forms chains: ` + "`lesson add`" + ` the replacement first, then
+` + "`lesson supersede L-old --by L-new --reason \"...\"`" + `. The store updates
+both sides — ` + "`L-old.status=superseded, L-old.superseded_by=L-new`" + ` and
+` + "`L-new.supersedes=L-old`" + `. The generator reads
+` + "`lesson list --status active`" + ` by default and will not see superseded
+records.
 
 ## Capturing allocated IDs
 

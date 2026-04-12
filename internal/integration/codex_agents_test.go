@@ -30,6 +30,56 @@ func TestEmbeddedCodexAgents_RewrittenForCodex(t *testing.T) {
 	}
 }
 
+// Per-role notebook-layer invariants. Each brief is rewritten from its
+// Claude source by string replacement, so any regression in the rewriter
+// (or in the source prompts) would silently strip the rationale flags and
+// the lesson contract. Pin the load-bearing strings.
+func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
+	agents, err := integration.EmbeddedCodexAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string][]byte{}
+	for _, a := range agents {
+		byName[a.Name] = a.Content
+	}
+
+	cases := []struct {
+		role    string
+		needles []string
+	}{
+		{"research-generator", []string{
+			"--rationale",
+			"autoresearch lesson list --status active",
+		}},
+		{"research-designer", []string{
+			"--design-notes",
+		}},
+		{"research-implementer", []string{
+			"--impl-notes",
+		}},
+		{"research-analyst", []string{
+			"--interpretation",
+			"autoresearch lesson add",
+		}},
+		{"research-critic", []string{
+			"autoresearch lesson add",
+		}},
+	}
+	for _, c := range cases {
+		content, ok := byName[c.role]
+		if !ok {
+			t.Errorf("role %s missing from embedded codex agents", c.role)
+			continue
+		}
+		for _, n := range c.needles {
+			if !bytes.Contains(content, []byte(n)) {
+				t.Errorf("codex %s brief missing %q", c.role, n)
+			}
+		}
+	}
+}
+
 func TestInstallCodexAgents(t *testing.T) {
 	dir := t.TempDir()
 	r, err := integration.InstallCodexAgents(dir)

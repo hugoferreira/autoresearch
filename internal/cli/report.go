@@ -53,6 +53,7 @@ type reportData struct {
 	Hypothesis  *entity.Hypothesis   `json:"hypothesis"`
 	Experiments []*experimentBlock   `json:"experiments"`
 	Conclusions []*entity.Conclusion `json:"conclusions"`
+	Lessons     []*entity.Lesson     `json:"lessons"`
 	Events      []eventRef           `json:"events"`
 }
 
@@ -93,6 +94,33 @@ func buildReport(s *store.Store, hyp *entity.Hypothesis) (*reportData, error) {
 	}
 	r.Conclusions = concls
 
+	// Lessons tied to this hypothesis: any lesson whose Subjects include
+	// the hypothesis id OR any of its conclusion ids. Deduplicate by
+	// lesson id so a lesson citing both H and its C is not rendered twice.
+	seenLessons := map[string]bool{}
+	collectLessons := func(subjectID string) error {
+		ls, err := s.ListLessonsForSubject(subjectID)
+		if err != nil {
+			return err
+		}
+		for _, l := range ls {
+			if seenLessons[l.ID] {
+				continue
+			}
+			seenLessons[l.ID] = true
+			r.Lessons = append(r.Lessons, l)
+		}
+		return nil
+	}
+	if err := collectLessons(hyp.ID); err != nil {
+		return nil, err
+	}
+	for _, c := range concls {
+		if err := collectLessons(c.ID); err != nil {
+			return nil, err
+		}
+	}
+
 	// Subset of the event log: events whose subject is this hypothesis,
 	// any of its experiments, observations, or conclusions.
 	relevant := map[string]bool{hyp.ID: true}
@@ -106,6 +134,9 @@ func buildReport(s *store.Store, hyp *entity.Hypothesis) (*reportData, error) {
 	}
 	for _, c := range concls {
 		relevant[c.ID] = true
+	}
+	for _, l := range r.Lessons {
+		relevant[l.ID] = true
 	}
 	all, err := s.Events(0)
 	if err != nil {
@@ -141,6 +172,12 @@ func renderReportMarkdown(r *reportData) string {
 		fmt.Fprintf(&sb, "**Parent**: %s  \n", h.Parent)
 	}
 	sb.WriteString("\n")
+
+	if rationale := strings.TrimSpace(entity.ExtractSection(h.Body, "Rationale")); rationale != "" {
+		sb.WriteString("## Rationale\n\n")
+		sb.WriteString(rationale)
+		sb.WriteString("\n\n")
+	}
 
 	sb.WriteString("## Prediction\n\n")
 	fmt.Fprintf(&sb, "- **Instrument**: `%s`\n", h.Predicts.Instrument)
@@ -186,6 +223,16 @@ func renderReportMarkdown(r *reportData) string {
 					sb.WriteString("\n")
 				}
 			}
+			if design := strings.TrimSpace(entity.ExtractSection(e.Body, "Design notes")); design != "" {
+				sb.WriteString("\n**Design notes**\n\n")
+				sb.WriteString(design)
+				sb.WriteString("\n")
+			}
+			if impl := strings.TrimSpace(entity.ExtractSection(e.Body, "Implementation notes")); impl != "" {
+				sb.WriteString("\n**Implementation notes**\n\n")
+				sb.WriteString(impl)
+				sb.WriteString("\n")
+			}
 			sb.WriteString("\n")
 		}
 	}
@@ -229,6 +276,24 @@ func renderReportMarkdown(r *reportData) string {
 				sb.WriteString("\n\n")
 			}
 		}
+	}
+
+	if len(r.Lessons) > 0 {
+		sb.WriteString("## Lessons tied to this hypothesis\n\n")
+		for _, l := range r.Lessons {
+			status := l.Status
+			if status == "" {
+				status = entity.LessonStatusActive
+			}
+			fmt.Fprintf(&sb, "- **%s** (%s, %s) — %s\n", l.ID, l.Scope, status, oneLine(l.Claim))
+			if l.SupersededByID != "" {
+				fmt.Fprintf(&sb, "  _superseded by %s_\n", l.SupersededByID)
+			}
+			if l.SupersedesID != "" {
+				fmt.Fprintf(&sb, "  _supersedes %s_\n", l.SupersedesID)
+			}
+		}
+		sb.WriteString("\n")
 	}
 
 	if len(r.Events) > 0 {

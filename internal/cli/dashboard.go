@@ -93,19 +93,20 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 // ---- snapshot capture ----
 
 type dashboardSnapshot struct {
-	Project      string              `json:"project"`
-	Paused       bool                `json:"paused"`
-	PauseReason  string              `json:"pause_reason,omitempty"`
-	Mode         string              `json:"mode"`
-	Goal         *entity.Goal        `json:"goal,omitempty"`
-	Budgets      dashboardBudgets    `json:"budgets"`
-	Counts       map[string]int      `json:"counts"`
-	Tree         []*treeNode         `json:"tree"`
-	Frontier     []frontierRow       `json:"frontier"`
-	StalledFor   int                 `json:"stalled_for"`
-	InFlight     []dashboardInFlight `json:"in_flight"`
-	RecentEvents []store.Event       `json:"recent_events"`
-	CapturedAt   time.Time           `json:"captured_at"`
+	Project       string              `json:"project"`
+	Paused        bool                `json:"paused"`
+	PauseReason   string              `json:"pause_reason,omitempty"`
+	Mode          string              `json:"mode"`
+	Goal          *entity.Goal        `json:"goal,omitempty"`
+	Budgets       dashboardBudgets    `json:"budgets"`
+	Counts        map[string]int      `json:"counts"`
+	Tree          []*treeNode         `json:"tree"`
+	Frontier      []frontierRow       `json:"frontier"`
+	StalledFor    int                 `json:"stalled_for"`
+	InFlight      []dashboardInFlight `json:"in_flight"`
+	RecentLessons []*entity.Lesson    `json:"recent_lessons,omitempty"`
+	RecentEvents  []store.Event       `json:"recent_events"`
+	CapturedAt    time.Time           `json:"captured_at"`
 }
 
 type dashboardBudgets struct {
@@ -128,6 +129,33 @@ type dashboardInFlight struct {
 	Instruments   []string   `json:"instruments"`
 	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
 	ElapsedS      float64    `json:"elapsed_s"`
+}
+
+const dashboardRecentEventsSummaryLimit = 10
+
+// readDashboardRecentEvents returns a descending slice of events, starting
+// from the newest event and paging backward by `offsetNewest`.
+func readDashboardRecentEvents(s *store.Store, offsetNewest, limit int) ([]store.Event, bool, error) {
+	all, err := s.Events(0)
+	if err != nil {
+		return nil, false, err
+	}
+	if limit <= 0 || len(all) == 0 || offsetNewest >= len(all) {
+		return []store.Event{}, true, nil
+	}
+	if offsetNewest < 0 {
+		offsetNewest = 0
+	}
+	end := len(all) - offsetNewest
+	if end < 0 {
+		end = 0
+	}
+	start := max(end-limit, 0)
+	out := make([]store.Event, 0, end-start)
+	for i := end - 1; i >= start; i-- {
+		out = append(out, all[i])
+	}
+	return out, start == 0, nil
 }
 
 // captureDashboard gathers everything the dashboard renders. All reads go
@@ -224,7 +252,28 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		return a.After(*b)
 	})
 
-	events, err := s.Events(10)
+	// Recent lessons: pull up to 5 most-recently-created active lessons so
+	// the reader sees the notebook's leading edge without having to jump
+	// to the lesson list. Superseded lessons are excluded — the dashboard
+	// should show what currently applies, not the history.
+	if lessons, err := s.ListLessons(); err == nil {
+		active := make([]*entity.Lesson, 0, len(lessons))
+		for _, l := range lessons {
+			if l.Status == entity.LessonStatusSuperseded {
+				continue
+			}
+			active = append(active, l)
+		}
+		sort.SliceStable(active, func(i, j int) bool {
+			return active[i].CreatedAt.After(active[j].CreatedAt)
+		})
+		if len(active) > 5 {
+			active = active[:5]
+		}
+		snap.RecentLessons = active
+	}
+
+	events, _, err := readDashboardRecentEvents(s, 0, dashboardRecentEventsSummaryLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +374,10 @@ func renderDashboard(w io.Writer, snap *dashboardSnapshot, width int, footerMode
 	fmt.Fprintln(w)
 	if len(snap.InFlight) > 0 {
 		renderDashboardInFlight(w, snap, a)
+		fmt.Fprintln(w)
+	}
+	if len(snap.RecentLessons) > 0 {
+		renderDashboardLessons(w, snap, a)
 		fmt.Fprintln(w)
 	}
 	renderDashboardRecent(w, snap, a)
@@ -516,6 +569,22 @@ func renderDashboardInFlight(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		tierCell := fmt.Sprintf("%-8s", r.Tier)
 		fmt.Fprintf(w, "   %-8s  %s  %s %s elapsed  instruments=%s\n",
 			r.ID, statusCell, a.dim("tier="+tierCell), elapsed, strings.Join(r.Instruments, ","))
+	}
+}
+
+func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {
+	fmt.Fprintln(w, " "+a.bold(fmt.Sprintf("Recent lessons (last %d)", len(snap.RecentLessons))))
+	fmt.Fprintln(w, " "+a.dim("────────────────────────"))
+	for _, l := range snap.RecentLessons {
+		scopeCell := fmt.Sprintf("%-10s", l.Scope)
+		switch l.Scope {
+		case entity.LessonScopeSystem:
+			scopeCell = a.magenta(scopeCell)
+		case entity.LessonScopeHypothesis:
+			scopeCell = a.cyan(scopeCell)
+		}
+		fmt.Fprintf(w, "   %-8s  %s  %s\n",
+			a.cyan(l.ID), scopeCell, truncate(l.Claim, 70))
 	}
 }
 

@@ -113,7 +113,8 @@ Edits inside this block will be overwritten.
 - Read ` + "`.codex/autoresearch.md`" + ` before mutating research state.
 - Use ` + "`autoresearch <verb>`" + ` to record every hypothesis, experiment, observation, and conclusion.
 - Never edit ` + "`.research/`" + ` directly; the CLI is the only writer.
-- Humans steer through the main Codex conversation. Read-only views like ` + "`dashboard`" + `, ` + "`log`" + `, ` + "`tree`" + `, ` + "`frontier`" + `, and ` + "`report`" + ` are windows onto state, not steering surfaces.
+- Capture reasoning, not just measurements: pass ` + "`--rationale`" + ` on ` + "`hypothesis add`" + `, ` + "`--design-notes`" + ` on ` + "`experiment design`" + `, ` + "`--impl-notes`" + ` on ` + "`experiment implement`" + `, and ` + "`--interpretation`" + ` on ` + "`conclude`" + `. Record cumulative lessons with ` + "`autoresearch lesson add`" + ` on decisive conclusions, and read ` + "`autoresearch lesson list --status active`" + ` before proposing new hypotheses — the loop should not re-derive what it already knows.
+- Humans steer through the main Codex conversation. Read-only views like ` + "`dashboard`" + `, ` + "`log`" + `, ` + "`tree`" + `, ` + "`frontier`" + `, ` + "`lesson list`" + `, and ` + "`report`" + ` are windows onto state, not steering surfaces.
 - When delegating with ` + "`spawn_agent`" + `, read the matching brief under ` + "`.codex/agents/research-*.md`" + ` first. Use ` + "`worker`" + ` for ` + "`research-implementer`" + ` and ` + "`default`" + ` for the other five roles.
 ` + codexBlockEnd + `
 `

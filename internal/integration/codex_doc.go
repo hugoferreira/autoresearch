@@ -19,5 +19,11 @@ func CodexDoc(moduleVersion string) string {
 		"  Edits will be overwritten. `autoresearch codex install` also maintains a\n  managed block in AGENTS.md that points Codex at `.codex/autoresearch.md`\n  while preserving any user-owned AGENTS.md content outside that block.\n",
 	)
 	doc = strings.ReplaceAll(doc, "treats Claude as an agentic researcher", "treats Codex as an agentic researcher")
+	// Catch-all: any remaining bare ".claude/" references (e.g. the file
+	// layout section that describes `<project>/.claude/` and the prose
+	// sentence about shared team infra) get flipped to ".codex/". Order
+	// matters — this must run AFTER the specific ".claude/autoresearch.md"
+	// replacement above, which has already handled its own form.
+	doc = strings.ReplaceAll(doc, ".claude/", ".codex/")
 	return doc
 }

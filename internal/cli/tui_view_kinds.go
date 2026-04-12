@@ -24,6 +24,8 @@ const (
 	kindArtifactDiff     = "artifact.diff"
 	kindReport           = "report"
 	kindInstrumentList   = "instrument.list"
+	kindLessonList       = "lesson.list"
+	kindLessonDetail     = "lesson.detail"
 )
 
 func (v *dashboardView) kind() string         { return kindDashboard }
@@ -49,3 +51,5 @@ func (v *artifactView) kind() string          { return kindArtifactView }
 func (v *artifactDiffView) kind() string      { return kindArtifactDiff }
 func (v *reportView) kind() string            { return kindReport }
 func (v *instrumentListView) kind() string    { return kindInstrumentList }
+func (v *lessonListView) kind() string        { return kindLessonList }
+func (v *lessonDetailView) kind() string      { return kindLessonDetail }

@@ -199,11 +199,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.jumpTo(newConclusionListView(), m.store)
 		case "L":
 			return m, m.jumpTo(newEventListView(), m.store)
+		case "N":
+			return m, m.jumpTo(newLessonListView(), m.store)
 		case "T":
 			return m, m.jumpTo(newTreeView(), m.store)
 		case "F":
 			return m, m.jumpTo(newFrontierView(), m.store)
-		case "G":
+		case "O":
 			return m, m.jumpTo(newGoalView(), m.store)
 		case "S":
 			return m, m.jumpTo(newStatusView(), m.store)
@@ -431,8 +433,8 @@ func (m tuiModel) renderHelp() string {
 		"Jump to view:",
 		"  H hypotheses   E experiments   C conclusions",
 		"  L event log    T tree          F frontier",
-		"  G goal         S status         A artifacts",
-		"  I instruments  R report picker",
+		"  O goal         S status         A artifacts",
+		"  I instruments  R report picker  N notebook",
 		"",
 		"Within a list:",
 		"  ↑/↓ or j/k    move cursor",
