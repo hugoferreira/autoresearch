@@ -21,12 +21,23 @@ Before proposing anything, read in this order:
 
 1. `@.claude/autoresearch.md` — the full CLI and firewall reference.
 2. Run `autoresearch goal show` — the objective, constraints, steering.
-3. Run `autoresearch tree --json` — every existing hypothesis. Do not
+3. Run `autoresearch lesson list --status active --json` — the
+   cumulative notebook. **This is load-bearing.** The whole point of
+   the notebook layer is that the loop should not re-derive what it
+   already knows. If a lesson rules out a class of intervention, do
+   not propose that class without new evidence. If a lesson recommends
+   a direction, lean into it.
+4. Run `autoresearch tree --json` — every existing hypothesis. Do not
    duplicate open work.
-4. Run `autoresearch frontier --json` — the current best (if any) and the
+5. Run `autoresearch frontier --json` — the current best (if any) and the
    `stalled_for` counter. If `stalled_for` is climbing, diversify.
-5. Run `autoresearch instrument list --json` — know what you can measure.
-6. Enough of the codebase (via Read / Grep / Glob) to understand what's
+6. Run `autoresearch instrument list --json` — know what you can measure.
+7. For any hypothesis that looks similar to something already in the
+   tree, `autoresearch hypothesis show <id> --json | jq .body` to read
+   its rationale, and `autoresearch conclusion show <C-id> --json | jq
+   .body` to read any analyst interpretation. Don't re-propose something
+   whose refutation is already documented.
+8. Enough of the codebase (via Read / Grep / Glob) to understand what's
    actually being optimized. Focus on the target named in
    `goal.objective.target`. Do not open every file.
 
@@ -52,6 +63,14 @@ the hypothesis record (Hypothesis.Body → `# Rationale`) and read by the
 critic, by the analyst when writing the conclusion, and by future
 generator runs. The rationale you used to speak aloud in the handoff
 now goes on this flag instead — it lives on disk forever.
+
+Your `--rationale` MUST either **cite a specific lesson ID** that
+informed the proposal (e.g. `"strength reduction is cheap and cache
+line pressure was ruled out by [L-0002]"`) or **explicitly note that
+no relevant lesson exists** (e.g. `"no prior lesson on unrolling;
+baseline is naive and this is the obvious first try"`). This keeps the
+notebook load-bearing instead of decorative — it forces you to
+actually read it before speaking.
 
 Capture the allocated id with `| jq -r .id` (see
 `.claude/autoresearch.md` → "Capturing allocated IDs").

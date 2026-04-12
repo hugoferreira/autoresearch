@@ -9,6 +9,7 @@ const (
 	KindExperiment  EntityKind = "E"
 	KindObservation EntityKind = "O"
 	KindConclusion  EntityKind = "C"
+	KindLesson      EntityKind = "L"
 )
 
 func (s *Store) AllocID(kind EntityKind) (string, error) {

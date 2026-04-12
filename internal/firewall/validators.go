@@ -242,6 +242,47 @@ func CheckTierGate(tier string, priorHostExperiments bool, force bool) error {
 	}
 }
 
+// ValidateLesson checks the structural rules of a lesson: non-empty claim,
+// valid scope, required Subjects for scope=hypothesis, and well-formed ID
+// prefixes on Subjects and SupersedesID. Existence of referenced entities is
+// NOT checked here — that's the CLI handler's job, matching the pattern used
+// for Hypothesis parent references.
+func ValidateLesson(l *entity.Lesson) error {
+	if strings.TrimSpace(l.Claim) == "" {
+		return errors.New("lesson claim is required")
+	}
+	switch l.Scope {
+	case entity.LessonScopeHypothesis, entity.LessonScopeSystem:
+	default:
+		return fmt.Errorf("lesson scope must be %q or %q, got %q",
+			entity.LessonScopeHypothesis, entity.LessonScopeSystem, l.Scope)
+	}
+	if l.Scope == entity.LessonScopeHypothesis && len(l.Subjects) == 0 {
+		return errors.New("lesson with scope=hypothesis requires at least one subject (--from H-NNNN,C-NNNN,...)")
+	}
+	for i, sub := range l.Subjects {
+		if !isValidSubjectID(sub) {
+			return fmt.Errorf("subject[%d] %q must be an H-/E-/C- id", i, sub)
+		}
+	}
+	if l.SupersedesID != "" && !strings.HasPrefix(l.SupersedesID, "L-") {
+		return fmt.Errorf("supersedes target %q must be an L- id", l.SupersedesID)
+	}
+	switch l.Status {
+	case "", entity.LessonStatusActive, entity.LessonStatusSuperseded:
+	default:
+		return fmt.Errorf("lesson status must be %q or %q, got %q",
+			entity.LessonStatusActive, entity.LessonStatusSuperseded, l.Status)
+	}
+	return nil
+}
+
+func isValidSubjectID(id string) bool {
+	return strings.HasPrefix(id, "H-") ||
+		strings.HasPrefix(id, "E-") ||
+		strings.HasPrefix(id, "C-")
+}
+
 func ValidateHypothesis(h *entity.Hypothesis, cfg *store.Config) error {
 	if strings.TrimSpace(h.Claim) == "" {
 		return errors.New("hypothesis claim is required")

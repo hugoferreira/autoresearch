@@ -130,3 +130,63 @@ func TestValidateHypothesis_Happy(t *testing.T) {
 		t.Errorf("valid hypothesis rejected: %v", err)
 	}
 }
+
+func TestValidateLesson(t *testing.T) {
+	t.Run("happy hypothesis-scope", func(t *testing.T) {
+		l := &entity.Lesson{
+			Claim: "unroll past 8× is cache-bound",
+			Scope: entity.LessonScopeHypothesis, Subjects: []string{"C-0003"},
+			Status: entity.LessonStatusActive,
+		}
+		if err := firewall.ValidateLesson(l); err != nil {
+			t.Errorf("valid lesson rejected: %v", err)
+		}
+	})
+	t.Run("happy system-scope", func(t *testing.T) {
+		l := &entity.Lesson{
+			Claim: "fixture cache is sticky",
+			Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive,
+		}
+		if err := firewall.ValidateLesson(l); err != nil {
+			t.Errorf("valid system lesson rejected: %v", err)
+		}
+	})
+	t.Run("empty claim", func(t *testing.T) {
+		l := &entity.Lesson{Scope: entity.LessonScopeSystem}
+		if err := firewall.ValidateLesson(l); err == nil {
+			t.Error("empty claim should fail")
+		}
+	})
+	t.Run("invalid scope", func(t *testing.T) {
+		l := &entity.Lesson{Claim: "x", Scope: "galactic"}
+		if err := firewall.ValidateLesson(l); err == nil ||
+			!strings.Contains(err.Error(), "scope must be") {
+			t.Errorf("bad scope should fail with scope hint, got %v", err)
+		}
+	})
+	t.Run("hypothesis scope requires subjects", func(t *testing.T) {
+		l := &entity.Lesson{Claim: "x", Scope: entity.LessonScopeHypothesis}
+		if err := firewall.ValidateLesson(l); err == nil ||
+			!strings.Contains(err.Error(), "at least one subject") {
+			t.Errorf("hypothesis scope without subjects should fail, got %v", err)
+		}
+	})
+	t.Run("invalid subject prefix", func(t *testing.T) {
+		l := &entity.Lesson{
+			Claim: "x", Scope: entity.LessonScopeHypothesis, Subjects: []string{"X-0001"},
+		}
+		if err := firewall.ValidateLesson(l); err == nil ||
+			!strings.Contains(err.Error(), "H-/E-/C-") {
+			t.Errorf("bad subject prefix should fail, got %v", err)
+		}
+	})
+	t.Run("supersedes must be L-", func(t *testing.T) {
+		l := &entity.Lesson{
+			Claim: "x", Scope: entity.LessonScopeSystem, SupersedesID: "H-0001",
+		}
+		if err := firewall.ValidateLesson(l); err == nil ||
+			!strings.Contains(err.Error(), "L- id") {
+			t.Errorf("non-L supersedes target should fail, got %v", err)
+		}
+	})
+}

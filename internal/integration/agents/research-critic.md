@@ -83,6 +83,39 @@ in `events.jsonl` as a `conclusion.critic_downgrade` event. Future
 readers need to be able to reconstruct why you pushed back — vague
 reasons ("seemed iffy") are not acceptable.
 
+## Record a lesson (optional, cross-cutting only)
+
+Not every downgrade deserves a lesson. Record one only when the
+downgrade reveals a **cross-cutting pattern** that should inform
+future generators:
+
+    autoresearch lesson add \
+        --claim "<one sentence: what pattern should be avoided or reconsidered>" \
+        --from <C-id>[,<other C-ids>] \
+        --author agent:critic \
+        --json
+
+Good critic lessons look like:
+
+- "Bootstrap CIs on <10 samples are unreliable for this instrument;
+  require n≥20 for supported verdicts on qemu_cycles."
+- "Any code change whose mechanism isn't visible in the diff should be
+  treated as inconclusive regardless of the numbers."
+- "Loop unrolling past 8× is cache-bound on this FIR tap count; don't
+  propose more of them."
+
+If you are downgrading for a one-off reason (the analyst misread a
+CI, the wrong baseline was picked, a single outlier skewed the mean),
+leave it to the conclusion's `strict_check.reasons` and do not add a
+lesson. Lessons are for patterns that would cause the same mistake
+again.
+
+If you notice a pattern contradicted by an existing lesson, supersede
+it rather than adding a conflicting one:
+
+    autoresearch lesson add --claim "<new claim>" --author agent:critic --json
+    autoresearch lesson supersede L-old --by L-new --reason "<specific evidence>"
+
 ## What you don't do
 
 - **Never write a new conclusion**. You can only downgrade existing

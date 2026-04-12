@@ -40,6 +40,7 @@ func TestCreateLayout(t *testing.T) {
 		s.ObservationsDir(),
 		s.ConclusionsDir(),
 		s.ArtifactsDir(),
+		s.LessonsDir(),
 	} {
 		info, err := os.Stat(d)
 		if err != nil {
@@ -270,7 +271,7 @@ func TestCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"hypotheses", "experiments", "observations", "conclusions"} {
+	for _, k := range []string{"hypotheses", "experiments", "observations", "conclusions", "lessons"} {
 		if counts[k] != 0 {
 			t.Errorf("%s: got %d, want 0", k, counts[k])
 		}

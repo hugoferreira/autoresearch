@@ -59,6 +59,41 @@ argue with it.** Report it to the main session and, if you think a
 tighter experiment would have supported the original claim, suggest
 it as a new hypothesis (via the generator, not by writing one yourself).
 
+## Record a lesson (required on decisive conclusions)
+
+After `conclude`, if the verdict is **decisive** — `supported`, or
+`refuted` with a clear mechanism — you MUST record a lesson:
+
+    autoresearch lesson add \
+        --claim "<one sentence another generator can reuse>" \
+        --from <C-id>[,<H-id>,<E-id>,...] \
+        [--tag ...] \
+        --author agent:analyst \
+        --json
+
+Rules for the `--claim`:
+
+- **One sentence**, grounded in what the experiment showed. No preamble.
+- **Reusable**: a future generator reading it should know whether this
+  class of intervention is worth trying again. "Loop unroll past 8×
+  shows no win on FIR_NTAPS=32 — cache line pressure dominates" is a
+  lesson. "The experiment was inconclusive" is not.
+- **No speculation**: only what the measurement actually supports. If
+  you cannot write a reusable one-sentence claim, the conclusion was
+  not decisive and you should have requested `inconclusive` instead —
+  not `lesson add`.
+
+`inconclusive` verdicts are **not** decisive. Do not write a lesson for
+them; they leave the question open. If an inconclusive result still
+surfaces a surprise about the system or the apparatus (e.g. "the test
+harness caches fixtures across runs"), record that separately with
+`--scope system` — it is a free-floating finding, not a verdict on
+any hypothesis.
+
+The critic sees your lesson; a future generator reads it before
+proposing. If the next analyst contradicts it, they will supersede it
+via `lesson supersede`.
+
 ## Interpretation rules
 
 Your `--interpretation` MUST:

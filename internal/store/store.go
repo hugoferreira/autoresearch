@@ -21,6 +21,7 @@ const (
 	ObservationsDir = "observations"
 	ConclusionsDir  = "conclusions"
 	ArtifactsDir    = "artifacts"
+	LessonsDir      = "lessons"
 )
 
 var (
@@ -91,6 +92,7 @@ func Create(projectDir string, cfg Config) (*Store, error) {
 		s.ObservationsDir(),
 		s.ConclusionsDir(),
 		s.ArtifactsDir(),
+		s.LessonsDir(),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("create %s: %w", d, err)
@@ -120,6 +122,7 @@ func (s *Store) ExperimentsDir() string  { return filepath.Join(s.DirPath(), Exp
 func (s *Store) ObservationsDir() string { return filepath.Join(s.DirPath(), ObservationsDir) }
 func (s *Store) ConclusionsDir() string  { return filepath.Join(s.DirPath(), ConclusionsDir) }
 func (s *Store) ArtifactsDir() string    { return filepath.Join(s.DirPath(), ArtifactsDir) }
+func (s *Store) LessonsDir() string      { return filepath.Join(s.DirPath(), LessonsDir) }
 
 // WorktreesRoot returns the configured absolute root directory under which
 // this project's experiment worktrees live. It is deliberately outside the
@@ -175,10 +178,17 @@ func (s *Store) Counts() (map[string]int, error) {
 		"experiments":  s.ExperimentsDir(),
 		"observations": s.ObservationsDir(),
 		"conclusions":  s.ConclusionsDir(),
+		"lessons":      s.LessonsDir(),
 	}
 	out := map[string]int{}
 	for name, d := range dirs {
 		entries, err := os.ReadDir(d)
+		if errors.Is(err, os.ErrNotExist) {
+			// Lessons dir is created lazily on first write so existing
+			// pre-M10 installs do not need a migration. Missing → 0.
+			out[name] = 0
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", d, err)
 		}
