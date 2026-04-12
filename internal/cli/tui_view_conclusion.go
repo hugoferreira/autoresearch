@@ -120,10 +120,6 @@ func newConclusionDetailView(id string) *conclusionDetailView {
 	return &conclusionDetailView{id: id}
 }
 
-func newConclusionDetailCompact(id string) *conclusionDetailView {
-	return &conclusionDetailView{id: id, compact: true}
-}
-
 func (v *conclusionDetailView) title() string { return "Conclusion " + v.id }
 
 func (v *conclusionDetailView) init(s *store.Store) tea.Cmd {

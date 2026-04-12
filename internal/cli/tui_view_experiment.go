@@ -121,10 +121,6 @@ func newExperimentDetailView(id string) *experimentDetailView {
 	return &experimentDetailView{id: id}
 }
 
-func newExperimentDetailCompact(id string) *experimentDetailView {
-	return &experimentDetailView{id: id, compact: true}
-}
-
 func (v *experimentDetailView) title() string { return "Experiment " + v.id }
 
 func (v *experimentDetailView) init(s *store.Store) tea.Cmd {

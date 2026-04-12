@@ -151,10 +151,6 @@ func newHypothesisDetailView(id string) *hypothesisDetailView {
 	return &hypothesisDetailView{id: id}
 }
 
-func newHypothesisDetailCompact(id string) *hypothesisDetailView {
-	return &hypothesisDetailView{id: id, compact: true}
-}
-
 func (v *hypothesisDetailView) title() string { return "Hypothesis " + v.id }
 
 func (v *hypothesisDetailView) init(s *store.Store) tea.Cmd {

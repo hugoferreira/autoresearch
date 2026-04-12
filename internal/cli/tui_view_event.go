@@ -147,10 +147,6 @@ func newEventDetailView(e store.Event) *eventDetailView {
 	return &eventDetailView{e: e}
 }
 
-func newEventDetailCompact(e store.Event) *eventDetailView {
-	return &eventDetailView{e: e, compact: true}
-}
-
 func (v *eventDetailView) title() string { return "Event " + v.e.Kind }
 
 func (v *eventDetailView) init(_ *store.Store) tea.Cmd                         { return nil }

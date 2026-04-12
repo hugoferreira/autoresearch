@@ -188,27 +188,26 @@ func (v *dashboardView) openSelected(s *store.Store) tea.Cmd {
 		if idx < 0 || idx >= len(flat) {
 			return nil
 		}
-		// Use a compact right-column detail.
-		v.rightOverlay = newHypothesisDetailCompact(flat[idx].ID)
+		v.rightOverlay = newHypothesisDetailView(flat[idx].ID)
 		return v.rightOverlay.init(s)
 	case dashFocusFrontier:
 		if idx < 0 || idx >= len(v.snap.Frontier) {
 			return nil
 		}
-		v.rightOverlay = newConclusionDetailCompact(v.snap.Frontier[idx].Conclusion)
+		v.rightOverlay = newConclusionDetailView(v.snap.Frontier[idx].Conclusion)
 		return v.rightOverlay.init(s)
 	case dashFocusInFlight:
 		if idx < 0 || idx >= len(v.snap.InFlight) {
 			return nil
 		}
-		v.rightOverlay = newExperimentDetailCompact(v.snap.InFlight[idx].ID)
+		v.rightOverlay = newExperimentDetailView(v.snap.InFlight[idx].ID)
 		return v.rightOverlay.init(s)
 	case dashFocusEvents:
 		events := v.currentEvents()
 		if idx < 0 || idx >= len(events) {
 			return nil
 		}
-		v.rightOverlay = newEventDetailCompact(events[idx])
+		v.rightOverlay = newEventDetailView(events[idx])
 		return v.rightOverlay.init(s)
 	}
 	return nil
