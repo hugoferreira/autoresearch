@@ -126,7 +126,7 @@ func (v *eventListView) view(width, height int) string {
 	}
 	rows := make([]string, len(v.filtered))
 	for i, e := range v.filtered {
-		rows[i] = fmt.Sprintf("%s  %s  %-16s  %s",
+		rows[i] = fmt.Sprintf("%s  %s  %-8s  %s",
 			tuiDim.Render(e.Ts.UTC().Format("15:04:05")),
 			padRight(tuiEventKindColor(e.Kind), 24),
 			emptyDash(e.Subject),

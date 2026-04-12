@@ -252,7 +252,12 @@ func (v *dashboardView) view(width, height int) string {
 	leftW := max(width*55/100-2, 40)
 	rightW := max(width-leftW-3, 30)
 
-	left := v.renderTreePanel(leftW, remaining)
+	treeH := remaining * 60 / 100
+	lessonsH := remaining - treeH
+	left := lipgloss.JoinVertical(lipgloss.Left,
+		v.renderTreePanel(leftW, treeH),
+		v.renderLessonsPanel(leftW, lessonsH),
+	)
 
 	var right string
 	if v.rightOverlay != nil {
@@ -309,8 +314,8 @@ func (v *dashboardView) renderTopStrip(width int) string {
 		lines = append(lines, line)
 	}
 
-	// Line 2: budget meters only.
-	parts := []string{}
+	// Append budget meters to the goal line so everything fits on one line.
+	var parts []string
 	if snap.Budgets.Limits.MaxExperiments > 0 {
 		s := fmt.Sprintf("%d/%d exp",
 			snap.Budgets.Usage.Experiments, snap.Budgets.Limits.MaxExperiments)
@@ -330,7 +335,12 @@ func (v *dashboardView) renderTopStrip(width int) string {
 		parts = append(parts, tuiMeterColor(float64(snap.StalledFor),
 			float64(snap.Budgets.Limits.FrontierStallK), s))
 	}
-	lines = append(lines, tuiBold.Render("Budget:")+" "+strings.Join(parts, tuiDim.Render("  ·  ")))
+	budget := strings.Join(parts, tuiDim.Render(" · "))
+	if len(lines) > 0 {
+		lines[len(lines)-1] += tuiDim.Render("  |  ") + budget
+	} else {
+		lines = append(lines, tuiBold.Render("Budget:")+" "+budget)
+	}
 
 	// Truncate each line to width so nothing wraps.
 	for i, l := range lines {
@@ -356,6 +366,24 @@ func (v *dashboardView) renderTreePanel(width, height int) string {
 	inner := max(height-2, 1)
 	lines = scrollWindow(lines, cursor, inner)
 	return boxPanel(title, strings.Join(lines, "\n"), width, height, active)
+}
+
+func (v *dashboardView) renderLessonsPanel(width, height int) string {
+	title := tuiPanelTitle.Render("Lessons")
+	snap := v.snap
+	if len(snap.RecentLessons) == 0 {
+		return boxPanel(title, tuiDim.Render("(no active lessons)"), width, height, false)
+	}
+	innerW := width - 4
+	// Prefix: "L-0006  " = 8 visible chars.
+	claimW := max(innerW-8, 20)
+	var lines []string
+	for _, l := range snap.RecentLessons {
+		lines = append(lines, fmt.Sprintf("%s  %s",
+			tuiCyan.Render(l.ID), truncate(l.Claim, claimW)))
+	}
+	lines = truncLines(lines, innerW)
+	return boxPanel(title, strings.Join(lines, "\n"), width, height, false)
 }
 
 func (v *dashboardView) renderFrontierPanel(width, height int) string {

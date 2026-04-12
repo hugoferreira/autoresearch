@@ -609,7 +609,7 @@ func renderDashboardRecent(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		}
 		kindCell := fmt.Sprintf("%-24s", e.Kind)
 		kindCell = eventKindColor(a, kindCell, e.Kind)
-		fmt.Fprintf(w, "   %s  %s  %-16s  %s\n",
+		fmt.Fprintf(w, "   %s  %s  %-8s  %s\n",
 			a.dim(e.Ts.UTC().Format("15:04:05")),
 			kindCell,
 			subject,
