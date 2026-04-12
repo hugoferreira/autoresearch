@@ -49,7 +49,7 @@ func TestHypothesisCRUD(t *testing.T) {
 
 func TestRegisterInstrument(t *testing.T) {
 	s, _ := mustCreate(t)
-	if err := s.RegisterInstrument("size_flash", store.Instrument{Unit: "bytes", Tier: "host"}); err != nil {
+	if err := s.RegisterInstrument("size_flash", store.Instrument{Unit: "bytes"}); err != nil {
 		t.Fatal(err)
 	}
 	insts, err := s.ListInstruments()

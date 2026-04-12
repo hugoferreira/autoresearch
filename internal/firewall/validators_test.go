@@ -101,7 +101,6 @@ func TestValidateHypothesis_NoKillIf(t *testing.T) {
 func TestValidateExperiment_Happy(t *testing.T) {
 	e := &entity.Experiment{
 		Hypothesis:  "H-0001",
-		Tier:        entity.TierHost,
 		Instruments: []string{"qemu_cycles"},
 		Baseline:    entity.Baseline{Ref: "HEAD"},
 	}
@@ -113,7 +112,6 @@ func TestValidateExperiment_Happy(t *testing.T) {
 func TestValidateExperiment_UnregisteredInstrument(t *testing.T) {
 	e := &entity.Experiment{
 		Hypothesis:  "H-0001",
-		Tier:        entity.TierHost,
 		Instruments: []string{"ghost_instrument"},
 		Baseline:    entity.Baseline{Ref: "HEAD"},
 	}
@@ -122,25 +120,39 @@ func TestValidateExperiment_UnregisteredInstrument(t *testing.T) {
 	}
 }
 
-func TestCheckTierGate(t *testing.T) {
-	if err := firewall.CheckTierGate(entity.TierHost, false, false); err != nil {
-		t.Errorf("host tier always allowed, got %v", err)
-	}
-	if err := firewall.CheckTierGate(entity.TierQemu, false, false); err == nil {
-		t.Error("qemu without prior host should be rejected")
-	}
-	if err := firewall.CheckTierGate(entity.TierQemu, true, false); err != nil {
-		t.Errorf("qemu with prior host should be allowed, got %v", err)
-	}
-	if err := firewall.CheckTierGate(entity.TierQemu, false, true); err != nil {
-		t.Errorf("qemu with --force should be allowed, got %v", err)
-	}
-	if err := firewall.CheckTierGate(entity.TierHardware, true, false); err == nil {
-		t.Error("hardware without --force should always be rejected")
-	}
-	if err := firewall.CheckTierGate(entity.TierHardware, false, true); err != nil {
-		t.Errorf("hardware with --force should be allowed, got %v", err)
-	}
+func TestCheckInstrumentDependencies(t *testing.T) {
+	cfg := &store.Config{Instruments: map[string]store.Instrument{
+		"host_test":   {Unit: "bool"},
+		"qemu_cycles": {Unit: "cycles", Requires: []string{"host_test=pass"}},
+	}}
+
+	t.Run("no observations returns error", func(t *testing.T) {
+		err := firewall.CheckInstrumentDependencies("qemu_cycles", cfg, nil)
+		if err == nil {
+			t.Error("expected error when no observations satisfy the prerequisite")
+		}
+	})
+
+	t.Run("passing host_test observation returns nil", func(t *testing.T) {
+		pass := true
+		obs := []*entity.Observation{
+			{Instrument: "host_test", Pass: &pass},
+		}
+		if err := firewall.CheckInstrumentDependencies("qemu_cycles", cfg, obs); err != nil {
+			t.Errorf("expected nil with passing prerequisite, got %v", err)
+		}
+	})
+
+	t.Run("non-passing observation still returns error", func(t *testing.T) {
+		fail := false
+		obs := []*entity.Observation{
+			{Instrument: "host_test", Pass: &fail},
+		}
+		err := firewall.CheckInstrumentDependencies("qemu_cycles", cfg, obs)
+		if err == nil {
+			t.Error("expected error when prerequisite observation is not passing")
+		}
+	})
 }
 
 func TestValidateHypothesis_Happy(t *testing.T) {

@@ -120,11 +120,48 @@ Claude reads `.claude/autoresearch.md` plus the `.claude/agents/research-*.md`
 prompts. Codex reads the managed `AGENTS.md` block,
 `.codex/autoresearch.md`, and the `.codex/agents/research-*.md` role briefs.
 
-A worked example lives in [`examples/cortex-m4-synth/`](examples/cortex-m4-synth)
-— optimizing a naive FIR filter against `host_timing` with `size_flash` and
-test-pass constraints, capped at 20 experiments. For that example, copy the
-directory elsewhere, run `./bootstrap.sh`, open `autoresearch dashboard
---refresh 2`, and then start Claude Code or Codex in the copied project.
+### Worked example: FIR filter optimization
+
+[`examples/cortex-m4-synth/`](examples/cortex-m4-synth) is a ready-to-run
+project: a naive direct-form FIR filter (`src/dsp_fir.c`) with host-timing
+and fake-qemu instruments, a 20% reduction goal, and a 20-experiment budget.
+
+```sh
+# Copy it out of the repo so autoresearch can use its own git worktrees
+cp -r examples/cortex-m4-synth /tmp/my-fir
+cd /tmp/my-fir
+
+# Bootstrap: creates git repo, inits .research/, registers instruments, sets goal
+./bootstrap.sh
+
+# Terminal 1 — watch the dashboard (read-only)
+autoresearch dashboard --refresh 2
+
+# Terminal 2 (optional) — tail the event log
+autoresearch log --follow
+
+# Terminal 3 — open Claude Code in the same directory and say:
+```
+
+```text
+Read the local autoresearch docs for this project. Use autoresearch as
+the only writer of research state, and start the research loop for the
+current goal. I will observe via the dashboard.
+```
+
+The agent reads `.claude/autoresearch.md` and the two prompts under
+`.claude/agents/`, then drives the loop autonomously: proposing hypotheses,
+designing experiments, implementing changes in isolated worktrees, running
+instruments (with dependency ordering — `host_test` must pass before
+`host_timing` runs), and concluding with the strict-mode firewall. The
+gate reviewer is dispatched automatically for decisive verdicts.
+
+For a more hands-on first step:
+
+```text
+Start by proposing 2 falsifiable hypotheses for the current goal and
+record them through autoresearch. Then recommend which one to pursue first.
+```
 
 ## Command map
 
@@ -142,7 +179,7 @@ is paused.
 | **observe** | `observe <exp> --instrument <name>` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
-| **conclusion** | `list`, `show`, `downgrade` (critic-only) |
+| **conclusion** | `list`, `show`, `downgrade` (gate-reviewer-only) |
 | **tree / frontier** | `tree [--goal G-NNNN]`, `frontier [--goal G-NNNN]` |
 | **log** | `log [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
@@ -213,8 +250,10 @@ An instrument is a shell command plus a parser. Four parsers ship built-in:
 | `builtin:size`     | Run once; first numeric column from `size`-style output. |
 | `builtin:scalar`   | Run N times; extract integer via regex; per-sample + BCa CI. |
 
-Tiers are `host` → `qemu` → `hardware`; the firewall enforces escalation order
-(no qemu observations until host has run, etc.).
+Instruments may declare dependencies via `--requires` (e.g.
+`--requires host_test=pass`). The firewall enforces these at observe time: an
+instrument whose dependency has not been observed with a passing result on the
+same experiment is refused. Use `observe --force` to bypass.
 
 ## Statistics
 
@@ -313,11 +352,12 @@ duplicate.
 
 ## Status
 
-Milestones M1–M9 are landed: full hypothesis → experiment → observation →
-conclusion loop, strict firewall, budgets, gitignore, the example project,
-the live dashboard, and the Bubble Tea TUI (`dashboard tui`,
-`internal/cli/tui_*.go`) as a richer read-only second face on the same
-snapshot. Concurrent multi-subagent locking is the next major piece.
+The full research loop is operational: serialized multi-goal lifecycle,
+hypothesis → experiment → observe → analyze → conclude with strict-mode
+firewall, instrument dependencies, budgets, content-addressed artifacts,
+cumulative lesson layer, live dashboard + Bubble Tea TUI, and a two-agent
+model (orchestrator + independent gate reviewer) that replaces the original
+six-agent waterfall.
 
 ## License
 

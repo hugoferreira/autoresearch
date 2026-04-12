@@ -92,9 +92,9 @@ func (v *experimentListView) view(width, height int) string {
 		len(v.filtered), filterLabel(v.statusFilter)))
 	rows := make([]string, len(v.filtered))
 	for i, e := range v.filtered {
-		rows[i] = fmt.Sprintf("%-8s  %s  %-8s  hyp=%-8s  inst=%s",
+		rows[i] = fmt.Sprintf("%-8s  %s  hyp=%-8s  inst=%s",
 			e.ID, padRight(tuiExpStatusBadge(e.Status), 12),
-			e.Tier, e.Hypothesis, strings.Join(e.Instruments, ","))
+			e.Hypothesis, strings.Join(e.Instruments, ","))
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
 }
@@ -173,8 +173,7 @@ func (v *experimentDetailView) view(width, height int) string {
 	}
 	e := v.e
 	lines := []string{}
-	// Title line: bold ID, status badge, tier.
-	lines = append(lines, tuiBold.Render(e.ID)+"  "+tuiExpStatusBadge(e.Status)+"  "+tuiDim.Render("tier="+e.Tier))
+	lines = append(lines, tuiBold.Render(e.ID)+"  "+tuiExpStatusBadge(e.Status))
 	lines = append(lines, "")
 
 	// Aligned key/value table — keys right-padded to the longest key.

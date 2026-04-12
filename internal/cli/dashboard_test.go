@@ -27,7 +27,7 @@ func TestCaptureDashboard_InFlightExcludesReferencedBaselines(t *testing.T) {
 
 	now := time.Now().UTC()
 	baseline := &entity.Experiment{
-		ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, Tier: "host",
+		ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
 		Baseline:               entity.Baseline{Ref: "HEAD"},
 		Instruments:            []string{"host_timing"},
 		Author:                 "agent:designer",
@@ -35,14 +35,14 @@ func TestCaptureDashboard_InFlightExcludesReferencedBaselines(t *testing.T) {
 		ReferencedAsBaselineBy: []string{"C-0001"},
 	}
 	candidate := &entity.Experiment{
-		ID: "E-0002", Hypothesis: "H-0001", Status: entity.ExpMeasured, Tier: "host",
+		ID: "E-0002", Hypothesis: "H-0001", Status: entity.ExpMeasured,
 		Baseline:    entity.Baseline{Ref: "HEAD"},
 		Instruments: []string{"host_timing"},
 		Author:      "agent:designer",
 		CreatedAt:   now,
 	}
 	stuck := &entity.Experiment{
-		ID: "E-0003", Hypothesis: "H-0002", Status: entity.ExpImplemented, Tier: "host",
+		ID: "E-0003", Hypothesis: "H-0002", Status: entity.ExpImplemented,
 		Baseline:    entity.Baseline{Ref: "HEAD"},
 		Instruments: []string{"host_timing"},
 		Author:      "agent:implementer",
@@ -155,7 +155,7 @@ func TestRenderDashboard_FullState(t *testing.T) {
 	impAt := time.Now().UTC().Add(-2*time.Minute - 14*time.Second)
 	snap.InFlight = []dashboardInFlight{
 		{
-			ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+			ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
 			Instruments:   []string{"qemu_cycles", "host_test"},
 			ImplementedAt: &impAt,
 			ElapsedS:      time.Since(impAt).Seconds(),
@@ -184,7 +184,6 @@ func TestRenderDashboard_FullState(t *testing.T) {
 		"C-0001  H-0001  qemu_cycles=750067",
 		"(stalled_for: 2 of 5)",
 		"E-0007",
-		"tier=qemu",
 		"instruments=qemu_cycles,host_test",
 		"hypothesis.add",
 		"experiment.design",
@@ -312,7 +311,7 @@ func newStoreWithBuiltins(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RegisterInstrument("host_timing", store.Instrument{Unit: "seconds", Tier: "host"}); err != nil {
+	if err := s.RegisterInstrument("host_timing", store.Instrument{Unit: "seconds"}); err != nil {
 		t.Fatal(err)
 	}
 	return s

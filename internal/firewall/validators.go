@@ -72,11 +72,6 @@ func ValidateExperiment(e *entity.Experiment, cfg *store.Config) error {
 	if strings.TrimSpace(e.Hypothesis) == "" {
 		return errors.New("experiment must reference a hypothesis")
 	}
-	switch e.Tier {
-	case entity.TierHost, entity.TierQemu, entity.TierHardware:
-	default:
-		return fmt.Errorf("tier must be host, qemu, or hardware; got %q", e.Tier)
-	}
 	if len(e.Instruments) == 0 {
 		return errors.New("experiment must declare at least one instrument")
 	}
@@ -242,27 +237,45 @@ func CheckObservationRequest(instName string, requestedSamples int, exp *entity.
 	return nil
 }
 
-// CheckTierGate enforces the host-first rule: qemu-tier experiments require at
-// least one prior host-tier experiment on the same hypothesis, and hardware
-// experiments are always human-gated. Callers pass priorHostExperiments=true
-// when such a predecessor exists.
-func CheckTierGate(tier string, priorHostExperiments bool, force bool) error {
-	switch tier {
-	case entity.TierHost:
-		return nil
-	case entity.TierQemu:
-		if priorHostExperiments || force {
-			return nil
-		}
-		return errors.New("qemu-tier experiments require a prior host-tier experiment on the same hypothesis (pass --force to override)")
-	case entity.TierHardware:
-		if !force {
-			return errors.New("hardware-tier experiments require explicit --force and a human approver")
-		}
-		return nil
-	default:
-		return fmt.Errorf("unknown tier %q", tier)
+// CheckInstrumentDependencies verifies that every prerequisite declared in the
+// instrument's `requires` list is satisfied by a passing observation on the
+// same experiment. Called from the observe command before running an instrument.
+//
+// Requires entries are "instrument=condition" pairs. v1 supports one condition:
+//   - "pass" — the prerequisite instrument must have at least one observation
+//     with pass=true on this experiment.
+func CheckInstrumentDependencies(instName string, cfg *store.Config, observations []*entity.Observation) error {
+	inst, ok := cfg.Instruments[instName]
+	if !ok {
+		return fmt.Errorf("instrument %q is not registered", instName)
 	}
+	if len(inst.Requires) == 0 {
+		return nil
+	}
+	for _, req := range inst.Requires {
+		parts := strings.SplitN(req, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("malformed requires entry %q (expected instrument=condition)", req)
+		}
+		reqInst, reqCond := parts[0], parts[1]
+		switch reqCond {
+		case "pass":
+			found := false
+			for _, o := range observations {
+				if o.Instrument == reqInst && o.Pass != nil && *o.Pass {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("instrument %q requires %q to have a passing observation on this experiment first (run `autoresearch observe <exp> --instrument %s` before observing with %s)",
+					instName, reqInst, reqInst, instName)
+			}
+		default:
+			return fmt.Errorf("unsupported requires condition %q in %q (only 'pass' is supported)", reqCond, req)
+		}
+	}
+	return nil
 }
 
 // ValidateLesson checks the structural rules of a lesson: non-empty claim,

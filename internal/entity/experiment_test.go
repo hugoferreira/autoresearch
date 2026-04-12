@@ -12,7 +12,6 @@ func TestExperimentRoundTrip(t *testing.T) {
 		ID:         "E-0001",
 		Hypothesis: "H-0001",
 		Status:     entity.ExpDesigned,
-		Tier:       entity.TierHost,
 		Baseline: entity.Baseline{
 			Ref: "HEAD",
 			SHA: "abcdef1234567890",
@@ -37,9 +36,6 @@ func TestExperimentRoundTrip(t *testing.T) {
 	}
 	if back.ID != "E-0001" || back.Hypothesis != "H-0001" {
 		t.Errorf("round trip mismatch: %+v", back)
-	}
-	if back.Tier != entity.TierHost {
-		t.Errorf("tier: got %q, want host", back.Tier)
 	}
 	if len(back.Instruments) != 3 {
 		t.Errorf("instruments: got %d, want 3", len(back.Instruments))

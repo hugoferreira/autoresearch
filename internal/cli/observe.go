@@ -18,6 +18,7 @@ func observeCommands() []*cobra.Command {
 		instName string
 		samples  int
 		author   string
+		force    bool
 	)
 	c := &cobra.Command{
 		Use:   "observe <exp-id>",
@@ -56,6 +57,16 @@ observation firewall, made physical.`,
 			strict := cfg.Mode == "" || cfg.Mode == "strict"
 			if err := firewall.CheckObservationRequest(instName, samples, exp, cfg, strict); err != nil {
 				return err
+			}
+
+			if !force {
+				priorObs, err := s.ListObservationsForExperiment(expID)
+				if err != nil {
+					return err
+				}
+				if err := firewall.CheckInstrumentDependencies(instName, cfg, priorObs); err != nil {
+					return err
+				}
 			}
 
 			inst := cfg.Instruments[instName]
@@ -187,5 +198,6 @@ observation firewall, made physical.`,
 	c.Flags().StringVar(&instName, "instrument", "", "registered instrument name (required)")
 	c.Flags().IntVar(&samples, "samples", 0, "number of samples (timing); 0 uses instrument min_samples or default 5")
 	c.Flags().StringVar(&author, "author", "", "author (default agent:observer)")
+	c.Flags().BoolVar(&force, "force", false, "bypass instrument dependency checks")
 	return []*cobra.Command{c}
 }

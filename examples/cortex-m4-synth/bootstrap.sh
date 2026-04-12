@@ -64,38 +64,43 @@ echo "=> registering instruments"
 "$AR" instrument register host_compile \
     --cmd make,all \
     --parser builtin:passfail \
-    --unit pass --tier host
+    --unit pass
 
 "$AR" instrument register host_test \
     --cmd make,test \
     --parser builtin:passfail \
-    --unit pass --tier host
+    --unit pass
 
 "$AR" instrument register host_timing \
     --cmd build/main \
     --parser builtin:timing \
-    --unit seconds --tier host --min-samples 8
+    --unit seconds --min-samples 8 \
+    --requires host_test=pass
 
 "$AR" instrument register size_flash \
     --cmd size,build/main \
     --parser builtin:size \
-    --unit bytes --tier host
+    --unit bytes
 
-if [ -x ./fake_qemu.sh ]; then
-    # qemu_cycles is a user-chosen name; the PARSER is the generic
-    # builtin:scalar which just runs a command N times and captures an
-    # integer via a regex. Swap the cmd for a real `qemu-system-arm ...`
-    # invocation when you have the toolchain; the pattern stays the same
-    # as long as your firmware still prints `cycles: N` via semihosting.
+if command -v arm-none-eabi-gcc >/dev/null 2>&1 && command -v qemu-system-arm >/dev/null 2>&1; then
+    echo "=> building firmware"
+    make firmware
+
     "$AR" instrument register qemu_cycles \
-        --cmd ./fake_qemu.sh \
+        --cmd qemu-system-arm,-machine,mps2-an386,-kernel,build/firmware.elf,-icount,shift=0,-nographic,-semihosting-config,enable=on,target=native \
         --parser builtin:scalar \
         --pattern 'cycles:\s*(\d+)' \
-        --unit cycles --tier qemu --min-samples 3
+        --unit cycles --min-samples 3 \
+        --requires host_test=pass
+else
+    echo "=> skipping qemu_cycles (install arm-none-eabi-gcc and qemu-system-arm to enable)"
 fi
 
 echo "=> loading goal.md"
 "$AR" goal set --file goal.md
+
+echo "=> setting budget"
+"$AR" budget set --max-experiments 20
 
 cat <<'EOF'
 

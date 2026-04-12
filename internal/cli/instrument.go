@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
@@ -46,10 +47,6 @@ func instrumentListCmd() *cobra.Command {
 			sort.Strings(names)
 			for _, n := range names {
 				inst := insts[n]
-				tier := inst.Tier
-				if tier == "" {
-					tier = "-"
-				}
 				unit := inst.Unit
 				if unit == "" {
 					unit = "-"
@@ -58,7 +55,10 @@ func instrumentListCmd() *cobra.Command {
 				if inst.Pattern != "" {
 					extra = fmt.Sprintf("  pattern=/%s/", inst.Pattern)
 				}
-				w.Textf("  %-16s  tier=%-8s  parser=%-18s  unit=%-12s%s\n", n, tier, inst.Parser, unit, extra)
+				if len(inst.Requires) > 0 {
+					extra += fmt.Sprintf("  requires=%s", strings.Join(inst.Requires, ","))
+				}
+				w.Textf("  %-16s  parser=%-18s  unit=%-12s%s\n", n, inst.Parser, unit, extra)
 			}
 			return nil
 		},
@@ -71,7 +71,7 @@ func instrumentRegisterCmd() *cobra.Command {
 		parser     string
 		pattern    string
 		unit       string
-		tier       string
+		requires   []string
 		minSamples int
 	)
 	c := &cobra.Command{
@@ -91,12 +91,12 @@ func instrumentRegisterCmd() *cobra.Command {
 				Parser:     parser,
 				Pattern:    pattern,
 				Unit:       unit,
-				Tier:       tier,
+				Requires:   requires,
 				MinSamples: minSamples,
 			}
 			if globalDryRun {
 				return w.Emit(
-					fmt.Sprintf("[dry-run] would register instrument %q (tier=%s, unit=%s)", name, tier, unit),
+					fmt.Sprintf("[dry-run] would register instrument %q (unit=%s)", name, unit),
 					map[string]any{"status": "dry-run", "name": name, "instrument": inst},
 				)
 			}
@@ -121,7 +121,7 @@ func instrumentRegisterCmd() *cobra.Command {
 	c.Flags().StringVar(&parser, "parser", "", "parser name (builtin:passfail | builtin:timing | builtin:size | builtin:scalar)")
 	c.Flags().StringVar(&pattern, "pattern", "", "regex with exactly one capture group (required for builtin:scalar)")
 	c.Flags().StringVar(&unit, "unit", "", "unit of measurement (e.g. cycles, bytes, seconds, instructions)")
-	c.Flags().StringVar(&tier, "tier", "", "tier: host | qemu | hardware")
+	c.Flags().StringArrayVar(&requires, "requires", nil, "prerequisite as 'instrument=pass' (repeatable); observe will refuse to run this instrument until prerequisites have passing observations")
 	c.Flags().IntVar(&minSamples, "min-samples", 0, "minimum samples required (strict mode)")
 	return c
 }

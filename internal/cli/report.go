@@ -196,7 +196,7 @@ func renderReportMarkdown(r *reportData) string {
 		sb.WriteString("## Experiments\n\n")
 		for _, blk := range r.Experiments {
 			e := blk.Experiment
-			fmt.Fprintf(&sb, "### %s — %s (%s tier)\n\n", e.ID, e.Status, e.Tier)
+			fmt.Fprintf(&sb, "### %s — %s\n\n", e.ID, e.Status)
 			fmt.Fprintf(&sb, "- **Baseline**: `%s`", e.Baseline.Ref)
 			if e.Baseline.SHA != "" {
 				fmt.Fprintf(&sb, " at `%s`", shortSHA(e.Baseline.SHA))

@@ -37,7 +37,6 @@ type BriefHypothesis struct {
 
 type BriefExperiment struct {
 	ID          string   `json:"id"`
-	Tier        string   `json:"tier"`
 	Instruments []string `json:"instruments"`
 	Baseline    string   `json:"baseline"`
 	BaselineSHA string   `json:"baseline_sha,omitempty"`

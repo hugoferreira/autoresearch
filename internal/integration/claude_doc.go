@@ -195,15 +195,18 @@ the firewall sees.
     autoresearch report             <hyp-id>               # markdown writeup
 
 ### Experiments
-    autoresearch experiment design     <hyp-id> --tier {host|qemu|hardware} --instruments a,b,c --baseline HEAD
+    autoresearch experiment design     <hyp-id> --instruments a,b,c --baseline HEAD
     autoresearch experiment implement  <exp-id>
     autoresearch experiment reset      <exp-id> --reason "..."
     autoresearch experiment worktree   <exp-id>
-    autoresearch experiment list       [--tier ...] [--status ...] [--hypothesis ...]
+    autoresearch experiment list       [--status ...] [--hypothesis ...]
     autoresearch experiment show       <exp-id>
 
-Tier gate: ` + "`qemu`" + ` requires a prior host-tier experiment on the same
-hypothesis (or ` + "`--force`" + `); ` + "`hardware`" + ` always requires ` + "`--force`" + `.
+Instrument dependencies: instruments may declare ` + "`--requires`" + ` dependencies
+(e.g. ` + "`host_test=pass`" + `). When you ` + "`observe`" + `, the CLI checks that all required
+instruments have already been observed with a passing result on the same
+experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
+` + "`observe --force`" + ` to bypass the dependency gate when you know what you're doing.
 
 ### Observations and analysis
     autoresearch observe  <exp-id> --instrument NAME [--samples N]
@@ -237,7 +240,7 @@ hypothesis (or ` + "`--force`" + `); ` + "`hardware`" + ` always requires ` + "`
         --cmd a,b,c \
         --parser builtin:{passfail|timing|size|scalar} \
         [--pattern 'regex with one capture group']  # required for builtin:scalar
-        --unit U --tier {host|qemu|hardware} [--min-samples N]
+        --unit U [--requires inst=pass,...] [--min-samples N]
     autoresearch instrument list
 
 Built-in parsers:
@@ -262,21 +265,21 @@ Examples of ` + "`builtin:scalar`" + ` instruments (the name is your choice):
         --cmd qemu-system-arm,-machine,mps2-an386,-kernel,firmware.elf,-icount,shift=0,-nographic,-semihosting-config,enable=on,target=native \
         --parser builtin:scalar \
         --pattern 'cycles:\s*(\d+)' \
-        --unit cycles --tier qemu --min-samples 3
+        --unit cycles --requires host_test=pass --min-samples 3
 
     # Retired instructions from perf stat on host:
     autoresearch instrument register perf_instructions \
         --cmd sh,-c,"perf stat -e instructions ./build/main 2>&1" \
         --parser builtin:scalar \
         --pattern '([0-9,]+)\s+instructions' \
-        --unit instructions --tier host --min-samples 5
+        --unit instructions --min-samples 5
 
     # Cyclomatic complexity reported by lizard:
     autoresearch instrument register ccn_avg_x100 \
         --cmd sh,-c,"lizard -C 0 src/ | awk '/Avg.CCN/ {printf \"avg_ccn_x100: %d\\n\", $1*100}'" \
         --parser builtin:scalar \
         --pattern 'avg_ccn_x100:\s*(\d+)' \
-        --unit ccn_x100 --tier host
+        --unit ccn_x100
 
 The parser requires an integer. If your tool emits a fractional number,
 scale it (as in the ccn example). If your tool emits multiple metrics,
@@ -293,7 +296,7 @@ fix the input instead.
   registered instruments, including goals with no instrument at all (feature
   delivery goals).
 - ` + "`experiment design`" + `: instruments must be registered; killed hypotheses
-  refuse new experiments; tier gate as above.
+  refuse new experiments.
 - ` + "`observe`" + `: experiment must be ` + "`implemented`" + ` or later; instrument must be
   registered; strict mode rejects ` + "`--samples N`" + ` below the instrument's
   ` + "`min_samples`" + `.
@@ -318,7 +321,7 @@ readable via ` + "`<entity> show <id> --json | jq .body`" + `:
 - ` + "`hypothesis add --rationale \"...\"`" + ` — why this hypothesis, what
   evidence or lesson led you here. Required on every call.
 - ` + "`experiment design --design-notes \"...\"`" + ` — why these instruments,
-  this tier, this baseline. Required on every call.
+  this baseline. Required on every call.
 - ` + "`experiment implement --impl-notes \"...\"`" + ` — what you noticed while
   applying the change; trade-offs, edge cases, anything surprising.
   Required on every call.

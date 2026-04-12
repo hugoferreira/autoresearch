@@ -65,10 +65,9 @@ func (v *instrumentListView) view(width, height int) string {
 	lines = append(lines, "")
 	for _, n := range v.names {
 		inst := v.by[n]
-		tier := emptyDash(inst.Tier)
 		unit := emptyDash(inst.Unit)
-		line := fmt.Sprintf("  %-16s  tier=%-8s  parser=%-18s  unit=%-12s",
-			tuiCyan.Render(n), tier, inst.Parser, unit)
+		line := fmt.Sprintf("  %-16s  parser=%-18s  unit=%-12s",
+			tuiCyan.Render(n), inst.Parser, unit)
 		if inst.Pattern != "" {
 			line += "  " + tuiDim.Render("pattern=/"+inst.Pattern+"/")
 		}

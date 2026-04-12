@@ -46,7 +46,7 @@ cmd/autoresearch/main.go     entry point; maps exit codes (0/1/2/3/4)
 internal/cli/                cobra commands, one file per group + tui_*.go
 internal/entity/             domain types (Goal, Hypothesis, Experiment, …)
 internal/store/              .research/ filesystem store, atomic writes
-internal/firewall/           strict-mode validators + tier gates + budget
+internal/firewall/           strict-mode validators + dependency gates + budget
 internal/instrument/         runner + four built-in parsers
 internal/stats/              gonum-backed BCa bootstrap, Mann–Whitney U
 internal/worktree/           git worktree shell-outs
@@ -96,7 +96,7 @@ This is the project's central design idea. Two enforcement points:
 
 1. **Validators** (`internal/firewall/validators.go`) — `ValidateGoal`,
    `ValidateHypothesis`, `ValidateExperiment`, `CheckObservationRequest`,
-   `CheckTierGate`, `CheckBudgetForNewExperiment`. Run them at the CLI
+   `CheckInstrumentDependencies`, `CheckBudgetForNewExperiment`. Run them at the CLI
    boundary, before touching state.
 2. **Conclusion downgrade** — when `conclude` runs in strict mode, if the
    percentile-bootstrap CI on the fractional delta crosses zero in the wrong
@@ -109,13 +109,15 @@ If you're tempted to weaken either path "to make a test pass" — stop and
 rethink. The whole point of the tool is that supported conclusions are hard
 to get.
 
-## Tier escalation
+## Instrument dependencies
 
-Instruments declare a tier: `host` (cheap, deterministic), `qemu`
-(simulator), `hardware` (real device). The firewall refuses qemu observations
-until host has run for the same experiment, and refuses hardware until qemu
-has. Don't bypass this — it's what keeps Claude from burning hardware
-hours on hypotheses that fail trivially in host.
+Instruments may declare a `Requires` list of `"instrument=pass"` strings
+at registration time (e.g. `--requires host_test=pass`). The firewall
+checks these at observe time: if a required instrument has not yet been
+observed with a passing result on the same experiment, `observe` refuses.
+`observe --force` bypasses the gate. Ordering is expressed
+per-instrument via explicit dependency edges, not as a fixed escalation
+ladder.
 
 ## Worktrees
 
@@ -227,7 +229,7 @@ scroll logic.
 ## Things to avoid
 
 - Adding a hidden flag, env var, or config key that lets agents bypass the
-  firewall, the pause gate, the tier gate, or the budget check.
+  firewall, the pause gate, the dependency gate, or the budget check.
 - Writing to `.research/` from anywhere outside `internal/store/`.
 - Importing `gonum`, `git`, or cobra-internal packages from outside their
   designated wrapper packages.

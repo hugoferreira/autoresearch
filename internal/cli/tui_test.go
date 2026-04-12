@@ -44,7 +44,7 @@ func tuiRichSnapshot() *dashboardSnapshot {
 		Frontier:   []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}},
 		StalledFor: 2,
 		InFlight: []dashboardInFlight{{
-			ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+			ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
 			Instruments: []string{"qemu_cycles", "host_test"}, ImplementedAt: &impAt, ElapsedS: 120,
 		}},
 		RecentEvents: []store.Event{
@@ -131,7 +131,7 @@ func TestTUI_HypothesisDetailOpensLinkedEntities(t *testing.T) {
 		Predicts: entity.Predicts{Instrument: "host_timing", Target: "dsp_fir", Direction: "decrease"},
 	}
 	exps := []*entity.Experiment{{
-		ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Tier: "host", Instruments: []string{"host_timing"},
+		ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Instruments: []string{"host_timing"},
 	}}
 	concls := []*entity.Conclusion{{
 		ID: "C-0001", Hypothesis: "H-0001", Verdict: entity.VerdictSupported,
@@ -169,11 +169,11 @@ func TestTUI_HypothesisDetailOpensLinkedEntities(t *testing.T) {
 func TestTUI_ExperimentList(t *testing.T) {
 	v := newExperimentListView()
 	es := []*entity.Experiment{
-		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Tier: "host", Instruments: []string{"qemu_cycles"}},
+		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Instruments: []string{"qemu_cycles"}},
 	}
 	nv, _ := v.update(expListLoadedMsg{list: es}, nil)
 	out := stripANSI(nv.view(100, 20))
-	for _, want := range []string{"1 experiments", "E-0001", "implemented", "host", "qemu_cycles"} {
+	for _, want := range []string{"1 experiments", "E-0001", "implemented", "qemu_cycles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("experiment list missing %q:\n%s", want, out)
 		}
@@ -183,7 +183,7 @@ func TestTUI_ExperimentList(t *testing.T) {
 func TestTUI_ExperimentDetail(t *testing.T) {
 	v := newExperimentDetailView("E-0007")
 	e := &entity.Experiment{
-		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
 		Instruments: []string{"qemu_cycles"}, Author: "agent:impl",
 		Baseline: entity.Baseline{Ref: "HEAD", SHA: "abc123def456789"},
 	}
@@ -194,7 +194,7 @@ func TestTUI_ExperimentDetail(t *testing.T) {
 	}
 	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs}, nil)
 	out := stripANSI(nv.view(120, 40))
-	for _, want := range []string{"E-0007", "measured", "tier=qemu", "abc123def456", "O-0001", "qemu_cycles=750000", "pass"} {
+	for _, want := range []string{"E-0007", "measured", "abc123def456", "O-0001", "qemu_cycles=750000", "pass"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("experiment detail missing %q:\n%s", want, out)
 		}
@@ -496,8 +496,8 @@ func TestTUI_ArtifactDiffView(t *testing.T) {
 func TestTUI_InstrumentList(t *testing.T) {
 	v := newInstrumentListView()
 	by := map[string]store.Instrument{
-		"qemu_cycles": {Cmd: []string{"bash", "-c", "./run"}, Parser: "builtin:scalar", Pattern: "cycles:(\\d+)", Unit: "cycles", Tier: "qemu", MinSamples: 5},
-		"host_test":   {Parser: "builtin:passfail", Tier: "host"},
+		"qemu_cycles": {Cmd: []string{"bash", "-c", "./run"}, Parser: "builtin:scalar", Pattern: "cycles:(\\d+)", Unit: "cycles", MinSamples: 5},
+		"host_test":   {Parser: "builtin:passfail"},
 	}
 	nv, _ := v.update(instrumentListLoadedMsg{by: by}, nil)
 	out := stripANSI(nv.view(120, 20))
@@ -522,7 +522,7 @@ func TestTUI_ReportView(t *testing.T) {
 func TestTUI_ExperimentDetailWithStats(t *testing.T) {
 	v := newExperimentDetailView("E-0007")
 	e := &entity.Experiment{
-		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
 		Instruments: []string{"qemu_cycles"}, Author: "agent:impl",
 	}
 	obs := []*entity.Observation{
@@ -880,7 +880,7 @@ func TestTUI_ExperimentDetailVisualDump(t *testing.T) {
 	}
 	v := newExperimentDetailView("E-0007")
 	e := &entity.Experiment{
-		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
 		Instruments: []string{"qemu_cycles", "host_test"}, Author: "agent:impl",
 		Worktree: "/Users/bytter/Library/Caches/autoresearch/fir-ab12/worktrees/E-0007",
 		Branch:   "autoresearch/E-0007",

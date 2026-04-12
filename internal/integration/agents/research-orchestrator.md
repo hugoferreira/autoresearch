@@ -83,20 +83,23 @@ autoresearch hypothesis add \
 
 ```sh
 autoresearch experiment design <hyp-id> \
-    --tier {host|qemu|hardware} \
     --baseline HEAD \
     --instruments instA,instB,... \
-    --design-notes "<why these instruments, this tier, this baseline>" \
+    --design-notes "<why these instruments, this baseline>" \
     --author agent:orchestrator --json
 ```
 
-**Tier rules:**
+**Instrument ordering:**
 
-- **Start with `host`** always. Host is cheap; catching broken candidates
-  early saves budget.
-- **Only `qemu`** after a prior host-tier experiment exists for the same
-  hypothesis. Don't pass `--force`.
-- **Never `hardware`** on your own — that needs human approval.
+- Run cheap, fast instruments (compile checks, test suites) first. Their
+  results gate expensive instruments via `--requires` dependencies declared
+  at registration time.
+- If an instrument declares `--requires host_test=pass`, `observe` will
+  refuse until `host_test` has been observed with a passing result on the
+  same experiment. Use `observe --force` only when the human explicitly
+  approves.
+- Order your `observe` calls so that dependency-free instruments run first,
+  then instruments whose dependencies are satisfied.
 
 **Instrument choice** — include the minimum set that answers:
 
@@ -234,7 +237,7 @@ Return a summary to the main session:
 ```
 Completed cycle for H-NNNN
   hypothesis: <claim>
-  experiment: E-NNNN (host tier)
+  experiment: E-NNNN
   verdict:    supported (firewall passed)
   effect:     delta_frac=-0.14 CI [-0.18, -0.10] p=0.003
   lesson:     L-NNNN (if recorded)

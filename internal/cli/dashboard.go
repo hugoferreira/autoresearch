@@ -125,7 +125,6 @@ type dashboardInFlight struct {
 	ID            string     `json:"id"`
 	Hypothesis    string     `json:"hypothesis"`
 	Status        string     `json:"status"`
-	Tier          string     `json:"tier"`
 	Instruments   []string   `json:"instruments"`
 	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
 	ElapsedS      float64    `json:"elapsed_s"`
@@ -237,7 +236,6 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 			ID:          e.ID,
 			Hypothesis:  e.Hypothesis,
 			Status:      e.Status,
-			Tier:        e.Tier,
 			Instruments: append([]string{}, e.Instruments...),
 		}
 		if impAt := findImplementedAt(s, e.ID); impAt != nil {
@@ -574,9 +572,8 @@ func renderDashboardInFlight(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		case entity.ExpMeasured:
 			statusCell = a.yellow(statusCell)
 		}
-		tierCell := fmt.Sprintf("%-8s", r.Tier)
-		fmt.Fprintf(w, "   %-8s  %s  %s %s elapsed  instruments=%s\n",
-			r.ID, statusCell, a.dim("tier="+tierCell), elapsed, strings.Join(r.Instruments, ","))
+		fmt.Fprintf(w, "   %-8s  %s  %s elapsed  instruments=%s\n",
+			r.ID, statusCell, elapsed, strings.Join(r.Instruments, ","))
 	}
 }
 

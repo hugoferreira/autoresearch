@@ -164,6 +164,7 @@ func (v *eventDetailView) view(width, height int) string {
 	lines = append(lines, tuiDim.Render("actor=")+emptyDash(v.e.Actor))
 	lines = append(lines, tuiDim.Render("subject=")+emptyDash(v.e.Subject))
 	lines = append(lines, tuiDim.Render("──────────"))
+	lines = append(lines, tuiBold.Render("Payload:"))
 	if len(v.e.Data) == 0 {
 		lines = append(lines, tuiDim.Render("(no payload)"))
 	} else {

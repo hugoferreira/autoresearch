@@ -15,17 +15,10 @@ const (
 	ExpFailed      = "failed"
 )
 
-const (
-	TierHost     = "host"
-	TierQemu     = "qemu"
-	TierHardware = "hardware"
-)
-
 type Experiment struct {
 	ID                    string    `yaml:"id"                                  json:"id"`
 	Hypothesis            string    `yaml:"hypothesis"                          json:"hypothesis"`
 	Status                string    `yaml:"status"                              json:"status"`
-	Tier                  string    `yaml:"tier"                                json:"tier"`
 	Baseline              Baseline  `yaml:"baseline"                            json:"baseline"`
 	Instruments           []string  `yaml:"instruments"                         json:"instruments"`
 	Worktree              string    `yaml:"worktree,omitempty"                  json:"worktree,omitempty"`

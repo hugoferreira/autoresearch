@@ -36,10 +36,8 @@ func experimentCommands() []*cobra.Command {
 
 func experimentDesignCmd() *cobra.Command {
 	var (
-		tier        string
 		baseline    string
 		instruments []string
-		force       bool
 		author      string
 		wallTimeS   int
 		maxSamples  int
@@ -52,14 +50,11 @@ func experimentDesignCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			hypID := args[0]
-			if tier == "" {
-				return errors.New("--tier is required (host | qemu | hardware)")
-			}
 			if len(instruments) == 0 {
 				return errors.New("--instruments is required (at least one)")
 			}
 			if author == "" {
-				author = "agent:designer"
+				author = "agent:orchestrator"
 			}
 
 			s, err := openStoreLive()
@@ -79,22 +74,6 @@ func experimentDesignCmd() *cobra.Command {
 				return fmt.Errorf("hypothesis %s is killed; cannot design new experiments for it", hypID)
 			}
 
-			priorHost := false
-			prior, err := s.ListExperimentsForHypothesis(hypID)
-			if err != nil {
-				return err
-			}
-			for _, pe := range prior {
-				if pe.Tier == entity.TierHost {
-					priorHost = true
-					break
-				}
-			}
-			if err := firewall.CheckTierGate(tier, priorHost, force); err != nil {
-				return err
-			}
-
-			// Budget dry-up: refuse new experiment design if a budget is exhausted.
 			state, err := s.State()
 			if err != nil {
 				return err
@@ -106,7 +85,6 @@ func experimentDesignCmd() *cobra.Command {
 			e := &entity.Experiment{
 				Hypothesis:  hypID,
 				Status:      entity.ExpDesigned,
-				Tier:        tier,
 				Baseline:    entity.Baseline{Ref: baseline},
 				Instruments: instruments,
 				Budget:      entity.Budget{WallTimeS: wallTimeS, MaxSamples: maxSamples},
@@ -118,7 +96,6 @@ func experimentDesignCmd() *cobra.Command {
 				return err
 			}
 
-			// Resolve the baseline to a full SHA so the record is stable.
 			sha, err := worktree.ResolveRef(globalProjectDir, baseline)
 			if err != nil {
 				return fmt.Errorf("resolve baseline %q: %w", baseline, err)
@@ -127,7 +104,7 @@ func experimentDesignCmd() *cobra.Command {
 
 			if globalDryRun {
 				return w.Emit(
-					fmt.Sprintf("[dry-run] would design experiment for %s (tier=%s, baseline=%s)", hypID, tier, sha[:12]),
+					fmt.Sprintf("[dry-run] would design experiment for %s (baseline=%s)", hypID, sha[:12]),
 					map[string]any{"status": "dry-run", "experiment": e},
 				)
 			}
@@ -142,7 +119,6 @@ func experimentDesignCmd() *cobra.Command {
 			}
 			eventData := map[string]any{
 				"hypothesis":  hypID,
-				"tier":        tier,
 				"baseline":    sha,
 				"instruments": instruments,
 			}
@@ -158,19 +134,17 @@ func experimentDesignCmd() *cobra.Command {
 				return err
 			}
 			return w.Emit(
-				fmt.Sprintf("designed %s for %s (tier=%s, baseline=%s)", id, hypID, tier, sha[:12]),
+				fmt.Sprintf("designed %s for %s (baseline=%s)", id, hypID, sha[:12]),
 				map[string]any{"status": "ok", "id": id, "experiment": e},
 			)
 		},
 	}
-	c.Flags().StringVar(&tier, "tier", "", "host | qemu | hardware (required)")
 	c.Flags().StringVar(&baseline, "baseline", "HEAD", "git ref to use as baseline")
 	c.Flags().StringSliceVar(&instruments, "instruments", nil, "comma-separated instrument names (required)")
-	c.Flags().BoolVar(&force, "force", false, "bypass the tier gate (qemu/hardware)")
-	c.Flags().StringVar(&author, "author", "", "author (e.g. agent:designer, human:alice)")
+	c.Flags().StringVar(&author, "author", "", "author (e.g. agent:orchestrator, human:alice)")
 	c.Flags().IntVar(&wallTimeS, "wall-time-s", 0, "wall-time budget in seconds")
 	c.Flags().IntVar(&maxSamples, "max-samples", 0, "max samples for this experiment")
-	c.Flags().StringVar(&designNotes, "design-notes", "", "prose notes on why these instruments, this tier, this baseline (persisted in the experiment body under `# Design notes`; first 200 chars also land on the experiment.design event)")
+	c.Flags().StringVar(&designNotes, "design-notes", "", "prose notes on why these instruments, this baseline (persisted in the experiment body under `# Design notes`; first 200 chars also land on the experiment.design event)")
 	return c
 }
 
@@ -356,7 +330,7 @@ func experimentWorktreeCmd() *cobra.Command {
 }
 
 func experimentListCmd() *cobra.Command {
-	var status, tier, hyp string
+	var status, hyp string
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List experiments",
@@ -375,9 +349,6 @@ func experimentListCmd() *cobra.Command {
 				if status != "" && e.Status != status {
 					continue
 				}
-				if tier != "" && e.Tier != tier {
-					continue
-				}
 				if hyp != "" && e.Hypothesis != hyp {
 					continue
 				}
@@ -391,14 +362,13 @@ func experimentListCmd() *cobra.Command {
 				return nil
 			}
 			for _, e := range filtered {
-				w.Textf("  %-8s  %-12s  tier=%-8s  hyp=%-8s  instruments=%s\n",
-					e.ID, e.Status, e.Tier, e.Hypothesis, strings.Join(e.Instruments, ","))
+				w.Textf("  %-8s  %-12s  hyp=%-8s  instruments=%s\n",
+					e.ID, e.Status, e.Hypothesis, strings.Join(e.Instruments, ","))
 			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&status, "status", "", "filter by status")
-	c.Flags().StringVar(&tier, "tier", "", "filter by tier")
 	c.Flags().StringVar(&hyp, "hypothesis", "", "filter by hypothesis id")
 	return c
 }
@@ -424,7 +394,6 @@ func experimentShowCmd() *cobra.Command {
 			w.Textf("id:           %s\n", e.ID)
 			w.Textf("hypothesis:   %s\n", e.Hypothesis)
 			w.Textf("status:       %s\n", e.Status)
-			w.Textf("tier:         %s\n", e.Tier)
 			w.Textf("baseline:     %s", e.Baseline.Ref)
 			if e.Baseline.SHA != "" {
 				w.Textf(" (%s)", e.Baseline.SHA[:12])
@@ -466,7 +435,6 @@ func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes 
 		},
 		Experiment: entity.BriefExperiment{
 			ID:          e.ID,
-			Tier:        e.Tier,
 			Instruments: e.Instruments,
 			Baseline:    e.Baseline.Ref,
 			BaselineSHA: e.Baseline.SHA,

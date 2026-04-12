@@ -302,8 +302,8 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 		lines = append(lines, "  "+tuiDim.Render("(none)"))
 	} else {
 		for _, e := range v.exps {
-			lines = append(lines, fmt.Sprintf("  %s  %s  tier=%s  inst=%s",
-				e.ID, tuiExpStatusBadge(e.Status), e.Tier, strings.Join(e.Instruments, ",")))
+			lines = append(lines, fmt.Sprintf("  %s  %s  inst=%s",
+				e.ID, tuiExpStatusBadge(e.Status), strings.Join(e.Instruments, ",")))
 			links = append(links, hypDetailLink{kind: hypDetailLinkExperiment, id: e.ID, line: len(lines) - 1})
 		}
 	}

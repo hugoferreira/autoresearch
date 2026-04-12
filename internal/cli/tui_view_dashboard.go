@@ -405,10 +405,9 @@ func (v *dashboardView) renderInFlightPanel(width, height int) string {
 		if r.ImplementedAt != nil {
 			elapsed = formatElapsed(time.Duration(r.ElapsedS) * time.Second)
 		}
-		line := fmt.Sprintf("%-8s  %s  %s  %s  inst=%s",
+		line := fmt.Sprintf("%-8s  %s  %s  inst=%s",
 			r.ID,
 			tuiExpStatusBadge(r.Status),
-			tuiDim.Render("tier="+r.Tier),
 			elapsed,
 			strings.Join(r.Instruments, ","))
 		lines = append(lines, line)

@@ -40,7 +40,11 @@ type Instrument struct {
 	Pattern    string   `yaml:"pattern,omitempty"`
 	Unit       string   `yaml:"unit"`
 	MinSamples int      `yaml:"min_samples,omitempty"`
-	Tier       string   `yaml:"tier,omitempty"`
+	// Requires lists instrument prerequisites as "instrument=condition" pairs.
+	// Before running this instrument, the observe command checks that each
+	// prerequisite has a passing observation on the same experiment.
+	// v1 condition: "pass" — the prerequisite must have pass=true.
+	Requires   []string `yaml:"requires,omitempty"`
 }
 
 type Budgets struct {
