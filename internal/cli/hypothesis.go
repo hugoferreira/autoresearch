@@ -31,15 +31,16 @@ func hypothesisCommands() []*cobra.Command {
 
 func hypothesisAddCmd() *cobra.Command {
 	var (
-		claim           string
-		parent          string
-		predInstrument  string
-		predTarget      string
-		predDirection   string
-		predMinEffect   float64
-		killIf          []string
-		author          string
-		tags            []string
+		claim          string
+		parent         string
+		predInstrument string
+		predTarget     string
+		predDirection  string
+		predMinEffect  float64
+		killIf         []string
+		author         string
+		tags           []string
+		rationale      string
 	)
 	c := &cobra.Command{
 		Use:   "add",
@@ -86,6 +87,7 @@ func hypothesisAddCmd() *cobra.Command {
 				Author:    author,
 				CreatedAt: nowUTC(),
 				Tags:      tags,
+				Body:      entity.AppendMarkdownSection("", "Rationale", rationale),
 			}
 			if err := firewall.ValidateHypothesis(h, cfg); err != nil {
 				return err
@@ -106,11 +108,15 @@ func hypothesisAddCmd() *cobra.Command {
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
+			eventData := map[string]any{"claim": claim, "parent": parent}
+			if snippet := truncate(strings.TrimSpace(rationale), 200); snippet != "" {
+				eventData["rationale"] = snippet
+			}
 			if err := s.AppendEvent(store.Event{
 				Kind:    "hypothesis.add",
 				Actor:   author,
 				Subject: id,
-				Data:    jsonRaw(map[string]any{"claim": claim, "parent": parent}),
+				Data:    jsonRaw(eventData),
 			}); err != nil {
 				return err
 			}
@@ -129,6 +135,7 @@ func hypothesisAddCmd() *cobra.Command {
 	c.Flags().StringArrayVar(&killIf, "kill-if", nil, "kill criterion; may be repeated (at least one required)")
 	c.Flags().StringVar(&author, "author", "", "author (e.g. human:alice, agent:generator)")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
+	c.Flags().StringVar(&rationale, "rationale", "", "one-line rationale: why this hypothesis, what evidence or lesson led you here (persisted in the hypothesis body under `# Rationale`; first 200 chars also land on the hypothesis.add event)")
 	return c
 }
 

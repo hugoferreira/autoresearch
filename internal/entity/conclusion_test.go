@@ -51,6 +51,9 @@ func TestConclusionRoundTrip(t *testing.T) {
 	if len(back.Observations) != 2 {
 		t.Errorf("observations: %+v", back.Observations)
 	}
+	if back.Body != c.Body {
+		t.Errorf("body round-trip:\n want: %q\n  got: %q", c.Body, back.Body)
+	}
 }
 
 func TestConclusionDowngradeSerialized(t *testing.T) {

@@ -31,10 +31,18 @@ One call to:
         --tier {host|qemu|hardware} \
         --baseline HEAD \
         --instruments instA,instB,... \
+        --design-notes "<one sentence: why these instruments, this tier, this baseline>" \
         --author agent:designer \
         --json
 
 Capture the `.id` field.
+
+The `--design-notes` flag is **required on every call**. It is
+persisted on the experiment record (Experiment.Body → `# Design
+notes`) and read by the implementer (to understand intent), by the
+analyst (when writing the conclusion), and by the critic. The
+rationale you used to speak aloud in the handoff now goes on this
+flag instead.
 
 ## Tier rules
 
@@ -85,4 +93,7 @@ Return:
       tier: host
       baseline: HEAD (<short-sha>)
       instruments: host_compile, host_test, host_timing, size_flash
-      rationale: <one sentence explaining why these instruments, not others>
+
+The rationale is persisted via `--design-notes`. Do not repeat it in
+the handoff. The main session can read it via `experiment show
+<exp-id> --json | jq .body` when it needs the reasoning.

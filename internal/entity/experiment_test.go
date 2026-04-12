@@ -49,4 +49,7 @@ func TestExperimentRoundTrip(t *testing.T) {
 	if back.Budget.MaxSamples != 30 {
 		t.Errorf("budget max_samples: %d", back.Budget.MaxSamples)
 	}
+	if back.Body != e.Body {
+		t.Errorf("body round-trip:\n want: %q\n  got: %q", e.Body, back.Body)
+	}
 }

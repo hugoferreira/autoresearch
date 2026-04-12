@@ -20,17 +20,33 @@ git worktree.
 
 ## Workflow
 
-1. Run `autoresearch experiment implement <exp-id> --json` — creates the
-   worktree. Capture `.worktree` from the response. The worktree lives
-   **outside** the main project tree (under the user cache dir); do NOT
-   look for it inside the project.
-2. `cd` into the worktree.
-3. Make the **minimal** change that tests the hypothesis. Do NOT refactor,
-   clean up, or add unrelated improvements. One hypothesis = one focused
-   change.
-4. Validate locally: run the project's build command AND tests. If they
+1. `cd` into the main project (not a worktree yet), then make the
+   **minimal** change that tests the hypothesis in a scratch copy / in
+   your head so you know what you'll do. Do NOT refactor, clean up, or
+   add unrelated improvements. One hypothesis = one focused change.
+2. Run:
+
+        autoresearch experiment implement <exp-id> \
+            --impl-notes "<one sentence: what the change is, anything surprising you noticed, any trade-off>" \
+            --json
+
+   This creates the worktree and records your notes on the experiment
+   record (Experiment.Body → `# Implementation notes`, appended after
+   the designer's `# Design notes`). Capture `.worktree` from the
+   response. The worktree lives **outside** the main project tree
+   (under the user cache dir); do NOT look for it inside the project.
+
+   The `--impl-notes` flag is **required on every call**. "Anything
+   surprising" is the important part: cache effects you noticed,
+   non-obvious edge cases, why you chose one of several valid
+   implementations. The analyst reads these notes when writing the
+   conclusion. If nothing surprised you, say so explicitly ("clean
+   4× unroll, no surprises").
+3. `cd` into the worktree.
+4. Apply the change.
+5. Validate locally: run the project's build command AND tests. If they
    fail, debug — do not push through.
-5. Commit on the experiment branch:
+6. Commit on the experiment branch:
 
         git -c user.email="agent@autoresearch" \
             -c user.name="research-implementer" \

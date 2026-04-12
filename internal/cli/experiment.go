@@ -42,6 +42,7 @@ func experimentDesignCmd() *cobra.Command {
 		author      string
 		wallTimeS   int
 		maxSamples  int
+		designNotes string
 	)
 	c := &cobra.Command{
 		Use:   "design <hyp-id>",
@@ -110,6 +111,7 @@ func experimentDesignCmd() *cobra.Command {
 				Budget:      entity.Budget{WallTimeS: wallTimeS, MaxSamples: maxSamples},
 				Author:      author,
 				CreatedAt:   nowUTC(),
+				Body:        entity.AppendMarkdownSection("", "Design notes", designNotes),
 			}
 			if err := firewall.ValidateExperiment(e, cfg); err != nil {
 				return err
@@ -137,16 +139,20 @@ func experimentDesignCmd() *cobra.Command {
 			if err := s.WriteExperiment(e); err != nil {
 				return err
 			}
+			eventData := map[string]any{
+				"hypothesis":  hypID,
+				"tier":        tier,
+				"baseline":    sha,
+				"instruments": instruments,
+			}
+			if snippet := truncate(strings.TrimSpace(designNotes), 200); snippet != "" {
+				eventData["design_notes"] = snippet
+			}
 			if err := s.AppendEvent(store.Event{
 				Kind:    "experiment.design",
 				Actor:   author,
 				Subject: id,
-				Data: jsonRaw(map[string]any{
-					"hypothesis":  hypID,
-					"tier":        tier,
-					"baseline":    sha,
-					"instruments": instruments,
-				}),
+				Data:    jsonRaw(eventData),
 			}); err != nil {
 				return err
 			}
@@ -163,11 +169,13 @@ func experimentDesignCmd() *cobra.Command {
 	c.Flags().StringVar(&author, "author", "", "author (e.g. agent:designer, human:alice)")
 	c.Flags().IntVar(&wallTimeS, "wall-time-s", 0, "wall-time budget in seconds")
 	c.Flags().IntVar(&maxSamples, "max-samples", 0, "max samples for this experiment")
+	c.Flags().StringVar(&designNotes, "design-notes", "", "prose notes on why these instruments, this tier, this baseline (persisted in the experiment body under `# Design notes`; first 200 chars also land on the experiment.design event)")
 	return c
 }
 
 func experimentImplementCmd() *cobra.Command {
-	return &cobra.Command{
+	var implNotes string
+	c := &cobra.Command{
 		Use:   "implement <exp-id>",
 		Short: "Spawn the experiment's worktree and mark it implemented",
 		Args:  cobra.ExactArgs(1),
@@ -211,14 +219,19 @@ func experimentImplementCmd() *cobra.Command {
 			e.Worktree = wtPath
 			e.Branch = branch
 			e.Status = entity.ExpImplemented
+			e.Body = entity.AppendMarkdownSection(e.Body, "Implementation notes", implNotes)
 			if err := s.WriteExperiment(e); err != nil {
 				return err
+			}
+			eventData := map[string]any{"worktree": wtPath, "branch": branch}
+			if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
+				eventData["impl_notes"] = snippet
 			}
 			if err := s.AppendEvent(store.Event{
 				Kind:    "experiment.implement",
 				Actor:   "system",
 				Subject: id,
-				Data:    jsonRaw(map[string]string{"worktree": wtPath, "branch": branch}),
+				Data:    jsonRaw(eventData),
 			}); err != nil {
 				return err
 			}
@@ -228,6 +241,8 @@ func experimentImplementCmd() *cobra.Command {
 			)
 		},
 	}
+	c.Flags().StringVar(&implNotes, "impl-notes", "", "prose notes on what you noticed while applying the change — trade-offs, edge cases, anomalies (appended to the experiment body under `# Implementation notes`; first 200 chars also land on the experiment.implement event)")
+	return c
 }
 
 func experimentResetCmd() *cobra.Command {

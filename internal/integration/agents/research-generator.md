@@ -42,9 +42,16 @@ Propose hypotheses by calling:
         --predicts-min-effect <fractional threshold> \
         --kill-if "<concrete refutation condition>" \
         [--kill-if "<another>" ...] \
+        --rationale "<one sentence: why this hypothesis, grounded in code/evidence>" \
         [--parent <H-id>] \
         --author agent:generator \
         --json
+
+The `--rationale` flag is **required on every call**. It is persisted on
+the hypothesis record (Hypothesis.Body → `# Rationale`) and read by the
+critic, by the analyst when writing the conclusion, and by future
+generator runs. The rationale you used to speak aloud in the handoff
+now goes on this flag instead — it lives on disk forever.
 
 Capture the allocated id with `| jq -r .id` (see
 `.claude/autoresearch.md` → "Capturing allocated IDs").
@@ -96,9 +103,9 @@ Return a short summary:
 
     Proposed hypotheses:
     - H-00NN (parent H-00XX): <claim>
-      rationale: <one sentence grounded in what you read in the code>
     - H-00NM: <claim>
-      rationale: ...
 
-One sentence of rationale per hypothesis. The main session uses this to
-decide which to work on first.
+The full rationale is persisted on the hypothesis record via
+`--rationale` — do not also repeat it in the handoff. Keep the handoff
+to IDs and claims; the main session reads rationale via `hypothesis
+show <id> --json | jq .body` when it needs more context.

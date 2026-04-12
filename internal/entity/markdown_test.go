@@ -43,3 +43,44 @@ func TestExtractSection(t *testing.T) {
 		t.Errorf("steering: got %q", got)
 	}
 }
+
+func TestAppendMarkdownSection(t *testing.T) {
+	t.Run("empty body", func(t *testing.T) {
+		got := entity.AppendMarkdownSection("", "Rationale", "cache-friendly stride")
+		want := "# Rationale\n\ncache-friendly stride\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+	t.Run("append to existing body", func(t *testing.T) {
+		body := "# Design notes\n\nhost tier only\n"
+		got := entity.AppendMarkdownSection(body, "Implementation notes", "unrolled by 4")
+		want := "# Design notes\n\nhost tier only\n\n# Implementation notes\n\nunrolled by 4\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+	t.Run("duplicate headings append rather than merge", func(t *testing.T) {
+		body := "# Notes\n\nfirst pass\n"
+		got := entity.AppendMarkdownSection(body, "Notes", "second pass")
+		want := "# Notes\n\nfirst pass\n\n# Notes\n\nsecond pass\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+	t.Run("empty content is a no-op", func(t *testing.T) {
+		body := "# Rationale\n\nwhy\n"
+		got := entity.AppendMarkdownSection(body, "Notes", "   ")
+		if got != body {
+			t.Errorf("whitespace-only content should be a no-op, got %q", got)
+		}
+	})
+	t.Run("trailing newlines normalized", func(t *testing.T) {
+		body := "# Notes\n\nexisting\n\n\n\n"
+		got := entity.AppendMarkdownSection(body, "Rationale", "new")
+		want := "# Notes\n\nexisting\n\n# Rationale\n\nnew\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}

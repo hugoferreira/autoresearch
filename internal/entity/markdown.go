@@ -43,6 +43,10 @@ func ParseFrontmatter(data []byte) (yamlBytes, body []byte, err error) {
 	after := rest[end+1:]
 	after = bytes.TrimPrefix(after, []byte("---\r\n"))
 	after = bytes.TrimPrefix(after, []byte("---\n"))
+	// WriteFrontmatter writes a blank line separator after the closing ---.
+	// Consume it so Body round-trips exactly as the caller set it.
+	after = bytes.TrimPrefix(after, []byte("\r\n"))
+	after = bytes.TrimPrefix(after, []byte("\n"))
 	return yamlBytes, after, nil
 }
 
@@ -62,6 +66,27 @@ func WriteFrontmatter(v any, body string) ([]byte, error) {
 		buf.WriteString("\n")
 	}
 	return buf.Bytes(), nil
+}
+
+// AppendMarkdownSection returns body with a new "# <heading>" section
+// containing content appended at the end, separated by a single blank line.
+// Content is TrimSpace'd; empty content is a no-op (returns body unchanged).
+//
+// The semantics are strict-append: if a previous section with the same heading
+// already exists in body, a new one is written after it rather than merged or
+// overwritten. This preserves the sequence of updates and keeps the notebook
+// layer auditable — a reader sees what was added when, not just the latest
+// revision.
+func AppendMarkdownSection(body, heading, content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return body
+	}
+	section := fmt.Sprintf("# %s\n\n%s\n", heading, content)
+	if body == "" {
+		return section
+	}
+	return strings.TrimRight(body, "\n") + "\n\n" + section
 }
 
 // ExtractSection returns the contents of a top-level markdown section

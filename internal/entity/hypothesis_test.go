@@ -42,4 +42,7 @@ func TestHypothesisRoundTrip(t *testing.T) {
 	if back.Predicts.Instrument != "qemu_cycles" {
 		t.Errorf("predicts instrument: %q", back.Predicts.Instrument)
 	}
+	if back.Body != h.Body {
+		t.Errorf("body round-trip:\n want: %q\n  got: %q", h.Body, back.Body)
+	}
 }
