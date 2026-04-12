@@ -16,18 +16,21 @@ var _ = errors.New
 var Version = "dev"
 
 func installClaudeCmd() *cobra.Command {
+	var trustShell bool
 	c := &cobra.Command{
 		Use:   "claude",
 		Short: "Install Claude Code integration (docs, settings, subagent prompts)",
 	}
 	c.AddCommand(installClaudeDocsCmd(), installClaudeAgentsCmd())
+	c.PersistentFlags().BoolVar(&trustShell, "trust-shell", false,
+		"add Bash(*) to allow all shell commands without prompts (subagents in worktrees run make, gcc, git, etc.)")
 	c.RunE = func(cmd *cobra.Command, args []string) error {
 		w := output.Default(globalJSON)
 		wrote, err := writeClaudeDoc(globalProjectDir, false, globalDryRun)
 		if err != nil {
 			return err
 		}
-		entries := []string{integration.AutoresearchAllowEntry}
+		entries := claudeAllowEntries(trustShell)
 		var settingsRes integration.ClaudeSettingsResult
 		if globalDryRun {
 			settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
@@ -82,7 +85,8 @@ func installClaudeDocsCmd() *cobra.Command {
 				return err
 			}
 
-			entries := []string{integration.AutoresearchAllowEntry}
+			trustShell, _ := cmd.Flags().GetBool("trust-shell")
+			entries := claudeAllowEntries(trustShell)
 			var settingsRes integration.ClaudeSettingsResult
 			if globalDryRun {
 				settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
@@ -195,6 +199,22 @@ func claudeSettingsResultToMap(r integration.ClaudeSettingsResult) map[string]an
 		"action": action,
 		"added":  r.Added,
 	}
+}
+
+// claudeAllowEntries builds the permission entries list. Always includes the
+// CLI allow and worktree file permissions. With trustShell, adds Bash(*)
+// so subagents can run arbitrary shell commands without prompts.
+func claudeAllowEntries(trustShell bool) []string {
+	entries := []string{integration.AutoresearchAllowEntry}
+	if trustShell {
+		entries = append(entries, "Bash(*)")
+	}
+	if s, err := openStore(); err == nil {
+		if wtRoot, err := s.WorktreesRoot(); err == nil {
+			entries = append(entries, integration.WorktreeAllowEntries(wtRoot)...)
+		}
+	}
+	return entries
 }
 
 // writeClaudeDoc writes .claude/autoresearch.md under projectDir.

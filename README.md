@@ -104,14 +104,19 @@ dashboard or event log.
 
 ```sh
 cd path/to/your/project
-autoresearch init --build-cmd "make all" --test-cmd "make test"
+autoresearch init --build-cmd "make all" --test-cmd "make test" --trust-shell
 autoresearch instrument register host_timing \
     --cmd "./build/main" --parser builtin:timing --unit s --min-samples 30
 autoresearch instrument register size_flash \
     --cmd "size ./build/main" --parser builtin:size --unit bytes
 autoresearch goal set --file goal.md
-autoresearch dashboard --refresh 2
+autoresearch dashboard tui
 ```
+
+`--trust-shell` adds `Bash(*)` to `.claude/settings.json` so subagents can run
+shell commands (make, gcc, git, etc.) in experiment worktrees without prompts.
+Omit it for a tighter permission model where each shell command is approved
+individually. You can add it later with `autoresearch install claude --trust-shell`.
 
 `autoresearch init` installs both agent integrations automatically. From that
 point on, stop typing mutating `autoresearch` verbs yourself. Open Claude Code
@@ -133,7 +138,8 @@ prompts. Codex reads the managed `AGENTS.md` block,
 
 [`examples/cortex-m4-synth/`](examples/cortex-m4-synth) is a ready-to-run
 project: a naive direct-form FIR filter (`src/dsp_fir.c`) with host-timing
-and fake-qemu instruments, a 20% reduction goal, and a 20-experiment budget.
+and real QEMU instruments (requires `arm-none-eabi-gcc` + `qemu-system-arm`),
+a 20% reduction goal, and a 20-experiment budget.
 
 ```sh
 # Copy it out of the repo so autoresearch can use its own git worktrees
@@ -193,7 +199,7 @@ is paused.
 | **instrument** | `list`, `register`, `run` |
 | **budget** | `show`, `set` |
 | **gc** | `gc` |
-| **install** | `install claude [docs\|agents]`, `install codex [docs\|agents]` |
+| **install** | `install claude [docs\|agents] [--trust-shell]`, `install codex [docs\|agents]` |
 | **dashboard** | `dashboard [--refresh N] [--color auto\|always\|never]`, `dashboard tui` |
 
 Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,

@@ -145,6 +145,7 @@ func displayReason(reason string) string {
 
 func initCmd() *cobra.Command {
 	var buildCmd, testCmd string
+	var trustShell bool
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize .research/ in the target project",
@@ -195,7 +196,7 @@ suite.`,
 				if err != nil {
 					return err
 				}
-				claudeSettings, err := integration.PreviewClaudeSettings(globalProjectDir, []string{integration.AutoresearchAllowEntry})
+				claudeSettings, err := integration.PreviewClaudeSettings(globalProjectDir, claudeAllowEntries(trustShell))
 				if err != nil {
 					return err
 				}
@@ -292,12 +293,12 @@ suite.`,
 				return fmt.Errorf("install subagents: %w", err)
 			}
 
-			// Merge autoresearch's Bash allow entry into .claude/settings.json
-			// so the main session can invoke autoresearch verbs without the
-			// permission prompt firing on every call.
+			// Merge autoresearch's allow entries into .claude/settings.json
+			// so the main session and subagents can invoke autoresearch verbs
+			// and read/edit worktree files without permission prompts.
 			settingsRes, err := integration.EnsureClaudeSettings(
 				globalProjectDir,
-				[]string{integration.AutoresearchAllowEntry},
+				claudeAllowEntries(trustShell),
 			)
 			if err != nil {
 				return fmt.Errorf("update claude settings: %w", err)
@@ -353,6 +354,7 @@ suite.`,
 	}
 	cmd.Flags().StringVar(&buildCmd, "build-cmd", "", "shell command that builds the project (required)")
 	cmd.Flags().StringVar(&testCmd, "test-cmd", "", "shell command that runs the test suite (required)")
+	cmd.Flags().BoolVar(&trustShell, "trust-shell", false, "add Bash(*) to .claude/settings.json so subagents can run any shell command without prompts")
 	return cmd
 }
 

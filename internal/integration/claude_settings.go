@@ -14,12 +14,29 @@ import (
 // decide which tool invocations run without prompting the user.
 const ClaudeSettingsRelPath = ".claude/settings.json"
 
-// AutoresearchAllowEntry is the single permission grant autoresearch installs
-// so that `autoresearch <verb>` invocations from the main session don't
-// prompt on every call. Claude Code's Bash permission matcher treats the
-// pattern as "command name + args prefix"; `autoresearch:*` covers every
-// verb and flag combination.
+// AutoresearchAllowEntry is the permission grant for CLI invocations so that
+// `autoresearch <verb>` calls from the main session don't prompt on every
+// call. Claude Code's Bash permission matcher treats the pattern as "command
+// name + args prefix"; `autoresearch:*` covers every verb and flag combo.
 const AutoresearchAllowEntry = "Bash(autoresearch:*)"
+
+// WorktreeAllowEntries returns permission entries for the worktree root
+// directory so that subagents working in experiment worktrees (which live
+// outside the project tree, typically under the user cache dir) don't
+// trigger permission prompts on every file or shell operation.
+//
+// Claude Code's Bash permission is command-prefix only — there's no way to
+// scope it to a directory. We use Read/Edit/Write path globs for file
+// operations and rely on the existing Bash(autoresearch:*) entry for CLI
+// calls. Shell commands in worktrees (make, gcc, git, etc.) will still
+// prompt unless the user adds broader Bash permissions themselves.
+func WorktreeAllowEntries(worktreesRoot string) []string {
+	return []string{
+		"Read(" + worktreesRoot + "/**)",
+		"Edit(" + worktreesRoot + "/**)",
+		"Write(" + worktreesRoot + "/**)",
+	}
+}
 
 // ClaudeSettingsResult reports what EnsureClaudeSettings did. Exactly one of
 // Created / Updated / AlreadyOK is true on success.
