@@ -172,11 +172,37 @@ they're easy to violate accidentally:
   disables when piped. `always` exists specifically so `watch -c
   autoresearch dashboard --color always` works — keep that path alive.
 
-The Bubble Tea TUI (`dashboard tui`, `internal/cli/tui_*.go`, currently
-untracked on master) is the second face of the same snapshot. The CLI
-`dashboard` is the source of truth for what data appears; if you extend
-the dashboard data model, update both views and keep `captureDashboard`
-as the single capture path.
+The Bubble Tea TUI (`dashboard tui`, `internal/cli/tui_*.go`) is the
+second face of the same snapshot. The CLI `dashboard` is the source of
+truth for what data appears; if you extend the dashboard data model,
+update both views and keep `captureDashboard` as the single capture
+path. The TUI is deliberately a superset of the one-shot view — it
+navigates every read-only CLI surface (hypotheses, experiments,
+conclusions, event log, artifacts, report, tree, frontier, goal,
+status, instruments) but never mutates `.research/`.
+
+TUI package layout (all under `internal/cli/`):
+
+- `tui_command.go` — `dashboard tui` cobra wiring
+- `tui_app.go` — root bubbletea model, view stack, key router, chrome
+- `tui_view_<entity>.go` — per-entity list + detail views
+- `tui_view_dashboard.go` / `tui_view_misc.go` — dashboard home + the
+  small single-screen views (tree, frontier, goal, status, instruments)
+- `tui_view_artifact.go` — artifact list + viewport viewer + diff
+- `tui_view_report.go` — glamour-rendered markdown report
+- `tui_view_kinds.go` — stable view-kind identifiers used by `jumpTo`
+  to canonicalize the breadcrumb on top-level jumps
+- `tui_helpers.go` — shared line layout, list scaffolding, table
+  renderers, tree helpers (reach into this instead of duplicating)
+- `tui_pager.go` — `pagerState` wrapping `bubbles/viewport`, used by
+  the three scrollable content viewers
+- `tui_json.go` — `prettyJSON` tokenizer for colorized event payloads
+- `tui_style.go` — lipgloss palette aligned with the `ansi` package
+
+When adding a new TUI view: pick `list`/`detail`/`pager` shape, add a
+`kind()` method to `tui_view_kinds.go`, and use the helpers in
+`tui_helpers.go` / `tui_pager.go` instead of hand-rolling cursor or
+scroll logic.
 
 ## When making changes
 

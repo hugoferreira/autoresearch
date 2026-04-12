@@ -180,6 +180,7 @@ autoresearch dashboard                  # one-shot composite snapshot
 autoresearch dashboard --refresh 2      # live, auto-redraws every 2s (TTY only)
 autoresearch dashboard --json           # structured snapshot for tools
 watch -c autoresearch dashboard --color always   # alternate way to live-poll
+autoresearch dashboard tui              # interactive read-only TUI
 autoresearch log --follow               # tail events.jsonl as they arrive
 ```
 
@@ -188,14 +189,55 @@ external polling loop if you want streaming JSON). `log --follow` polls
 `events.jsonl` every 200 ms — no fsnotify dep, works the same over SSH.
 Both verbs work while the project is paused.
 
+### `dashboard tui`
+
+A Bubble Tea TUI built on top of the same `captureDashboard` snapshot.
+Richer than the one-shot view, but the read-only constraint is
+identical: it never mutates `.research/`, and there are no "quick
+action" keystrokes — steering is still conversational with the main
+Claude session.
+
+The TUI surfaces every read-only CLI verb as a navigable view:
+
+- **Dashboard** (home): responsive 2-column layout with hypothesis
+  tree, frontier, in-flight experiments, and recent events. Tab to
+  cycle focus, Enter to drill into the selected row (hypothesis,
+  experiment, conclusion, or event) in the right column.
+- **Hypothesis / Experiment / Conclusion** list + detail with filter
+  cycling (`f`) and per-instrument summary stats via
+  `stats.Summarize`.
+- **Event log**: full log with follow mode, kind filter, and an event
+  detail view that pretty-prints JSON payloads with colorized keys,
+  strings, numbers, and literals.
+- **Tree / Frontier / Goal / Status / Instruments**: full-screen
+  versions of the corresponding CLI verbs.
+- **Artifacts**: list + scrollable viewer with head/tail/full/grep
+  modes. `d` prompts for a second SHA and shows the unified diff,
+  colorized.
+- **Report**: `buildReport` markdown rendered by `glamour` with a
+  width-keyed cache for resize handling.
+
+Top-level jump keys reach every view from anywhere:
+
+```
+H hypotheses   E experiments  C conclusions   L event log
+T tree         F frontier     G goal          S status
+A artifacts    I instruments  R report picker D dashboard
+?  help overlay      Esc / ⌫  pop current view      q / Ctrl-C  quit
+```
+
+Jumps canonicalize the view stack, so pressing `H` twice does not grow
+the breadcrumb — the second press is a no-op, and jumping to a view
+from deeper in the stack truncates back to it instead of pushing a
+duplicate.
+
 ## Status
 
 Milestones M1–M9 are landed: full hypothesis → experiment → observation →
 conclusion loop, strict firewall, budgets, gitignore, the example project,
-and the live dashboard. The Bubble Tea TUI (`dashboard tui`,
-`internal/cli/tui_*.go`) is in active development as a richer second face
-on the same read-only snapshot. Concurrent multi-subagent locking is the
-next major piece.
+the live dashboard, and the Bubble Tea TUI (`dashboard tui`,
+`internal/cli/tui_*.go`) as a richer read-only second face on the same
+snapshot. Concurrent multi-subagent locking is the next major piece.
 
 ## License
 
