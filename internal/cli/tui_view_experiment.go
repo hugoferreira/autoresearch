@@ -267,6 +267,10 @@ func (v *experimentDetailView) view(width, height int) string {
 		}
 		lines = append(lines, renderTable(srows, "  "))
 	}
+	if !v.compact && strings.TrimSpace(e.Body) != "" {
+		lines = append(lines, "")
+		lines = append(lines, strings.TrimRight(renderMarkdown(width, e.Body), "\n"))
+	}
 	return clampLines(strings.Join(lines, "\n"), height, width)
 }
 

@@ -341,5 +341,9 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 			lines = append(lines, tuiDim.Render(fmt.Sprintf("  … %d more", len(v.obs)-max)))
 		}
 	}
+	if !v.compact && strings.TrimSpace(h.Body) != "" {
+		lines = append(lines, "")
+		lines = append(lines, strings.TrimRight(renderMarkdown(width, h.Body), "\n"))
+	}
 	return lines, links
 }
