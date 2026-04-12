@@ -22,7 +22,9 @@ import (
 )
 
 func dashboardCommands() []*cobra.Command {
-	return []*cobra.Command{dashboardCmd()}
+	root := dashboardCmd()
+	root.AddCommand(dashboardTuiCmd())
+	return []*cobra.Command{root}
 }
 
 func dashboardCmd() *cobra.Command {

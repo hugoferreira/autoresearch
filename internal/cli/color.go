@@ -71,7 +71,6 @@ func (a *ansi) cyan(s string) string    { return a.wrap("36", s) }
 
 // boldYellow and similar combinations show up often enough to warrant shortcuts.
 func (a *ansi) boldYellow(s string) string { return a.bold(a.yellow(s)) }
-func (a *ansi) boldRed(s string) string    { return a.bold(a.red(s)) }
 
 var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 

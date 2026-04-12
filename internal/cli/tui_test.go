@@ -1,0 +1,669 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/stats"
+	"github.com/bytter/autoresearch/internal/store"
+)
+
+// Smoke tests for TUI views. We skip the real Bubble Tea program loop and
+// exercise each view by feeding it the *Loaded message it would normally
+// receive from its store-read cmd, then calling View(). This verifies the
+// render pipeline without needing a real .research/ on disk.
+
+func tuiRichSnapshot() *dashboardSnapshot {
+	now := time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC)
+	flash := 65536.0
+	impAt := now.Add(-2 * time.Minute)
+	snap := &dashboardSnapshot{
+		Project: "/tmp/fir",
+		Mode:    "strict",
+		Goal: &entity.Goal{
+			Objective: entity.Objective{
+				Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.2,
+			},
+			Constraints: []entity.Constraint{
+				{Instrument: "size_flash", Max: &flash},
+				{Instrument: "host_test", Require: "pass"},
+			},
+		},
+		Counts: map[string]int{"hypotheses": 3, "experiments": 5, "observations": 12, "conclusions": 2},
+		Tree: []*treeNode{
+			{ID: "H-0001", Claim: "unrolling dsp_fir", Status: entity.StatusSupported, Author: "human"},
+			{ID: "H-0002", Claim: "fixed-point rewrite", Status: entity.StatusOpen, Author: "agent:gen",
+				Children: []*treeNode{
+					{ID: "H-0003", Claim: "sub: Q15 only", Status: entity.StatusInconclusive, Author: "agent:gen"},
+				}},
+		},
+		Frontier:   []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}},
+		StalledFor: 2,
+		InFlight: []dashboardInFlight{{
+			ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+			Instruments: []string{"qemu_cycles", "host_test"}, ImplementedAt: &impAt, ElapsedS: 120,
+		}},
+		RecentEvents: []store.Event{
+			{Ts: now, Kind: "hypothesis.add", Actor: "agent:gen", Subject: "H-0003"},
+			{Ts: now, Kind: "experiment.design", Actor: "agent:des", Subject: "E-0007"},
+		},
+		CapturedAt: now,
+	}
+	snap.Budgets.Limits.MaxExperiments = 20
+	snap.Budgets.Limits.MaxWallTimeH = 8
+	snap.Budgets.Limits.FrontierStallK = 5
+	snap.Budgets.Usage.Experiments = 5
+	snap.Budgets.Usage.ElapsedH = 1.2
+	return snap
+}
+
+func TestTUI_DashboardRenders(t *testing.T) {
+	v := newDashboardView()
+	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+	out := nv.view(140, 40)
+	for _, want := range []string{
+		"Goal:", "decrease qemu_cycles", "size_flash", "5/20 exp",
+		"Hypothesis tree", "H-0001", "H-0003",
+		"Frontier", "C-0001",
+		"In flight", "E-0007",
+		"Recent events", "hypothesis.add",
+	} {
+		if !strings.Contains(stripANSI(out), want) {
+			t.Errorf("dashboard missing %q:\n%s", want, stripANSI(out))
+		}
+	}
+}
+
+func TestTUI_DashboardNarrowFallback(t *testing.T) {
+	v := newDashboardView()
+	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+	out := stripANSI(nv.view(80, 40))
+	// Narrow width still renders the key sections in single-column layout.
+	for _, want := range []string{"Hypothesis tree", "Frontier", "H-0001"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("narrow dashboard missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_HypothesisList(t *testing.T) {
+	v := newHypothesisListView()
+	hs := []*entity.Hypothesis{
+		{ID: "H-0001", Claim: "one", Status: entity.StatusOpen, Author: "human"},
+		{ID: "H-0002", Claim: "two", Status: entity.StatusSupported, Author: "agent"},
+	}
+	nv, _ := v.update(hypListLoadedMsg{list: hs}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"2 hypotheses", "H-0001", "H-0002", "supported"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("hypothesis list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_HypothesisDetail(t *testing.T) {
+	v := newHypothesisDetailView("H-0007")
+	h := &entity.Hypothesis{
+		ID: "H-0007", Parent: "H-0001", Claim: "tiled kernel", Status: entity.StatusOpen,
+		Author: "agent:gen",
+		Predicts: entity.Predicts{
+			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", MinEffect: 0.1,
+		},
+		KillIf: []string{"size_flash grows >10%"},
+	}
+	nv, _ := v.update(hypDetailLoadedMsg{h: h}, nil)
+	out := stripANSI(nv.view(100, 30))
+	for _, want := range []string{"H-0007", "tiled kernel", "Predicts:", "decrease qemu_cycles", "Kill if:", "size_flash grows"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("hypothesis detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ExperimentList(t *testing.T) {
+	v := newExperimentListView()
+	es := []*entity.Experiment{
+		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Tier: "host", Instruments: []string{"qemu_cycles"}},
+	}
+	nv, _ := v.update(expListLoadedMsg{list: es}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"1 experiments", "E-0001", "implemented", "host", "qemu_cycles"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("experiment list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ExperimentDetail(t *testing.T) {
+	v := newExperimentDetailView("E-0007")
+	e := &entity.Experiment{
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+		Instruments: []string{"qemu_cycles"}, Author: "agent:impl",
+		Baseline: entity.Baseline{Ref: "HEAD", SHA: "abc123def456789"},
+	}
+	pass := true
+	ciLow, ciHigh := 730000.0, 770000.0
+	obs := []*entity.Observation{
+		{ID: "O-0001", Experiment: "E-0007", Instrument: "qemu_cycles", Value: 750000, Unit: "cycles", Samples: 10, CILow: &ciLow, CIHigh: &ciHigh, Pass: &pass},
+	}
+	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs}, nil)
+	out := stripANSI(nv.view(120, 40))
+	for _, want := range []string{"E-0007", "measured", "tier=qemu", "abc123def456", "O-0001", "qemu_cycles=750000", "pass"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("experiment detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ConclusionList(t *testing.T) {
+	v := newConclusionListView()
+	cs := []*entity.Conclusion{
+		{ID: "C-0001", Hypothesis: "H-0001", Verdict: entity.VerdictSupported,
+			Effect: entity.Effect{DeltaFrac: -0.25, PValue: 0.01}},
+		{ID: "C-0002", Hypothesis: "H-0002", Verdict: entity.VerdictInconclusive,
+			Strict: entity.Strict{RequestedFrom: "supported", Reasons: []string{"p>0.05"}}},
+	}
+	nv, _ := v.update(concListLoadedMsg{list: cs}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{"2 conclusions", "C-0001", "supported", "C-0002", "↓from supported"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("conclusion list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ConclusionDetail(t *testing.T) {
+	v := newConclusionDetailView("C-0042")
+	c := &entity.Conclusion{
+		ID: "C-0042", Hypothesis: "H-0007", Verdict: entity.VerdictInconclusive,
+		Author: "agent:analyst", CandidateExp: "E-0007",
+		Strict:   entity.Strict{RequestedFrom: "supported", Reasons: []string{"size_flash exceeded"}},
+		Effect:   entity.Effect{Instrument: "qemu_cycles", DeltaFrac: -0.1, PValue: 0.02, NCandidate: 10, NBaseline: 10, CIMethod: "bca"},
+		StatTest: "welch",
+	}
+	nv, _ := v.update(concDetailLoadedMsg{c: c}, nil)
+	out := stripANSI(nv.view(120, 30))
+	for _, want := range []string{"C-0042", "inconclusive", "downgraded from supported", "size_flash exceeded", "Effect:", "welch", "delta_frac"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("conclusion detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_EventListAndDetail(t *testing.T) {
+	v := newEventListView()
+	es := []store.Event{
+		{Ts: time.Now().UTC(), Kind: "experiment.implement", Actor: "agent:impl", Subject: "E-0007",
+			Data: []byte(`{"worktree":"/tmp/wt","branch":"autoresearch/E-0007","samples":5,"pass":true}`)},
+	}
+	nv, _ := v.update(eventListLoadedMsg{list: es}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{"1 events", "experiment.implement", "E-0007"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("event list missing %q:\n%s", want, out)
+		}
+	}
+	d := newEventDetailView(es[0])
+	raw := d.view(120, 25)
+	dout := stripANSI(raw)
+	for _, want := range []string{"experiment.implement", "Payload:", "worktree", "autoresearch/E-0007"} {
+		if !strings.Contains(dout, want) {
+			t.Errorf("event detail missing %q:\n%s", want, dout)
+		}
+	}
+	// The payload must be multi-line (indented) and not a one-liner blob.
+	payloadStart := strings.Index(dout, "Payload:")
+	if payloadStart < 0 {
+		t.Fatalf("no Payload: heading")
+	}
+	payload := dout[payloadStart:]
+	if strings.Count(payload, "\n") < 3 {
+		t.Errorf("payload does not look indented (too few newlines):\n%s", payload)
+	}
+	// Key should be on its own line and followed by the opening brace of
+	// the object. Check for a real key/value pair layout.
+	if !strings.Contains(payload, `"worktree": "/tmp/wt"`) {
+		t.Errorf("payload missing indented worktree entry:\n%s", payload)
+	}
+	_ = raw // ANSI color escapes are stripped in non-TTY tests; visual dump
+	// exercises the styled path.
+}
+
+func TestTUI_PrettyJSON(t *testing.T) {
+	raw := []byte(`{"name":"fir","count":3,"nested":{"k":true,"v":null,"n":-2.5e3},"arr":[1,"two",false]}`)
+	plain := stripANSI(prettyJSON(raw, "  "))
+	// Expected structural layout: every line prefixed by "  ", nested
+	// objects/arrays indented by an additional 2 spaces per level.
+	for _, want := range []string{
+		"  {",
+		`    "name": "fir"`,
+		`    "count": 3`,
+		`    "nested": {`,
+		`      "k": true`,
+		`      "v": null`,
+		`    "arr": [`,
+		"  }",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("prettyJSON missing %q:\n%s", want, plain)
+		}
+	}
+	// Invalid JSON falls back to raw bytes (still prefixed).
+	bad := prettyJSON([]byte("not json"), "  ")
+	if bad != "  not json" {
+		t.Errorf("prettyJSON fallback wrong: %q", bad)
+	}
+	// Empty payload shows a dim marker.
+	empty := stripANSI(prettyJSON(nil, "  "))
+	if !strings.Contains(empty, "(empty)") {
+		t.Errorf("prettyJSON empty = %q, want '(empty)'", empty)
+	}
+}
+
+func TestTUI_TreeView(t *testing.T) {
+	v := newTreeView()
+	nodes := []*treeNode{
+		{ID: "H-0001", Claim: "root hyp", Status: entity.StatusOpen},
+		{ID: "H-0002", Claim: "another", Status: entity.StatusSupported},
+	}
+	nv, _ := v.update(treeLoadedMsg{roots: nodes}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"H-0001", "root hyp", "H-0002", "another"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tree view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_FrontierView(t *testing.T) {
+	v := newFrontierView()
+	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
+	rows := []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}}
+	nv, _ := v.update(frontierLoadedMsg{goal: g, rows: rows, stalled: 2}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{"decrease qemu_cycles", "stalled_for=2", "C-0001", "H-0001", "750067"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("frontier view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_GoalView(t *testing.T) {
+	v := newGoalView()
+	flash := 65536.0
+	g := &entity.Goal{
+		Objective:   entity.Objective{Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.2},
+		Constraints: []entity.Constraint{{Instrument: "size_flash", Max: &flash}, {Instrument: "host_test", Require: "pass"}},
+	}
+	nv, _ := v.update(goalLoadedMsg{g: g}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"Objective:", "decrease qemu_cycles", "size_flash", "host_test", "require=pass"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("goal view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_StatusView(t *testing.T) {
+	v := newStatusView()
+	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+	out := stripANSI(nv.view(100, 30))
+	for _, want := range []string{"State:", "active", "Mode:", "strict", "Budget:", "5/20 experiments", "Counts:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ModelHeaderAndHints(t *testing.T) {
+	m := newTuiModel(nil, 2*time.Second)
+	m.width, m.height = 120, 30
+	// Feed a loaded snapshot to the dashboard so it renders non-empty.
+	top := m.top()
+	nv, _ := top.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+	m.setTop(nv)
+	out := stripANSI(m.View())
+	for _, want := range []string{"Dashboard", "help", "quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("model chrome missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ArtifactList(t *testing.T) {
+	v := newArtifactListView()
+	rows := []artifactRow{
+		{Observation: "O-0001", Instrument: "qemu_cycles", Name: "primary", SHA: "abc123def45678", Bytes: 2048, Path: "artifacts/ab/abc123def45678"},
+		{Observation: "O-0002", Instrument: "host_test", Name: "primary", SHA: "fed987abc12345", Bytes: 512000, Path: "artifacts/fe/fed987abc12345"},
+	}
+	nv, _ := v.update(artifactListLoadedMsg{rows: rows}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{"2 artifacts", "O-0001", "qemu_cycles", "abc123def456", "500.0K", "host_test"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("artifact list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ArtifactViewHeader(t *testing.T) {
+	row := artifactRow{
+		Observation: "O-0001", Instrument: "qemu_cycles", Name: "primary",
+		SHA: "abcdef1234567890", Bytes: 4096, Path: "artifacts/ab/abcdef1234567890",
+	}
+	v := newArtifactView(row)
+	// Feed a synthetic loaded message: no real file, but the header still
+	// renders correctly.
+	nv, _ := v.update(artifactLoadedMsg{
+		sha:   "abcdef1234567890",
+		abs:   "/fake/abs",
+		rel:   "artifacts/ab/abcdef1234567890",
+		lines: []string{"line 1", "line 2", "line 3"},
+		total: 3,
+		bytes: 4096,
+	}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"abcdef1234567890", "artifacts/ab/abcdef", "lines=3", "mode=head"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("artifact view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ArtifactDiffView(t *testing.T) {
+	v := newArtifactDiffView(
+		"abcdef1234567890", "a/path",
+		"1234567890abcdef", "b/path",
+		[]string{"@@ -1,3 +1,3 @@", "-old", "+new", " same"},
+	)
+	out := stripANSI(v.view(100, 20))
+	for _, want := range []string{"a/path", "b/path", "-old", "+new"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("artifact diff missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_InstrumentList(t *testing.T) {
+	v := newInstrumentListView()
+	by := map[string]store.Instrument{
+		"qemu_cycles": {Cmd: []string{"bash", "-c", "./run"}, Parser: "builtin:scalar", Pattern: "cycles:(\\d+)", Unit: "cycles", Tier: "qemu", MinSamples: 5},
+		"host_test":   {Parser: "builtin:passfail", Tier: "host"},
+	}
+	nv, _ := v.update(instrumentListLoadedMsg{by: by}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{"2 instruments", "qemu_cycles", "host_test", "builtin:scalar", "pattern=/cycles", "min_samples=5"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("instrument list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ReportView(t *testing.T) {
+	v := newReportView("H-0007")
+	nv, _ := v.update(reportLoadedMsg{md: "# H-0007 — my claim\n\n**Status**: open\n\n## Prediction\n\n- stuff"}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"H-0007", "my claim", "Prediction"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ExperimentDetailWithStats(t *testing.T) {
+	v := newExperimentDetailView("E-0007")
+	e := &entity.Experiment{
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+		Instruments: []string{"qemu_cycles"}, Author: "agent:impl",
+	}
+	obs := []*entity.Observation{
+		{ID: "O-0001", Experiment: "E-0007", Instrument: "qemu_cycles", Value: 1000, Unit: "cycles", Samples: 5, PerSample: []float64{1000, 1010, 990, 1005, 995}},
+	}
+	summ := map[string]stats.Summary{
+		"qemu_cycles": {N: 5, Mean: 1000, StdDev: 7.07, Min: 990, Max: 1010, CILow: 993, CIHigh: 1007, CIMethod: "bca"},
+	}
+	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs, summ: summ}, nil)
+	out := stripANSI(nv.view(130, 40))
+	for _, want := range []string{"E-0007", "Summary (per instrument):", "qemu_cycles", "1000", "bca"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("experiment detail stats missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_JumpToCanonicalizes(t *testing.T) {
+	m := newTuiModel(nil, 2*time.Second)
+	// Start: [dashboard]
+	if got := len(m.stack); got != 1 {
+		t.Fatalf("initial stack depth = %d, want 1", got)
+	}
+	// Jump to hypotheses: [dashboard, hypotheses]
+	m.jumpTo(newHypothesisListView(), nil)
+	if got := len(m.stack); got != 2 || m.top().kind() != kindHypothesisList {
+		t.Fatalf("after H: depth=%d top=%s", got, m.top().kind())
+	}
+	// Jump to hypotheses again: still [dashboard, hypotheses], not 3-deep.
+	m.jumpTo(newHypothesisListView(), nil)
+	if got := len(m.stack); got != 2 {
+		t.Errorf("H after H: depth=%d want 2", got)
+	}
+	// Push a detail: [dashboard, hypotheses, detail]
+	m.push(newHypothesisDetailView("H-0001"))
+	if got := len(m.stack); got != 3 {
+		t.Fatalf("after push detail: depth=%d want 3", got)
+	}
+	// Jump to hypotheses again: truncates to [dashboard, hypotheses], dropping the detail.
+	m.jumpTo(newHypothesisListView(), nil)
+	if got := len(m.stack); got != 2 {
+		t.Errorf("H from detail: depth=%d want 2", got)
+	}
+	if m.top().kind() != kindHypothesisList {
+		t.Errorf("top = %s, want hypothesis.list", m.top().kind())
+	}
+	// Jump to experiments from hypotheses: [dashboard, experiments].
+	m.jumpTo(newExperimentListView(), nil)
+	if got := len(m.stack); got != 2 || m.top().kind() != kindExperimentList {
+		t.Fatalf("E after H: depth=%d top=%s", got, m.top().kind())
+	}
+	// R opens the report-mode hypothesis list — a different kind, so it pushes.
+	m.jumpTo(newHypothesisListViewForReport(), nil)
+	if got := len(m.stack); got != 2 || m.top().kind() != kindHypothesisReport {
+		t.Errorf("R after E: depth=%d top=%s", got, m.top().kind())
+	}
+}
+
+func TestTUI_DashboardForwardsLoadMsgToOverlay(t *testing.T) {
+	d := newDashboardView()
+	// Prime the dashboard with a snapshot so focus/cursor are meaningful.
+	snap := tuiRichSnapshot()
+	nv, _ := d.update(dashLoadedMsg{snap: snap}, nil)
+	d = nv.(*dashboardView)
+	// Simulate the user drilling down with Enter on the tree panel.
+	d.focus = dashFocusTree
+	_ = d.openSelected(nil) // rightOverlay is now a hypothesisDetailView (compact)
+	if d.rightOverlay == nil {
+		t.Fatalf("expected rightOverlay after drill-down")
+	}
+	// Feed a loaded detail message — should reach the overlay, not be
+	// swallowed by the dashboard. Before the fix it would be ignored and
+	// the compact detail would stay on "loading…".
+	h := &entity.Hypothesis{
+		ID: "H-0001", Claim: "unrolling dsp_fir", Status: entity.StatusSupported,
+		Predicts: entity.Predicts{Instrument: "qemu_cycles", Direction: "decrease"},
+	}
+	nv, _ = d.update(hypDetailLoadedMsg{h: h}, nil)
+	d = nv.(*dashboardView)
+	out := stripANSI(d.rightOverlay.view(60, 20))
+	for _, want := range []string{"H-0001", "unrolling dsp_fir"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("overlay still showing loading state after load msg, missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestTUI_DashboardVisualDump renders a realistic dashboard snapshot and
+// dumps it with t.Log so `go test -v -run VisualDump` lets a human
+// eyeball the layout. No assertions — this is a development aid.
+func TestTUI_DashboardVisualDump(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	snap := tuiRichSnapshot()
+	// Add more events + in-flight to stress the layout.
+	now := snap.CapturedAt
+	for i := 0; i < 10; i++ {
+		snap.RecentEvents = append(snap.RecentEvents, store.Event{
+			Ts: now.Add(time.Duration(i) * time.Second),
+			Kind: "observation.record", Actor: "agent:observer",
+			Subject: "O-00" + string(rune('0'+i)),
+		})
+	}
+	snap.Paused = true
+	snap.PauseReason = "10/10 experiment budget reached"
+
+	m := newTuiModel(nil, 2*time.Second)
+	m.width, m.height = 130, 40
+	m.chrome = chromeLoadedMsg{
+		paused: true, pauseReason: "10/10 experiment budget reached",
+		mode: "strict",
+		counts: map[string]int{"hypotheses": 10, "experiments": 4, "observations": 37, "conclusions": 9},
+	}
+	top := m.top()
+	nv, _ := top.update(dashLoadedMsg{snap: snap}, nil)
+	m.setTop(nv)
+	t.Log("\n" + m.View())
+}
+
+// TestTUI_ReportViewRendersMarkdown asserts that glamour is actually styling
+// the report body — i.e. the raw `**Status**:` sigils are consumed by the
+// renderer and the plain-text word "Status" survives in the output. If
+// glamour stops running (dep removed, style missing, whatever) the raw `**`
+// would leak through and this test would fail.
+func TestTUI_ReportViewRendersMarkdown(t *testing.T) {
+	v := newReportView("H-0007")
+	md := "# H-0007 — my claim\n\n**Status**: open  \n\n## Prediction\n\n- **Instrument**: `qemu_cycles`\n- _italic note_\n"
+	nv, _ := v.update(reportLoadedMsg{md: md}, nil)
+	rv := nv.(*reportView)
+	rendered := rv.ensureRendered(100)
+	plain := stripANSI(rendered)
+	// Content must survive:
+	for _, want := range []string{"H-0007", "my claim", "Status", "Prediction", "Instrument", "qemu_cycles", "italic note"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("rendered report missing %q:\n%s", want, plain)
+		}
+	}
+	// Raw inline sigils must NOT survive — glamour replaced them with ANSI
+	// styling. (H2/H3 prefixes like `## Prediction` are intentionally kept
+	// by glamour's dark style as a visual marker, so we don't check those.)
+	for _, bad := range []string{"**Status**", "_italic note_"} {
+		if strings.Contains(plain, bad) {
+			t.Errorf("rendered report still contains raw markdown sigil %q:\n%s", bad, plain)
+		}
+	}
+	// Rendered output must differ from raw — glamour injected at least some ANSI.
+	if rendered == md {
+		t.Errorf("rendered == raw markdown (glamour did not run):\n%s", rendered)
+	}
+}
+
+// TestTUI_ReportViewCachesByWidth ensures the glamour cache invalidates on
+// resize. Rendering at width 80 then 120 should produce different outputs,
+// and a repeated render at width 80 should hit the cache (same result).
+func TestTUI_ReportViewCachesByWidth(t *testing.T) {
+	v := newReportView("H-0007")
+	// A paragraph long enough that 80 vs 120 col wrapping produces visibly
+	// different line counts.
+	md := "# Heading\n\nlorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam\n"
+	nv, _ := v.update(reportLoadedMsg{md: md}, nil)
+	rv := nv.(*reportView)
+
+	at80 := rv.ensureRendered(80)
+	if rv.renderedWidth != 80 {
+		t.Errorf("renderedWidth = %d, want 80", rv.renderedWidth)
+	}
+	at80Again := rv.ensureRendered(80)
+	if at80 != at80Again {
+		t.Errorf("second render at same width returned different output — cache miss")
+	}
+	at120 := rv.ensureRendered(120)
+	if rv.renderedWidth != 120 {
+		t.Errorf("renderedWidth = %d after resize, want 120", rv.renderedWidth)
+	}
+	if at80 == at120 {
+		t.Errorf("rendered output unchanged between width 80 and 120 — word wrap is not width-aware")
+	}
+}
+
+// TestTUI_ReportViewVisualDump dumps a realistic report so the eyeball-check
+// `go test -run ReportViewVisualDump -v` shows styled markdown.
+func TestTUI_ReportViewVisualDump(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	v := newReportView("H-0007")
+	md := "# H-0007 — Unrolling dsp_fir inner loop by 8x is a clean multiple\n\n" +
+		"**Status**: supported  \n" +
+		"**Author**: agent:generator  \n\n" +
+		"## Prediction\n\n" +
+		"- **Instrument**: `qemu_cycles`\n" +
+		"- **Target**: `dsp_fir`\n" +
+		"- **Direction**: decrease\n" +
+		"- **Minimum effect**: 0.1000 (fractional)\n\n" +
+		"## Experiments\n\n" +
+		"### E-0007 — measured (qemu tier)\n\n" +
+		"- **Baseline**: `HEAD` at `abc123def456`\n" +
+		"- **Instruments**: qemu_cycles, host_test\n\n" +
+		"## Conclusions\n\n" +
+		"### C-0001 — supported\n\n" +
+		"- **Effect on `qemu_cycles`**: -0.2512 (fractional)  95% CI [-0.2801, -0.2223]\n" +
+		"- **p-value**: 0.0012 (welch)\n"
+	nv, _ := v.update(reportLoadedMsg{md: md}, nil)
+	t.Log("\n" + nv.view(100, 40))
+}
+
+// TestTUI_EventDetailVisualDump dumps a realistic event payload so
+// `go test -run EventDetailVisualDump -v` shows the ANSI-colored JSON.
+func TestTUI_EventDetailVisualDump(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	ev := store.Event{
+		Ts:      time.Date(2026, 4, 12, 14, 30, 0, 0, time.UTC),
+		Kind:    "conclusion.critic_downgrade",
+		Actor:   "agent:critic",
+		Subject: "C-0042",
+		Data: []byte(`{"from":"supported","to":"inconclusive","hypothesis":"H-0007","reasons":["size_flash exceeded 65536","n_candidate=3 below min_samples=5"],"n_candidate":3,"p_value":0.021,"strict":true,"reviewed_by":null}`),
+	}
+	d := newEventDetailView(ev)
+	t.Log("\n" + d.view(120, 30))
+}
+
+// TestTUI_ExperimentDetailVisualDump renders the experiment detail with a
+// realistic set of observations + summary stats to eyeball the alignment.
+func TestTUI_ExperimentDetailVisualDump(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	v := newExperimentDetailView("E-0007")
+	e := &entity.Experiment{
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured, Tier: "qemu",
+		Instruments: []string{"qemu_cycles", "host_test"}, Author: "agent:impl",
+		Worktree: "/Users/bytter/Library/Caches/autoresearch/fir-ab12/worktrees/E-0007",
+		Branch:   "autoresearch/E-0007",
+		Baseline: entity.Baseline{Ref: "HEAD", SHA: "abc123def456789abcdef"},
+		Budget:   entity.Budget{WallTimeS: 3600, MaxSamples: 20},
+	}
+	ciLow, ciHigh := 992.5, 1007.5
+	pass := true
+	obs := []*entity.Observation{
+		{ID: "O-0001", Experiment: "E-0007", Instrument: "qemu_cycles", Value: 1000.42, Unit: "cycles", Samples: 5, PerSample: []float64{1000, 1010, 990, 1005, 995}, CILow: &ciLow, CIHigh: &ciHigh, Command: "./bench --runs 5"},
+		{ID: "O-0002", Experiment: "E-0007", Instrument: "host_test", Value: 1, Unit: "", Samples: 1, Pass: &pass},
+	}
+	summ := map[string]stats.Summary{
+		"qemu_cycles": {N: 5, Mean: 1000.42, StdDev: 7.070, Min: 990, Max: 1010, CILow: 992.5, CIHigh: 1007.5, CIMethod: "bca"},
+		"host_test":   {N: 1, Mean: 1, StdDev: 0, Min: 1, Max: 1, CILow: 1, CIHigh: 1, CIMethod: "bca"},
+	}
+	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs, summ: summ}, nil)
+	t.Log("\n" + nv.view(130, 50))
+}
