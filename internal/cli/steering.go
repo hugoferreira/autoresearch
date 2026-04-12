@@ -63,11 +63,11 @@ func steeringAppendCmd() *cobra.Command {
 has no # Steering section yet, one is created at the end of the body.
 The note is written as a Markdown bullet ('- <note>\n').
 
-This is the verb the main Claude Code session uses when a human says
-something like "also, don't touch the FFT code" or "start with loop
-unrolling". The session calls 'autoresearch steering append' with the
-human's phrasing and echoes back a confirmation; the human never has
-to open goal.md themselves.`,
+This is the verb the main agent session uses when a human says something
+like "also, don't touch the FFT code" or "start with loop unrolling".
+The session calls 'autoresearch steering append' with the human's
+phrasing and echoes back a confirmation; the human never has to open
+goal.md themselves.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
@@ -167,4 +167,3 @@ func appendSteeringBullet(body, note string) string {
 	out = append(out, lines[end:]...)
 	return strings.Join(out, "\n")
 }
-

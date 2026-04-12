@@ -2,27 +2,29 @@
 
 Guidance for Claude Code working **on** the `autoresearch` repo itself.
 
-> Not to be confused with `.claude/autoresearch.md`, which `autoresearch claude
-> install` writes into *target* projects to teach an agent how to **use** the
-> CLI. This file is about hacking on the CLI's own source.
+> Not to be confused with `.claude/autoresearch.md` / `.codex/autoresearch.md`,
+> which `autoresearch claude install` / `autoresearch codex install` write into
+> *target* projects to teach an agent how to **use** the CLI. This file is
+> about hacking on the CLI's own source.
 
 ## What this project is
 
-A Go CLI (`github.com/bytter/autoresearch`) that drives Claude Code through a
-disciplined optimization research loop on a target codebase. Read `README.md`
-for the user-facing summary; the rest of this file is about the internals.
+A Go CLI (`github.com/bytter/autoresearch`) that drives Claude Code or Codex
+through a disciplined optimization research loop on a target codebase. Read
+`README.md` for the user-facing summary; the rest of this file is about the
+internals.
 
 Two load-bearing invariants — both have to survive every change:
 
 1. **The CLI is the single writer of `.research/` state.** Subagents never
    edit files in `.research/` directly; they shell out to `autoresearch
    <verb>`. Any new feature has to preserve that.
-2. **The human's interface is the main Claude Code session; `.research/` is
-   the durable substrate.** Humans steer by talking to the agent, which
-   translates intent into CLI calls. Read-only views (dashboard, log, tree,
-   frontier, report) are *windows* onto state — they are never a steering
-   surface. Don't add interactive keystroke handling, pause-from-dashboard,
-   or "quick edit" verbs to anything in the read-only set.
+2. **The human's interface is the main agent session; `.research/` is the
+   durable substrate.** Humans steer by talking to the agent, which translates
+   intent into CLI calls. Read-only views (dashboard, log, tree, frontier,
+   report) are *windows* onto state — they are never a steering surface. Don't
+   add interactive keystroke handling, pause-from-dashboard, or "quick edit"
+   verbs to anything in the read-only set.
 
 ## Build / test
 
@@ -48,7 +50,7 @@ internal/firewall/           strict-mode validators + tier gates + budget
 internal/instrument/         runner + four built-in parsers
 internal/stats/              gonum-backed BCa bootstrap, Mann–Whitney U
 internal/worktree/           git worktree shell-outs
-internal/integration/        .claude/ doc + agent prompts + settings/gitignore
+internal/integration/        .claude/.codex docs + prompts/briefs + settings/gitignore
 internal/output/             JSON/text rendering helpers
 examples/cortex-m4-synth/    end-to-end FIR optimization example
 ```
@@ -132,16 +134,19 @@ a worktree — different tree, different store. Don't "fix" that.
 
 `internal/integration/` owns everything that touches `.claude/`:
 
-- `claude_doc.go` generates `.claude/autoresearch.md` (the agent-facing
-  reference). When you add or rename a verb, update the verb table here too.
-- `agents.go` embeds six prompts under `agents/` —
-  `research-{generator,designer,implementer,observer,analyst,critic}.md`.
+- `claude_doc.go` / `codex_doc.go` generate the agent-facing reference docs.
+  When you add or rename a verb, update the verb table here too.
+- `agents.go` embeds six Claude prompts under `agents/`.
+  `codex_agents.go` derives the Codex role briefs from the same contracts.
   Each role has a narrow contract; don't widen them casually.
 - `claude_settings.go` merges a Bash allow entry into `.claude/settings.json`
   so subagents can invoke `autoresearch` without permission prompts.
+- `codex_instructions.go` maintains the managed autoresearch block in the
+  target project's root `AGENTS.md`.
 - `gitignore.go` adds `.research/` to the project's `.gitignore`.
 
-`autoresearch claude install` and `autoresearch claude agents install`
+`autoresearch claude install`, `autoresearch claude agents install`,
+`autoresearch codex install`, and `autoresearch codex agents install`
 re-run these without re-running `init`.
 
 ## Dashboard and `log --follow`
@@ -208,7 +213,7 @@ scroll logic.
 
 - **New verb.** Add to the matching `internal/cli/<group>.go`, validate via
   `internal/firewall`, persist via `internal/store`, emit an event, support
-  `--json`, update `internal/integration/claude_doc.go` so agents can
+  `--json`, update the agent docs in `internal/integration/` so agents can
   discover it, add a test.
 - **New instrument parser.** Add to `internal/instrument/`, register in the
   parser switch, document the `--parser` value in the `instrument register`

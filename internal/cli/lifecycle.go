@@ -68,9 +68,9 @@ Re-pausing while already paused is a no-op.`,
 				return err
 			}
 			if err := s.AppendEvent(store.Event{
-				Kind:    "pause",
-				Actor:   "human",
-				Data:    jsonRaw(map[string]string{"reason": reason}),
+				Kind:  "pause",
+				Actor: "human",
+				Data:  jsonRaw(map[string]string{"reason": reason}),
 			}); err != nil {
 				return err
 			}
@@ -186,14 +186,58 @@ suite.`,
 				if err != nil {
 					return err
 				}
+				claudePath, err := installClaudeDoc(globalProjectDir, false, true)
+				if err != nil {
+					return err
+				}
+				claudeAgents, err := integration.PreviewAgents(globalProjectDir)
+				if err != nil {
+					return err
+				}
+				claudeSettings, err := integration.PreviewClaudeSettings(globalProjectDir, []string{integration.AutoresearchAllowEntry})
+				if err != nil {
+					return err
+				}
+				codexPath, err := installCodexDoc(globalProjectDir, false, true)
+				if err != nil {
+					return err
+				}
+				codexAgents, err := integration.PreviewCodexAgents(globalProjectDir)
+				if err != nil {
+					return err
+				}
+				codexInstructions, err := integration.PreviewCodexInstructions(globalProjectDir)
+				if err != nil {
+					return err
+				}
 				return w.Emit(
-					fmt.Sprintf("[dry-run] would initialize .research/ under %s\n[dry-run] gitignore: %s", globalProjectDir, describeGitignoreAction(preview)),
+					fmt.Sprintf("[dry-run] would initialize .research/ under %s\n[dry-run] gitignore: %s\n[dry-run] claude doc: %s\n[dry-run] claude agents: %d file(s) to %s\n[dry-run] claude settings: %s\n[dry-run] codex doc: %s\n[dry-run] codex agents: %d file(s) to %s\n[dry-run] AGENTS.md: %s",
+						globalProjectDir,
+						describeGitignoreAction(preview),
+						claudePath,
+						claudeAgents.Count,
+						claudeAgents.Dir,
+						describeClaudeSettingsAction(claudeSettings),
+						codexPath,
+						codexAgents.Count,
+						codexAgents.Dir,
+						describeCodexInstructionsAction(codexInstructions)),
 					map[string]any{
-						"status":    "dry-run",
-						"root":      globalProjectDir,
-						"build":     "ok",
-						"test":      "ok",
-						"gitignore": gitignoreResultToMap(preview),
+						"status":                "dry-run",
+						"root":                  globalProjectDir,
+						"build":                 "ok",
+						"test":                  "ok",
+						"gitignore":             gitignoreResultToMap(preview),
+						"claude_doc":            claudePath,
+						"claude_subagents_dir":  claudeAgents.Dir,
+						"claude_subagent_files": claudeAgents.Written,
+						"claude_subagent_count": claudeAgents.Count,
+						"claude_settings":       claudeSettingsResultToMap(claudeSettings),
+						"codex_doc":             codexPath,
+						"codex_agents_dir":      codexAgents.Dir,
+						"codex_agent_files":     codexAgents.Written,
+						"codex_agent_count":     codexAgents.Count,
+						"codex_instructions":    codexInstructionsResultToMap(codexInstructions),
 					},
 				)
 			}
@@ -255,21 +299,50 @@ suite.`,
 				return fmt.Errorf("update claude settings: %w", err)
 			}
 
+			codexPath, err := installCodexDoc(globalProjectDir, false, false)
+			if err != nil {
+				return fmt.Errorf("install codex doc: %w", err)
+			}
+
+			codexAgentRes, err := integration.InstallCodexAgents(globalProjectDir)
+			if err != nil {
+				return fmt.Errorf("install codex role briefs: %w", err)
+			}
+
+			codexInstructionsRes, err := integration.EnsureCodexInstructions(globalProjectDir)
+			if err != nil {
+				return fmt.Errorf("update AGENTS.md: %w", err)
+			}
+
 			return w.Emit(
-				fmt.Sprintf("initialized .research/ at %s\ngitignore: %s\nwrote %s\nwrote %d subagent prompt(s) to %s\nsettings: %s\n(to load the reference into Claude Code's main session, add `@.claude/autoresearch.md` to your CLAUDE.md)",
-					s.DirPath(), describeGitignoreAction(gi), claudePath, agentRes.Count, agentRes.Dir, describeClaudeSettingsAction(settingsRes)),
+				fmt.Sprintf("initialized .research/ at %s\ngitignore: %s\nclaude: wrote %s\nclaude: wrote %d subagent prompt(s) to %s\nclaude: settings: %s\ncodex: wrote %s\ncodex: wrote %d role brief(s) to %s\ncodex: AGENTS.md: %s\n(to load the Claude reference into Claude Code's main session, add `@.claude/autoresearch.md` to your CLAUDE.md)",
+					s.DirPath(),
+					describeGitignoreAction(gi),
+					claudePath,
+					agentRes.Count,
+					agentRes.Dir,
+					describeClaudeSettingsAction(settingsRes),
+					codexPath,
+					codexAgentRes.Count,
+					codexAgentRes.Dir,
+					describeCodexInstructionsAction(codexInstructionsRes)),
 				map[string]any{
-					"status":         "ok",
-					"root":           s.Root(),
-					"dir":            s.DirPath(),
-					"build":          "ok",
-					"test":           "ok",
-					"claude_doc":     claudePath,
-					"gitignore":      gitignoreResultToMap(gi),
-					"subagents_dir":  agentRes.Dir,
-					"subagent_files": agentRes.Written,
-					"subagent_count": agentRes.Count,
-					"settings":       claudeSettingsResultToMap(settingsRes),
+					"status":             "ok",
+					"root":               s.Root(),
+					"dir":                s.DirPath(),
+					"build":              "ok",
+					"test":               "ok",
+					"claude_doc":         claudePath,
+					"gitignore":          gitignoreResultToMap(gi),
+					"subagents_dir":      agentRes.Dir,
+					"subagent_files":     agentRes.Written,
+					"subagent_count":     agentRes.Count,
+					"settings":           claudeSettingsResultToMap(settingsRes),
+					"codex_doc":          codexPath,
+					"codex_agents_dir":   codexAgentRes.Dir,
+					"codex_agent_files":  codexAgentRes.Written,
+					"codex_agent_count":  codexAgentRes.Count,
+					"codex_instructions": codexInstructionsResultToMap(codexInstructionsRes),
 				},
 			)
 		},

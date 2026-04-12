@@ -3,8 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/bytter/autoresearch/internal/integration"
 	"github.com/bytter/autoresearch/internal/output"
@@ -99,7 +97,7 @@ This command NEVER touches the user's top-level CLAUDE.md. To make the main
 session read the reference, add the line "@.claude/autoresearch.md" to your
 CLAUDE.md yourself, or instruct subagents to read it directly.
 
-The file is fully managed: running this command or `+"`autoresearch init`"+`
+The file is fully managed: running this command or ` + "`autoresearch init`" + `
 again overwrites it with the current version. Do not edit it by hand —
 your edits will be lost on the next refresh.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -182,24 +180,5 @@ func claudeSettingsResultToMap(r integration.ClaudeSettingsResult) map[string]an
 // doc is refreshed on every `init` / `claude install` call. We do NOT touch
 // any sibling files (no CLAUDE.md, no .claude/agents/*).
 func installClaudeDoc(projectDir string, _force, dryRun bool) (string, error) {
-	if projectDir == "" {
-		return "", errors.New("project dir is empty")
-	}
-	abs, err := filepath.Abs(projectDir)
-	if err != nil {
-		return "", err
-	}
-	fullPath := filepath.Join(abs, integration.ClaudeDocRelPath)
-
-	if dryRun {
-		return fullPath, nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-		return "", fmt.Errorf("create .claude/: %w", err)
-	}
-	if err := os.WriteFile(fullPath, []byte(integration.ClaudeDoc(Version)), 0o644); err != nil {
-		return "", fmt.Errorf("write %s: %w", fullPath, err)
-	}
-	return fullPath, nil
+	return installManagedDoc(projectDir, integration.ClaudeDocRelPath, integration.ClaudeDoc(Version), dryRun)
 }

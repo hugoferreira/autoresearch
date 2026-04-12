@@ -2,18 +2,18 @@
 
 > Autonomous, agentic research over an existing codebase.
 
-`autoresearch` turns [Claude Code](https://claude.com/claude-code) into a
-disciplined scientific researcher operating on a working codebase. It generates
-falsifiable hypotheses, runs instrument-backed experiments in isolated git
-worktrees, and draws statistically-sound conclusions — with a strict firewall
-between speculation and observation.
+`autoresearch` turns [Claude Code](https://claude.com/claude-code) or Codex
+into a disciplined scientific researcher operating on a working codebase. It
+generates falsifiable hypotheses, runs instrument-backed experiments in
+isolated git worktrees, and draws statistically-sound conclusions — with a
+strict firewall between speculation and observation.
 
 It is for **optimizing existing, working systems against measurable goals**.
 It is **not** a feature-delivery or program-synthesis tool. If your goal cannot
 be expressed as a number an instrument can measure, autoresearch is the wrong
 tool.
 
-The human's interface is the main Claude Code session; `.research/` is the
+The human's interface is the main agent session; `.research/` is the
 durable substrate. You steer by talking to the agent, not by editing state
 files or typing into a dashboard.
 
@@ -21,7 +21,7 @@ files or typing into a dashboard.
 
 You define a goal: an objective metric (with a direction and target effect)
 plus a set of constraints (other instruments that must pass or stay within
-bounds). Claude Code, driven by six embedded subagent prompts, then loops:
+bounds). Claude Code or Codex, driven by six embedded role contracts, then loops:
 
 ```
 goal → hypothesis → experiment → observe → analyze → conclude → report
@@ -48,6 +48,11 @@ Requires Go 1.26+.
 
 ## Quickstart
 
+Human setup is a short, one-time CLI step. After that, the main Claude Code
+or Codex session is the orchestrator: it should invoke mutating
+`autoresearch` verbs on the human's behalf while the human watches the
+dashboard or event log.
+
 ```sh
 cd path/to/your/project
 autoresearch init --build-cmd "make all" --test-cmd "make test"
@@ -56,18 +61,30 @@ autoresearch instrument register host_timing \
 autoresearch instrument register size_flash \
     --cmd "size ./build/main" --parser builtin:size --unit bytes
 autoresearch goal set --file goal.md
-autoresearch claude install
-autoresearch claude agents install
 autoresearch dashboard --refresh 2
 ```
 
-Then, inside Claude Code in the same project, ask the agent to start
-researching. It will read `.claude/autoresearch.md` and the
-`.claude/agents/research-*.md` subagent prompts and begin the loop.
+`autoresearch init` installs both agent integrations automatically. From that
+point on, stop typing mutating `autoresearch` verbs yourself. Open Claude Code
+or Codex in the same project and tell the main agent to run the loop for you.
+
+For example:
+
+```text
+Read the local autoresearch docs for this project. Use autoresearch as the
+only writer of research state, and start the research loop for the current
+goal. I will observe via the dashboard.
+```
+
+Claude reads `.claude/autoresearch.md` plus the `.claude/agents/research-*.md`
+prompts. Codex reads the managed `AGENTS.md` block,
+`.codex/autoresearch.md`, and the `.codex/agents/research-*.md` role briefs.
 
 A worked example lives in [`examples/cortex-m4-synth/`](examples/cortex-m4-synth)
 — optimizing a naive FIR filter against `host_timing` with `size_flash` and
-test-pass constraints, capped at 20 experiments.
+test-pass constraints, capped at 20 experiments. For that example, copy the
+directory elsewhere, run `./bootstrap.sh`, open `autoresearch dashboard
+--refresh 2`, and then start Claude Code or Codex in the copied project.
 
 ## Command map
 
@@ -94,6 +111,7 @@ is paused.
 | **budget** | `show`, `set` |
 | **gc** | `gc` |
 | **claude** | `claude install`, `claude agents install` |
+| **codex** | `codex install`, `codex agents install` |
 | **dashboard** | `dashboard [--refresh N] [--color auto\|always\|never]`, `dashboard tui` |
 
 Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,
@@ -195,7 +213,7 @@ A Bubble Tea TUI built on top of the same `captureDashboard` snapshot.
 Richer than the one-shot view, but the read-only constraint is
 identical: it never mutates `.research/`, and there are no "quick
 action" keystrokes — steering is still conversational with the main
-Claude session.
+agent session.
 
 The TUI surfaces every read-only CLI verb as a navigable view:
 

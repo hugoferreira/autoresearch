@@ -22,7 +22,7 @@ log, tree, frontier, goal, and status.
 The TUI never mutates .research/. Effectful actions (init, pause,
 resume, goal set, hypothesis add, experiment design/implement, observe,
 conclude, budget set) remain CLI-only — humans steer by talking to the
-main Claude session, which translates intent into CLI calls.
+main agent session, which translates intent into CLI calls.
 
 Press ? inside the TUI for a full key reference. Top-level jumps:
 H hypotheses  E experiments  C conclusions  L log

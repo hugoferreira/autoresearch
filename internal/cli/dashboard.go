@@ -42,7 +42,7 @@ experiments, and the last 10 events. One-shot by default; pass
 
 The dashboard is read-only. It never mutates .research/; it works fine
 while the store is paused; and it is not a steering surface. Humans
-steer by talking to the main Claude session, which translates intent
+steer by talking to the main agent session, which translates intent
 into CLI calls.
 
 Use --json for a structured one-shot snapshot suitable for external

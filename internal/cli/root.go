@@ -14,11 +14,11 @@ func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "autoresearch",
 		Short: "Autonomous, agentic research over an existing codebase",
-		Long: `autoresearch turns Claude Code into a disciplined scientific researcher
-over a working codebase. It generates falsifiable hypotheses, runs
-instrument-backed experiments in isolated git worktrees, and draws
-statistically-sound conclusions — with a strict firewall between
-speculation and observation.
+		Long: `autoresearch turns Claude Code or Codex into a disciplined scientific
+researcher over a working codebase. It generates falsifiable
+hypotheses, runs instrument-backed experiments in isolated git
+worktrees, and draws statistically-sound conclusions — with a strict
+firewall between speculation and observation.
 
 autoresearch is for optimizing existing, working systems against
 measurable goals. It is not a feature-delivery or program-synthesis tool.`,
@@ -47,6 +47,7 @@ measurable goals. It is not a feature-delivery or program-synthesis tool.`,
 		artifactCommands(),
 		instrumentCommands(),
 		claudeCommands(),
+		codexCommands(),
 		budgetCommands(),
 		conclusionCommands(),
 		dashboardCommands(),

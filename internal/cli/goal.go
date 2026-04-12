@@ -25,15 +25,15 @@ func goalCommands() []*cobra.Command {
 
 func goalSetCmd() *cobra.Command {
 	var (
-		file             string
-		objInstrument    string
-		objTarget        string
-		objDirection     string
-		objTargetEffect  float64
-		constraintMax    []string
-		constraintMin    []string
-		constraintReq    []string
-		steeringText     string
+		file            string
+		objInstrument   string
+		objTarget       string
+		objDirection    string
+		objTargetEffect float64
+		constraintMax   []string
+		constraintMin   []string
+		constraintReq   []string
+		steeringText    string
 	)
 	c := &cobra.Command{
 		Use:   "set",
@@ -43,8 +43,8 @@ func goalSetCmd() *cobra.Command {
   --file goal.md            Read a YAML-frontmatter goal document.
   --objective-* + --constraint-*   Build the goal from flags directly.
 
-The flag form is the one the main Claude Code session uses when
-translating a human's natural-language request — the session never
+The flag form is the one the main agent session uses when translating a
+human's natural-language request — the session never
 asks the human to author YAML. Humans who prefer an editor-based
 workflow can still write goal.md and point --file at it.
 

@@ -22,7 +22,11 @@ type AgentFile struct {
 // EmbeddedAgents returns every subagent template baked into the binary,
 // in a stable alphabetical order.
 func EmbeddedAgents() ([]AgentFile, error) {
-	entries, err := agentFS.ReadDir("agents")
+	return embeddedAgentFiles(agentFS, "agents")
+}
+
+func embeddedAgentFiles(fs embed.FS, dir string) ([]AgentFile, error) {
+	entries, err := fs.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded agents: %w", err)
 	}
@@ -31,7 +35,7 @@ func EmbeddedAgents() ([]AgentFile, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		data, err := agentFS.ReadFile("agents/" + e.Name())
+		data, err := fs.ReadFile(dir + "/" + e.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read embedded %s: %w", e.Name(), err)
 		}
@@ -42,28 +46,13 @@ func EmbeddedAgents() ([]AgentFile, error) {
 	return out, nil
 }
 
-// AgentInstallResult reports what InstallAgents did.
-type AgentInstallResult struct {
-	Dir          string
-	Written      []string // filenames we wrote (created or overwritten)
-	Count        int
-}
-
-// InstallAgents writes every embedded subagent template into
-// <projectDir>/.claude/agents/. It creates the directory if absent and
-// overwrites existing research-*.md files unconditionally (they are fully
-// managed). Non-research agent files in .claude/agents/ are never touched.
-func InstallAgents(projectDir string) (AgentInstallResult, error) {
+func installAgentFiles(projectDir, relDir string, agents []AgentFile) (AgentInstallResult, error) {
 	res := AgentInstallResult{}
-	agents, err := EmbeddedAgents()
-	if err != nil {
-		return res, err
-	}
 	abs, err := filepath.Abs(projectDir)
 	if err != nil {
 		return res, err
 	}
-	dir := filepath.Join(abs, ".claude", "agents")
+	dir := filepath.Join(abs, relDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return res, fmt.Errorf("create %s: %w", dir, err)
 	}
@@ -79,21 +68,44 @@ func InstallAgents(projectDir string) (AgentInstallResult, error) {
 	return res, nil
 }
 
-// PreviewAgents reports what InstallAgents WOULD write, without mutating.
-func PreviewAgents(projectDir string) (AgentInstallResult, error) {
+func previewAgentFiles(projectDir, relDir string, agents []AgentFile) (AgentInstallResult, error) {
 	res := AgentInstallResult{}
-	agents, err := EmbeddedAgents()
-	if err != nil {
-		return res, err
-	}
 	abs, err := filepath.Abs(projectDir)
 	if err != nil {
 		return res, err
 	}
-	res.Dir = filepath.Join(abs, ".claude", "agents")
+	res.Dir = filepath.Join(abs, relDir)
 	for _, a := range agents {
 		res.Written = append(res.Written, a.Filename)
 	}
 	res.Count = len(agents)
 	return res, nil
+}
+
+// AgentInstallResult reports what InstallAgents did.
+type AgentInstallResult struct {
+	Dir     string
+	Written []string // filenames we wrote (created or overwritten)
+	Count   int
+}
+
+// InstallAgents writes every embedded subagent template into
+// <projectDir>/.claude/agents/. It creates the directory if absent and
+// overwrites existing research-*.md files unconditionally (they are fully
+// managed). Non-research agent files in .claude/agents/ are never touched.
+func InstallAgents(projectDir string) (AgentInstallResult, error) {
+	agents, err := EmbeddedAgents()
+	if err != nil {
+		return AgentInstallResult{}, err
+	}
+	return installAgentFiles(projectDir, filepath.Join(".claude", "agents"), agents)
+}
+
+// PreviewAgents reports what InstallAgents WOULD write, without mutating.
+func PreviewAgents(projectDir string) (AgentInstallResult, error) {
+	agents, err := EmbeddedAgents()
+	if err != nil {
+		return AgentInstallResult{}, err
+	}
+	return previewAgentFiles(projectDir, filepath.Join(".claude", "agents"), agents)
 }

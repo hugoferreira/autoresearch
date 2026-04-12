@@ -20,9 +20,10 @@ if [ ! -f src/dsp_fir.c ] || [ ! -f Makefile ]; then
 fi
 
 # Resolve the binary: if $AR is an executable path use it directly,
-# otherwise make sure it's on $PATH. Claude Code subagents spawn Bash
-# which looks up executables in $PATH, so "it works for the bootstrap"
-# is not sufficient — it must also resolve for the main session.
+# otherwise make sure it's on $PATH. The main Claude/Codex session and
+# its delegated subagents spawn Bash which looks up executables in
+# $PATH, so "it works for the bootstrap" is not sufficient — it must
+# also resolve for the actual research loop.
 if ! command -v "$AR" >/dev/null 2>&1 && [ ! -x "$AR" ]; then
     cat >&2 <<'EOF'
 bootstrap.sh: cannot find `autoresearch` on $PATH.
@@ -33,15 +34,15 @@ Install it from the autoresearch source tree:
 
 That runs `go install ./cmd/autoresearch`, dropping the binary in
 $GOPATH/bin. Make sure $GOPATH/bin is on your $PATH — that's where
-the research subagents will look for the binary when the main Claude
-Code session invokes them.
+the research agents will look for the binary when the main Claude Code
+or Codex session invokes them.
 
 Alternatively, pass AR=/absolute/path/to/autoresearch:
 
     AR=/path/to/autoresearch ./bootstrap.sh
 
-but note: the Claude Code subagents won't see that env var, so they
-will still need `autoresearch` on $PATH at run time.
+but note: delegated agents won't see that env var, so they will still
+need `autoresearch` on $PATH at run time.
 EOF
     exit 1
 fi
@@ -98,30 +99,25 @@ echo "=> loading goal.md"
 
 cat <<'EOF'
 
-Bootstrap complete. Try:
+Bootstrap complete.
 
-  autoresearch hypothesis add \
-      --claim "unrolling dsp_fir inner loop 4x reduces runtime by >= 15%" \
-      --predicts-instrument host_timing \
-      --predicts-target dsp_fir \
-      --predicts-direction decrease \
-      --predicts-min-effect 0.15 \
-      --kill-if "host_test fails" \
-      --author human:you
+Human workflow from here:
 
-  autoresearch experiment design H-0001 --tier host \
-      --instruments host_compile,host_test,host_timing,size_flash
+  Terminal 1 (observe only):
+    autoresearch dashboard --refresh 2
 
-  autoresearch experiment implement E-0001
-  # edit src/dsp_fir.c inside $(autoresearch experiment worktree E-0001)
-  # commit your change on the experiment branch
+  Terminal 2 (optional, observe only):
+    autoresearch log --follow
 
-  autoresearch observe E-0001 --instrument host_compile
-  autoresearch observe E-0001 --instrument host_test
-  autoresearch observe E-0001 --instrument host_timing --samples 12
-  autoresearch observe E-0001 --instrument size_flash
+  Main Claude Code or Codex session, opened in this directory:
+    "Read the local autoresearch docs for this project. Use autoresearch as
+     the only writer of research state, and start the research loop for the
+     current goal. I will observe via the dashboard."
 
-  autoresearch analyze  E-0001 --baseline <baseline-E-id> --instrument host_timing
-  autoresearch conclude H-0001 --verdict supported --observations <O-id>
+If you want a narrower first step, ask the main agent:
+
+  "Start by proposing 2 falsifiable hypotheses for the current goal and
+   record them through autoresearch. Then recommend which one to pursue
+   first."
 
 EOF
