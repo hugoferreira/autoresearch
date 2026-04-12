@@ -261,10 +261,9 @@ func (v *dashboardView) view(width, height int) string {
 
 	var right string
 	if v.rightOverlay != nil {
-		right = tuiPanelBorder.Width(rightW - 4).Render(
-			tuiPanelTitle.Render("Detail") + "\n" +
-				v.rightOverlay.view(rightW-6, remaining-4),
-		)
+		title := tuiPanelTitle.Render("Detail")
+		content := v.rightOverlay.view(rightW-4, remaining-2)
+		right = boxPanel(title, content, rightW, remaining, true)
 	} else {
 		frontierH, inFlightH, eventsH := v.rightColumnHeights(remaining)
 		right = lipgloss.JoinVertical(lipgloss.Left,
