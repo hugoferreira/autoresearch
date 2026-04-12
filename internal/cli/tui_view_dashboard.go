@@ -21,6 +21,12 @@ type dashboardView struct {
 	focus        dashFocus
 	cursors      [dashPanelCount]int
 	rightOverlay tuiView // non-nil = replace right column with this compact detail
+
+	events          []store.Event
+	eventsErr       error
+	eventsReady     bool
+	eventsAllLoaded bool
+	eventsLoading   bool
 }
 
 type dashFocus int
@@ -38,6 +44,20 @@ type dashLoadedMsg struct {
 	err  error
 }
 
+type dashEventsLoadedMsg struct {
+	list      []store.Event
+	allLoaded bool
+	replace   bool
+	err       error
+}
+
+const (
+	dashboardRecentEventsPageSize     = 64
+	dashboardRecentEventsPrefetchRows = 8
+	dashboardCompactPanelMaxHeight    = 7
+	dashboardCompactPanelMinHeight    = 4
+)
+
 func newDashboardView() *dashboardView {
 	return &dashboardView{}
 }
@@ -45,10 +65,11 @@ func newDashboardView() *dashboardView {
 func (v *dashboardView) title() string { return "Dashboard" }
 
 func (v *dashboardView) init(s *store.Store) tea.Cmd {
-	return func() tea.Msg {
-		snap, err := captureDashboard(s)
-		return dashLoadedMsg{snap: snap, err: err}
-	}
+	v.eventsLoading = true
+	return tea.Batch(
+		loadDashboardSnapshotCmd(s),
+		loadDashboardEventsCmd(s, 0, dashboardRecentEventsPageSize, true),
+	)
 }
 
 func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
@@ -57,10 +78,31 @@ func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.snap = msg.snap
 		v.err = msg.err
 		return v, nil
+	case dashEventsLoadedMsg:
+		selected := v.selectedEventKey()
+		v.eventsLoading = false
+		if msg.err != nil {
+			v.eventsErr = msg.err
+			return v, nil
+		}
+		if msg.replace {
+			v.events = append([]store.Event{}, msg.list...)
+		} else {
+			v.events = append(v.events, msg.list...)
+		}
+		v.eventsErr = nil
+		v.eventsReady = true
+		v.eventsAllLoaded = msg.allLoaded
+		v.restoreEventCursor(selected)
+		return v, v.maybeLoadMoreEvents(s)
 	case tuiTickMsg:
 		// Refresh both the dashboard and any open right-column overlay so
 		// drilled-down details stay live.
-		cmds := []tea.Cmd{v.init(s)}
+		cmds := []tea.Cmd{loadDashboardSnapshotCmd(s)}
+		if !v.eventsLoading {
+			v.eventsLoading = true
+			cmds = append(cmds, loadDashboardEventsCmd(s, 0, max(len(v.currentEvents()), dashboardRecentEventsPageSize), true))
+		}
 		if v.rightOverlay != nil {
 			nv, cmd := v.rightOverlay.update(msg, s)
 			v.rightOverlay = nv
@@ -90,7 +132,7 @@ func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 			return v, nil
 		case "down", "j":
 			v.moveCursor(1)
-			return v, nil
+			return v, v.maybeLoadMoreEvents(s)
 		case "enter":
 			return v, v.openSelected(s)
 		}
@@ -130,7 +172,7 @@ func (v *dashboardView) panelLen(f dashFocus) int {
 	case dashFocusInFlight:
 		return len(v.snap.InFlight)
 	case dashFocusEvents:
-		return len(v.snap.RecentEvents)
+		return len(v.currentEvents())
 	}
 	return 0
 }
@@ -162,10 +204,11 @@ func (v *dashboardView) openSelected(s *store.Store) tea.Cmd {
 		v.rightOverlay = newExperimentDetailCompact(v.snap.InFlight[idx].ID)
 		return v.rightOverlay.init(s)
 	case dashFocusEvents:
-		if idx < 0 || idx >= len(v.snap.RecentEvents) {
+		events := v.currentEvents()
+		if idx < 0 || idx >= len(events) {
 			return nil
 		}
-		v.rightOverlay = newEventDetailCompact(v.snap.RecentEvents[idx])
+		v.rightOverlay = newEventDetailCompact(events[idx])
 		return v.rightOverlay.init(s)
 	}
 	return nil
@@ -196,12 +239,12 @@ func (v *dashboardView) view(width, height int) string {
 	remaining := max(height-topH-1, 4)
 
 	if !twoCol {
-		// Single column: tree, frontier, in-flight, events stacked.
+		treeH, frontierH, inFlightH, eventsH := v.stackedColumnHeights(remaining)
 		sections := []string{
-			v.renderTreePanel(width, remaining/2),
-			v.renderFrontierPanel(width, remaining/4),
-			v.renderInFlightPanel(width, remaining/8),
-			v.renderEventsPanel(width, remaining/8),
+			v.renderTreePanel(width, treeH),
+			v.renderFrontierPanel(width, frontierH),
+			v.renderInFlightPanel(width, inFlightH),
+			v.renderEventsPanel(width, eventsH),
 		}
 		return lipgloss.JoinVertical(lipgloss.Left, topStrip, "", strings.Join(sections, "\n"))
 	}
@@ -218,11 +261,11 @@ func (v *dashboardView) view(width, height int) string {
 				v.rightOverlay.view(rightW-6, remaining-4),
 		)
 	} else {
-		rightHalf := remaining / 3
+		frontierH, inFlightH, eventsH := v.rightColumnHeights(remaining)
 		right = lipgloss.JoinVertical(lipgloss.Left,
-			v.renderFrontierPanel(rightW, rightHalf),
-			v.renderInFlightPanel(rightW, rightHalf),
-			v.renderEventsPanel(rightW, remaining-2*rightHalf),
+			v.renderFrontierPanel(rightW, frontierH),
+			v.renderInFlightPanel(rightW, inFlightH),
+			v.renderEventsPanel(rightW, eventsH),
 		)
 	}
 
@@ -298,10 +341,7 @@ func (v *dashboardView) renderTopStrip(width int) string {
 
 func (v *dashboardView) renderTreePanel(width, height int) string {
 	active := v.focus == dashFocusTree
-	title := tuiPanelTitle.Render("Hypothesis tree")
-	if active {
-		title += " " + tuiDim.Render("(focused)")
-	}
+	title := tuiPanelTitle.Render("Hypothesis ") + tuiBoldYellow.Render("t") + tuiPanelTitle.Render("ree")
 	flat := flattenTree(v.snap.Tree)
 	if len(flat) == 0 {
 		return boxPanel(title, tuiDim.Render("(no hypotheses)"), width, height, active)
@@ -321,9 +361,6 @@ func (v *dashboardView) renderTreePanel(width, height int) string {
 func (v *dashboardView) renderFrontierPanel(width, height int) string {
 	active := v.focus == dashFocusFrontier
 	title := tuiPanelTitle.Render("Frontier")
-	if active {
-		title += " " + tuiDim.Render("(focused)")
-	}
 	snap := v.snap
 	if snap.Goal == nil {
 		return boxPanel(title, tuiDim.Render("(no goal set)"), width, height, active)
@@ -359,9 +396,6 @@ func (v *dashboardView) renderFrontierPanel(width, height int) string {
 func (v *dashboardView) renderInFlightPanel(width, height int) string {
 	active := v.focus == dashFocusInFlight
 	title := tuiPanelTitle.Render("In flight")
-	if active {
-		title += " " + tuiDim.Render("(focused)")
-	}
 	if len(v.snap.InFlight) == 0 {
 		return boxPanel(title, tuiDim.Render("(nothing in flight)"), width, height, active)
 	}
@@ -392,15 +426,22 @@ func (v *dashboardView) renderInFlightPanel(width, height int) string {
 
 func (v *dashboardView) renderEventsPanel(width, height int) string {
 	active := v.focus == dashFocusEvents
-	title := tuiPanelTitle.Render(fmt.Sprintf("Recent events (last %d)", len(v.snap.RecentEvents)))
-	if active {
-		title += " " + tuiDim.Render("(focused)")
+	events := v.currentEvents()
+	title := tuiPanelTitle.Render("Recent events")
+	switch {
+	case v.eventsLoading && len(events) > 0:
+		title += " " + tuiDim.Render("(loading more)")
+	case !v.eventsAllLoaded && v.eventsReady:
+		title += " " + tuiDim.Render("(scroll for older)")
 	}
-	if len(v.snap.RecentEvents) == 0 {
+	if v.eventsErr != nil && len(events) == 0 {
+		return boxPanel(title, tuiRed.Render("error: "+v.eventsErr.Error()), width, height, active)
+	}
+	if len(events) == 0 {
 		return boxPanel(title, tuiDim.Render("(no events yet)"), width, height, active)
 	}
 	lines := []string{}
-	for _, e := range v.snap.RecentEvents {
+	for _, e := range events {
 		subject := e.Subject
 		if subject == "" {
 			subject = "-"
@@ -423,12 +464,152 @@ func (v *dashboardView) renderEventsPanel(width, height int) string {
 	return boxPanel(title, strings.Join(lines, "\n"), width, height, active)
 }
 
-// boxPanel frames content in a bordered panel with a title line. In this
-// version of lipgloss, Width with horizontal Padding treats the padding as
-// *inside* the Width budget — so to get a panel whose total rendered width is
-// `width` (including the 2 border cells), we must set Width to `width-2` and
-// truncate each content line to `width-4` (border+padding). Callers are
-// expected to have already truncated their body lines to `width-4`.
+func loadDashboardSnapshotCmd(s *store.Store) tea.Cmd {
+	return func() tea.Msg {
+		snap, err := captureDashboard(s)
+		return dashLoadedMsg{snap: snap, err: err}
+	}
+}
+
+func loadDashboardEventsCmd(s *store.Store, offsetNewest, limit int, replace bool) tea.Cmd {
+	return func() tea.Msg {
+		list, allLoaded, err := readDashboardRecentEvents(s, offsetNewest, limit)
+		return dashEventsLoadedMsg{
+			list:      list,
+			allLoaded: allLoaded,
+			replace:   replace,
+			err:       err,
+		}
+	}
+}
+
+func (v *dashboardView) currentEvents() []store.Event {
+	if v.eventsReady {
+		return v.events
+	}
+	if v.snap != nil {
+		return v.snap.RecentEvents
+	}
+	return nil
+}
+
+func (v *dashboardView) selectedEventKey() string {
+	events := v.currentEvents()
+	idx := v.cursors[dashFocusEvents]
+	if idx < 0 || idx >= len(events) {
+		return ""
+	}
+	return dashboardEventKey(events[idx])
+}
+
+func (v *dashboardView) restoreEventCursor(selected string) {
+	if selected != "" {
+		for i, e := range v.currentEvents() {
+			if dashboardEventKey(e) == selected {
+				v.cursors[dashFocusEvents] = i
+				return
+			}
+		}
+	}
+	v.cursors[dashFocusEvents] = clampCursor(v.cursors[dashFocusEvents], len(v.currentEvents()))
+}
+
+func (v *dashboardView) maybeLoadMoreEvents(s *store.Store) tea.Cmd {
+	if s == nil || !v.eventsReady || v.eventsLoading || v.eventsAllLoaded || v.focus != dashFocusEvents {
+		return nil
+	}
+	if len(v.events)-1-v.cursors[dashFocusEvents] > dashboardRecentEventsPrefetchRows {
+		return nil
+	}
+	v.eventsLoading = true
+	return loadDashboardEventsCmd(s, len(v.events), dashboardRecentEventsPageSize, false)
+}
+
+func dashboardEventKey(e store.Event) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s",
+		e.Ts.UTC().Format(time.RFC3339Nano),
+		e.Kind,
+		e.Actor,
+		e.Subject,
+		string(e.Data),
+	)
+}
+
+func dashboardPanelHeight(rows, maxHeight int) int {
+	rows = max(rows, 1)
+	h := rows + 3
+	if h < dashboardCompactPanelMinHeight {
+		return dashboardCompactPanelMinHeight
+	}
+	if h > maxHeight {
+		return maxHeight
+	}
+	return h
+}
+
+func shrinkDashboardPanels(total, fillMin int, heights ...*int) {
+	used := fillMin
+	for _, h := range heights {
+		used += *h
+	}
+	for used > total {
+		shrunk := false
+		for _, h := range heights {
+			if *h > dashboardCompactPanelMinHeight && used > total {
+				*h--
+				used--
+				shrunk = true
+			}
+		}
+		if !shrunk {
+			return
+		}
+	}
+}
+
+func (v *dashboardView) rightColumnHeights(total int) (frontierH, inFlightH, eventsH int) {
+	frontierH = dashboardPanelHeight(v.frontierRows(), dashboardCompactPanelMaxHeight)
+	inFlightH = dashboardPanelHeight(v.inFlightRows(), dashboardCompactPanelMaxHeight)
+	shrinkDashboardPanels(total, dashboardCompactPanelMinHeight, &frontierH, &inFlightH)
+	eventsH = max(total-frontierH-inFlightH, dashboardCompactPanelMinHeight)
+	return frontierH, inFlightH, eventsH
+}
+
+func (v *dashboardView) stackedColumnHeights(total int) (treeH, frontierH, inFlightH, eventsH int) {
+	treeH = max(total*45/100, 8)
+	if treeH > total {
+		treeH = total
+	}
+	frontierH = dashboardPanelHeight(v.frontierRows(), dashboardCompactPanelMaxHeight)
+	inFlightH = dashboardPanelHeight(v.inFlightRows(), dashboardCompactPanelMaxHeight)
+	for treeH+frontierH+inFlightH+dashboardCompactPanelMinHeight > total && treeH > 4 {
+		treeH--
+	}
+	shrinkDashboardPanels(total-treeH, dashboardCompactPanelMinHeight, &frontierH, &inFlightH)
+	eventsH = max(total-treeH-frontierH-inFlightH, dashboardCompactPanelMinHeight)
+	return treeH, frontierH, inFlightH, eventsH
+}
+
+func (v *dashboardView) frontierRows() int {
+	if v.snap == nil || v.snap.Goal == nil || len(v.snap.Frontier) == 0 {
+		return 1
+	}
+	return len(v.snap.Frontier)
+}
+
+func (v *dashboardView) inFlightRows() int {
+	if v.snap == nil || len(v.snap.InFlight) == 0 {
+		return 1
+	}
+	return len(v.snap.InFlight)
+}
+
+// boxPanel frames content in a bordered panel. In this version of lipgloss,
+// Width with horizontal Padding treats the padding as *inside* the Width
+// budget — so to get a panel whose total rendered width is `width`
+// (including the 2 border cells), we must set Width to `width-2` and
+// truncate each content line to `width-4` (border+padding). The title is
+// overlaid onto the top border so it does not consume a body row.
 func boxPanel(title, content string, width, height int, active bool) string {
 	style := tuiPanelBorder
 	if active {
@@ -436,10 +617,43 @@ func boxPanel(title, content string, width, height int, active bool) string {
 	}
 	inner := max(width-4, 10)
 	innerH := max(height-2, 1)
-	// Truncate title to inner so long titles don't wrap either.
-	title = truncDisplay(title, inner)
-	content = clampLines(content, innerH-1, inner)
-	body := title + "\n" + content
-	return style.Width(width - 2).Render(body)
+	content = clampLines(content, innerH, inner)
+	panel := style.Width(width - 2).Render(content)
+	if title == "" {
+		return panel
+	}
+	return panelWithBorderTitle(panel, title, width, style)
 }
 
+func panelWithBorderTitle(panel, title string, width int, style lipgloss.Style) string {
+	if width < 8 {
+		return panel
+	}
+	lines := strings.Split(panel, "\n")
+	if len(lines) == 0 {
+		return panel
+	}
+	borderParts := style.GetBorderStyle()
+	border := lipgloss.NewStyle().
+		Foreground(style.GetBorderTopForeground()).
+		Background(style.GetBorderTopBackground())
+
+	innerW := max(width-lipgloss.Width(borderParts.TopLeft)-lipgloss.Width(borderParts.TopRight), 0)
+	leftSep := borderParts.MiddleRight + " "
+	rightSep := " " + borderParts.MiddleLeft
+	leftRun := 1
+	maxTitleW := innerW - leftRun - lipgloss.Width(leftSep) - lipgloss.Width(rightSep)
+	if maxTitleW < 1 {
+		leftRun = 0
+		maxTitleW = innerW - lipgloss.Width(leftSep) - lipgloss.Width(rightSep)
+	}
+	title = truncDisplay(title, max(maxTitleW, 1))
+	rightRun := max(innerW-leftRun-lipgloss.Width(leftSep)-lipgloss.Width(title)-lipgloss.Width(rightSep), 0)
+
+	lines[0] =
+		border.Render(borderParts.TopLeft+strings.Repeat(borderParts.Top, leftRun)) +
+			border.Render(leftSep) +
+			title +
+			border.Render(rightSep+strings.Repeat(borderParts.Top, rightRun)+borderParts.TopRight)
+	return strings.Join(lines, "\n")
+}

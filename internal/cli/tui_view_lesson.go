@@ -122,9 +122,12 @@ func (v *lessonListView) view(width, height int) string {
 // ---- detail view ----
 
 type lessonDetailView struct {
-	id  string
-	l   *entity.Lesson
-	err error
+	id            string
+	l             *entity.Lesson
+	err           error
+	rendered      string
+	renderedWidth int
+	pager         pagerState
 }
 
 type lessonDetailLoadedMsg struct {
@@ -133,7 +136,7 @@ type lessonDetailLoadedMsg struct {
 }
 
 func newLessonDetailView(id string) *lessonDetailView {
-	return &lessonDetailView{id: id}
+	return &lessonDetailView{id: id, renderedWidth: -1}
 }
 
 func (v *lessonDetailView) title() string { return "Lesson " + v.id }
@@ -151,21 +154,32 @@ func (v *lessonDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd
 	case lessonDetailLoadedMsg:
 		v.l = msg.l
 		v.err = msg.err
+		v.renderedWidth = -1
+		if v.pager.ready {
+			v.pager.setContent(v.ensureRendered(v.pager.vp.Width))
+			v.pager.gotoTop()
+		}
 		return v, nil
 	case tuiTickMsg:
 		return v, v.init(s)
+	case tea.KeyMsg:
+		return v, v.pager.handleKey(msg)
+	case tea.MouseMsg:
+		return v, v.pager.handleMouse(msg)
 	}
 	return v, nil
 }
 
-func (v *lessonDetailView) hints() []tuiHint { return nil }
+func (v *lessonDetailView) hints() []tuiHint {
+	return []tuiHint{{"g/G", "top/bot"}, {"↑↓/PgUp/PgDn", "scroll"}}
+}
 
-func (v *lessonDetailView) view(width, height int) string {
-	if v.err != nil {
-		return tuiRed.Render("error: " + v.err.Error())
+func (v *lessonDetailView) ensureRendered(width int) string {
+	if width <= 0 {
+		width = 80
 	}
-	if v.l == nil {
-		return tuiDim.Render("loading…")
+	if v.rendered != "" && v.renderedWidth == width {
+		return v.rendered
 	}
 	l := v.l
 	lines := []string{}
@@ -173,7 +187,7 @@ func (v *lessonDetailView) view(width, height int) string {
 	lines = append(lines, tuiDim.Render("author=")+l.Author)
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render("Claim:"))
-	lines = append(lines, wrap(l.Claim, width-2))
+	lines = append(lines, wrap(l.Claim, max(width-2, 1)))
 	if len(l.Subjects) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, tuiBold.Render("From:"))
@@ -194,12 +208,25 @@ func (v *lessonDetailView) view(width, height int) string {
 			lines = append(lines, tuiBoldYellow.Render("superseded by: ")+l.SupersededByID)
 		}
 	}
-	if strings.TrimSpace(l.Body) != "" {
+	if body := strings.TrimSpace(l.Body); body != "" {
 		lines = append(lines, "")
-		lines = append(lines, tuiBold.Render("Body:"))
-		lines = append(lines, strings.TrimSpace(l.Body))
+		lines = append(lines, strings.TrimRight(renderMarkdown(width, body), "\n"))
 	}
-	return clampLines(strings.Join(lines, "\n"), height, width)
+	v.rendered = strings.Join(lines, "\n")
+	v.renderedWidth = width
+	return v.rendered
+}
+
+func (v *lessonDetailView) view(width, height int) string {
+	if v.err != nil {
+		return tuiRed.Render("error: " + v.err.Error())
+	}
+	if v.l == nil {
+		return tuiDim.Render("loading…")
+	}
+	v.pager.ensureSize(width, height)
+	v.pager.setContent(v.ensureRendered(width))
+	return v.pager.view()
 }
 
 // ---- badges ----

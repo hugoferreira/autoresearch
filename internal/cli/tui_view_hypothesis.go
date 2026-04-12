@@ -129,13 +129,14 @@ func (v *hypothesisListView) view(width, height int) string {
 // ---- detail view ----
 
 type hypothesisDetailView struct {
-	id    string
-	h     *entity.Hypothesis
-	exps  []*entity.Experiment
-	concls []*entity.Conclusion
-	obs   []*entity.Observation
-	compact bool
-	err   error
+	id         string
+	h          *entity.Hypothesis
+	exps       []*entity.Experiment
+	concls     []*entity.Conclusion
+	obs        []*entity.Observation
+	linkCursor int
+	compact    bool
+	err        error
 }
 
 type hypDetailLoadedMsg struct {
@@ -191,13 +192,36 @@ func (v *hypothesisDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea
 			if v.h != nil {
 				return v, tuiPush(newReportView(v.h.ID))
 			}
+		case "up", "k":
+			if !v.compact {
+				moveCursor(&v.linkCursor, -1, len(v.detailLinks()))
+			}
+		case "down", "j":
+			if !v.compact {
+				moveCursor(&v.linkCursor, 1, len(v.detailLinks()))
+			}
+		case "g":
+			if !v.compact && len(v.detailLinks()) > 0 {
+				v.linkCursor = 0
+			}
+		case "G":
+			if !v.compact && len(v.detailLinks()) > 0 {
+				v.linkCursor = len(v.detailLinks()) - 1
+			}
+		case "enter":
+			if !v.compact {
+				return v, v.openSelectedLink()
+			}
 		}
 	}
 	return v, nil
 }
 
 func (v *hypothesisDetailView) hints() []tuiHint {
-	return []tuiHint{{"r", "report"}}
+	if v.compact {
+		return []tuiHint{{"r", "report"}}
+	}
+	return []tuiHint{{"↑↓", "link"}, {"Enter", "open"}, {"g/G", "top/bot"}, {"r", "report"}}
 }
 
 func (v *hypothesisDetailView) view(width, height int) string {
@@ -207,8 +231,55 @@ func (v *hypothesisDetailView) view(width, height int) string {
 	if v.h == nil {
 		return tuiDim.Render("loading…")
 	}
+	lines, links := v.renderLines(width)
+	if !v.compact && len(links) > 0 {
+		v.linkCursor = clampCursor(v.linkCursor, len(links))
+		lines = truncLines(lines, width)
+		lines = highlightRow(lines, links[v.linkCursor].line, width)
+		lines = scrollWindow(lines, links[v.linkCursor].line, height)
+		return strings.Join(lines, "\n")
+	}
+	return clampLines(strings.Join(lines, "\n"), height, width)
+}
+
+type hypDetailLink struct {
+	kind string
+	id   string
+	line int
+}
+
+const (
+	hypDetailLinkExperiment  = "experiment"
+	hypDetailLinkConclusion  = "conclusion"
+	hypDetailLinkObservation = "observation"
+)
+
+func (v *hypothesisDetailView) detailLinks() []hypDetailLink {
+	_, links := v.renderLines(100)
+	return links
+}
+
+func (v *hypothesisDetailView) openSelectedLink() tea.Cmd {
+	links := v.detailLinks()
+	if len(links) == 0 {
+		return nil
+	}
+	link := links[clampCursor(v.linkCursor, len(links))]
+	switch link.kind {
+	case hypDetailLinkExperiment:
+		return tuiPush(newExperimentDetailView(link.id))
+	case hypDetailLinkConclusion:
+		return tuiPush(newConclusionDetailView(link.id))
+	case hypDetailLinkObservation:
+		return tuiPush(newObservationDetailView(link.id))
+	}
+	return nil
+}
+
+func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink) {
 	h := v.h
 	lines := []string{}
+	links := []hypDetailLink{}
 	lines = append(lines, tuiBold.Render(h.ID)+"  "+tuiStatusGlyph(h.Status)+"  "+h.Status)
 	lines = append(lines, tuiDim.Render("author=")+h.Author+"  "+tuiDim.Render("parent=")+emptyDash(h.Parent))
 	lines = append(lines, "")
@@ -233,6 +304,7 @@ func (v *hypothesisDetailView) view(width, height int) string {
 		for _, e := range v.exps {
 			lines = append(lines, fmt.Sprintf("  %s  %s  tier=%s  inst=%s",
 				e.ID, tuiExpStatusBadge(e.Status), e.Tier, strings.Join(e.Instruments, ",")))
+			links = append(links, hypDetailLink{kind: hypDetailLinkExperiment, id: e.ID, line: len(lines) - 1})
 		}
 	}
 	lines = append(lines, "")
@@ -243,10 +315,11 @@ func (v *hypothesisDetailView) view(width, height int) string {
 		for _, c := range v.concls {
 			extras := ""
 			if c.Strict.RequestedFrom != "" {
-				extras = tuiDim.Render("  (downgraded from "+c.Strict.RequestedFrom+")")
+				extras = tuiDim.Render("  (downgraded from " + c.Strict.RequestedFrom + ")")
 			}
 			lines = append(lines, fmt.Sprintf("  %s  %s  delta_frac=%.4f  p=%.4g%s",
 				c.ID, tuiVerdictBadge(c.Verdict), c.Effect.DeltaFrac, c.Effect.PValue, extras))
+			links = append(links, hypDetailLink{kind: hypDetailLinkConclusion, id: c.ID, line: len(lines) - 1})
 		}
 	}
 	lines = append(lines, "")
@@ -262,11 +335,11 @@ func (v *hypothesisDetailView) view(width, height int) string {
 			o := v.obs[i]
 			lines = append(lines, fmt.Sprintf("  %s  %s=%.6g %s  n=%d  %s",
 				o.ID, o.Instrument, o.Value, o.Unit, o.Samples, tuiDim.Render(o.Experiment)))
+			links = append(links, hypDetailLink{kind: hypDetailLinkObservation, id: o.ID, line: len(lines) - 1})
 		}
 		if max < len(v.obs) {
 			lines = append(lines, tuiDim.Render(fmt.Sprintf("  … %d more", len(v.obs)-max)))
 		}
 	}
-	return clampLines(strings.Join(lines, "\n"), height, width)
+	return lines, links
 }
-

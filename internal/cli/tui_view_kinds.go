@@ -5,30 +5,31 @@ package cli
 // multiple hypothesis lists. Keep the strings stable — if a future test
 // asserts on kinds it will anchor on these values.
 const (
-	kindDashboard        = "dashboard"
-	kindHypothesisList   = "hypothesis.list"
-	kindHypothesisReport = "hypothesis.list.report" // list in "pick for report" mode
-	kindHypothesisDetail = "hypothesis.detail"
-	kindExperimentList   = "experiment.list"
-	kindExperimentDetail = "experiment.detail"
-	kindConclusionList   = "conclusion.list"
-	kindConclusionDetail = "conclusion.detail"
-	kindEventList        = "event.list"
-	kindEventDetail      = "event.detail"
-	kindTree             = "tree"
-	kindFrontier         = "frontier"
-	kindGoal             = "goal"
-	kindStatus           = "status"
-	kindArtifactList     = "artifact.list"
-	kindArtifactView     = "artifact.view"
-	kindArtifactDiff     = "artifact.diff"
-	kindReport           = "report"
-	kindInstrumentList   = "instrument.list"
-	kindLessonList       = "lesson.list"
-	kindLessonDetail     = "lesson.detail"
+	kindDashboard         = "dashboard"
+	kindHypothesisList    = "hypothesis.list"
+	kindHypothesisReport  = "hypothesis.list.report" // list in "pick for report" mode
+	kindHypothesisDetail  = "hypothesis.detail"
+	kindExperimentList    = "experiment.list"
+	kindExperimentDetail  = "experiment.detail"
+	kindConclusionList    = "conclusion.list"
+	kindConclusionDetail  = "conclusion.detail"
+	kindObservationDetail = "observation.detail"
+	kindEventList         = "event.list"
+	kindEventDetail       = "event.detail"
+	kindTree              = "tree"
+	kindFrontier          = "frontier"
+	kindGoal              = "goal"
+	kindStatus            = "status"
+	kindArtifactList      = "artifact.list"
+	kindArtifactView      = "artifact.view"
+	kindArtifactDiff      = "artifact.diff"
+	kindReport            = "report"
+	kindInstrumentList    = "instrument.list"
+	kindLessonList        = "lesson.list"
+	kindLessonDetail      = "lesson.detail"
 )
 
-func (v *dashboardView) kind() string         { return kindDashboard }
+func (v *dashboardView) kind() string { return kindDashboard }
 func (v *hypothesisListView) kind() string {
 	if v.reportMode {
 		return kindHypothesisReport
@@ -40,6 +41,7 @@ func (v *experimentListView) kind() string    { return kindExperimentList }
 func (v *experimentDetailView) kind() string  { return kindExperimentDetail }
 func (v *conclusionListView) kind() string    { return kindConclusionList }
 func (v *conclusionDetailView) kind() string  { return kindConclusionDetail }
+func (v *observationDetailView) kind() string { return kindObservationDetail }
 func (v *eventListView) kind() string         { return kindEventList }
 func (v *eventDetailView) kind() string       { return kindEventDetail }
 func (v *treeView) kind() string              { return kindTree }

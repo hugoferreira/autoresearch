@@ -70,6 +70,24 @@ func (v *reportView) hints() []tuiHint {
 	return []tuiHint{{"g/G", "top/bot"}, {"↑↓/PgUp/PgDn", "scroll"}}
 }
 
+func renderMarkdown(width int, md string) string {
+	if width <= 0 {
+		width = 80
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return md
+	}
+	out, err := r.Render(md)
+	if err != nil {
+		return md
+	}
+	return out
+}
+
 // ensureRendered returns the glamour-styled body, rendering (or re-rendering)
 // it if the cache is stale against `width`. Glamour wraps paragraphs to a
 // fixed column budget, so width changes invalidate the cache. Errors fall
@@ -81,18 +99,7 @@ func (v *reportView) ensureRendered(width int) string {
 	if v.rendered != "" && v.renderedWidth == width {
 		return v.rendered
 	}
-	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(width),
-	)
-	if err != nil {
-		return v.md
-	}
-	out, err := r.Render(v.md)
-	if err != nil {
-		return v.md
-	}
-	v.rendered = out
+	v.rendered = renderMarkdown(width, v.md)
 	v.renderedWidth = width
 	return v.rendered
 }

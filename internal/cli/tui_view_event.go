@@ -11,12 +11,12 @@ import (
 // ---- list view ----
 
 type eventListView struct {
-	all      []store.Event
-	filtered []store.Event
-	cursor   int
+	all        []store.Event
+	filtered   []store.Event
+	cursor     int
 	kindFilter string // filter token ("" = all)
-	follow   bool
-	err      error
+	follow     bool
+	err        error
 }
 
 type eventListLoadedMsg struct {
@@ -88,7 +88,7 @@ func (v *eventListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		case "G":
 			v.cursor = clampCursor(len(v.filtered)-1, len(v.filtered))
 			v.follow = true
-		case "F":
+		case "W":
 			v.follow = !v.follow
 		case "f":
 			v.kindFilter = nextStatusFilter(v.kindFilter, eventKindFilters)
@@ -110,7 +110,7 @@ func (v *eventListView) hints() []tuiHint {
 	return []tuiHint{
 		{"↑↓", "move"}, {"Enter", "open"},
 		{"f", "kind:" + filterLabel(v.kindFilter)},
-		{"F", "follow:" + follow},
+		{"W", "follow:" + follow},
 		{"g/G", "top/bottom"},
 	}
 }
@@ -153,9 +153,9 @@ func newEventDetailCompact(e store.Event) *eventDetailView {
 
 func (v *eventDetailView) title() string { return "Event " + v.e.Kind }
 
-func (v *eventDetailView) init(_ *store.Store) tea.Cmd            { return nil }
+func (v *eventDetailView) init(_ *store.Store) tea.Cmd                         { return nil }
 func (v *eventDetailView) update(_ tea.Msg, _ *store.Store) (tuiView, tea.Cmd) { return v, nil }
-func (v *eventDetailView) hints() []tuiHint                       { return nil }
+func (v *eventDetailView) hints() []tuiHint                                    { return nil }
 
 func (v *eventDetailView) view(width, height int) string {
 	lines := []string{}

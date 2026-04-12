@@ -26,7 +26,7 @@ main agent session, which translates intent into CLI calls.
 
 Press ? inside the TUI for a full key reference. Top-level jumps:
 H hypotheses  E experiments  C conclusions  L log
-T tree  F frontier  G goal  S status  D dashboard
+T tree  F frontier  O goal  S status  D dashboard
 A artifacts  I instruments  R report picker`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !term.IsTerminal(int(os.Stdout.Fd())) {

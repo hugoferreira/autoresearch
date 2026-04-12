@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Smoke tests for TUI views. We skip the real Bubble Tea program loop and
@@ -46,8 +48,8 @@ func tuiRichSnapshot() *dashboardSnapshot {
 			Instruments: []string{"qemu_cycles", "host_test"}, ImplementedAt: &impAt, ElapsedS: 120,
 		}},
 		RecentEvents: []store.Event{
+			{Ts: now.Add(time.Second), Kind: "experiment.design", Actor: "agent:des", Subject: "E-0007"},
 			{Ts: now, Kind: "hypothesis.add", Actor: "agent:gen", Subject: "H-0003"},
-			{Ts: now, Kind: "experiment.design", Actor: "agent:des", Subject: "E-0007"},
 		},
 		CapturedAt: now,
 	}
@@ -122,6 +124,48 @@ func TestTUI_HypothesisDetail(t *testing.T) {
 	}
 }
 
+func TestTUI_HypothesisDetailOpensLinkedEntities(t *testing.T) {
+	v := newHypothesisDetailView("H-0001")
+	h := &entity.Hypothesis{
+		ID: "H-0001", Claim: "unroll the FIR tap loop", Status: entity.StatusOpen,
+		Predicts: entity.Predicts{Instrument: "host_timing", Target: "dsp_fir", Direction: "decrease"},
+	}
+	exps := []*entity.Experiment{{
+		ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Tier: "host", Instruments: []string{"host_timing"},
+	}}
+	concls := []*entity.Conclusion{{
+		ID: "C-0001", Hypothesis: "H-0001", Verdict: entity.VerdictSupported,
+		Effect: entity.Effect{DeltaFrac: -0.12, PValue: 0.01},
+	}}
+	obs := []*entity.Observation{{
+		ID: "O-0001", Experiment: "E-0001", Instrument: "host_timing", Value: 1.2, Unit: "s", Samples: 5,
+	}}
+	nv, _ := v.update(hypDetailLoadedMsg{h: h, exps: exps, concls: concls, obs: obs}, nil)
+	hv := nv.(*hypothesisDetailView)
+
+	_, cmd := hv.update(tea.KeyMsg{Type: tea.KeyEnter}, nil)
+	push := cmd().(tuiPushMsg)
+	if got, want := push.v.kind(), kindExperimentDetail; got != want {
+		t.Fatalf("first linked target kind = %s, want %s", got, want)
+	}
+
+	nv, _ = hv.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}, nil)
+	hv = nv.(*hypothesisDetailView)
+	_, cmd = hv.update(tea.KeyMsg{Type: tea.KeyEnter}, nil)
+	push = cmd().(tuiPushMsg)
+	if got, want := push.v.kind(), kindConclusionDetail; got != want {
+		t.Fatalf("second linked target kind = %s, want %s", got, want)
+	}
+
+	nv, _ = hv.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}, nil)
+	hv = nv.(*hypothesisDetailView)
+	_, cmd = hv.update(tea.KeyMsg{Type: tea.KeyEnter}, nil)
+	push = cmd().(tuiPushMsg)
+	if got, want := push.v.kind(), kindObservationDetail; got != want {
+		t.Fatalf("third linked target kind = %s, want %s", got, want)
+	}
+}
+
 func TestTUI_ExperimentList(t *testing.T) {
 	v := newExperimentListView()
 	es := []*entity.Experiment{
@@ -153,6 +197,42 @@ func TestTUI_ExperimentDetail(t *testing.T) {
 	for _, want := range []string{"E-0007", "measured", "tier=qemu", "abc123def456", "O-0001", "qemu_cycles=750000", "pass"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("experiment detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ObservationDetail(t *testing.T) {
+	v := newObservationDetailView("O-0003")
+	pass := true
+	ciLow, ciHigh := 1.1, 1.3
+	o := &entity.Observation{
+		ID:         "O-0003",
+		Experiment: "E-0007",
+		Instrument: "host_timing",
+		MeasuredAt: time.Date(2026, 4, 12, 11, 0, 0, 0, time.UTC),
+		Value:      1.2,
+		Unit:       "s",
+		Samples:    5,
+		PerSample:  []float64{1.1, 1.2, 1.3},
+		CILow:      &ciLow,
+		CIHigh:     &ciHigh,
+		CIMethod:   "bca",
+		Pass:       &pass,
+		Artifacts: []entity.Artifact{{
+			Name: "primary", SHA: "abcdef1234567890", Path: "artifacts/ab/abcdef1234567890", Bytes: 2048,
+		}},
+		Command:     "make test",
+		ExitCode:    0,
+		Worktree:    "/tmp/wt",
+		BaselineSHA: "fedcba9876543210",
+		Author:      "agent:observer",
+		Aux:         map[string]any{"stdev": 0.04, "warm": true},
+	}
+	nv, _ := v.update(obsDetailLoadedMsg{o: o}, nil)
+	out := stripANSI(nv.view(120, 25))
+	for _, want := range []string{"O-0003", "host_timing=1.2 s", "experiment=E-0007", "Artifacts (1):", "make test", "stdev", "warm"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("observation detail missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -229,6 +309,34 @@ func TestTUI_EventListAndDetail(t *testing.T) {
 	}
 	_ = raw // ANSI color escapes are stripped in non-TTY tests; visual dump
 	// exercises the styled path.
+}
+
+func TestTUI_LessonDetailRendersMarkdown(t *testing.T) {
+	v := newLessonDetailView("L-0007")
+	l := &entity.Lesson{
+		ID:        "L-0007",
+		Claim:     "keep the 8x-unrolled FIR tap loop for this target",
+		Scope:     entity.LessonScopeHypothesis,
+		Status:    entity.LessonStatusActive,
+		Subjects:  []string{"H-0002", "C-0001"},
+		Tags:      []string{"fir", "unroll"},
+		Author:    "agent:analyst",
+		CreatedAt: time.Now().UTC(),
+		Body:      "# Lesson\n\n**Why**: this keeps `host_timing` low.\n\n- cache stays warm\n- _single-accumulator_ variant regresses\n",
+	}
+	nv, _ := v.update(lessonDetailLoadedMsg{l: l}, nil)
+	raw := nv.view(100, 24)
+	out := stripANSI(raw)
+	for _, want := range []string{"L-0007", "keep the 8x-unrolled FIR tap loop", "Why", "host_timing", "cache stays warm", "single-accumulator"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lesson detail missing %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"**Why**", "_single-accumulator_"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("lesson detail leaked raw markdown %q:\n%s", bad, out)
+		}
+	}
 }
 
 func TestTUI_PrettyJSON(t *testing.T) {
@@ -473,6 +581,50 @@ func TestTUI_JumpToCanonicalizes(t *testing.T) {
 	}
 }
 
+func TestTUI_EventListKeysDoNotConflictWithRootShortcuts(t *testing.T) {
+	v := newEventListView()
+	es := []store.Event{
+		{Ts: time.Now().UTC(), Kind: "init", Subject: "A"},
+		{Ts: time.Now().UTC(), Kind: "hypothesis.add", Subject: "B"},
+	}
+	nv, _ := v.update(eventListLoadedMsg{list: es}, nil)
+	ev := nv.(*eventListView)
+	ev.cursor = 0
+	ev.follow = false
+
+	m := newTuiModel(nil, 2*time.Second)
+	m.stack = []tuiView{newDashboardView(), ev}
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	m = model.(tuiModel)
+	if m.top().kind() != kindEventList {
+		t.Fatalf("G should stay in event list, top=%s", m.top().kind())
+	}
+	ev = m.top().(*eventListView)
+	if got, want := ev.cursor, len(ev.filtered)-1; got != want {
+		t.Fatalf("G should move cursor to bottom, got %d want %d", got, want)
+	}
+	if !ev.follow {
+		t.Fatalf("G should re-enable follow mode at the tail")
+	}
+
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'W'}})
+	m = model.(tuiModel)
+	ev = m.top().(*eventListView)
+	if ev.follow {
+		t.Fatalf("W should toggle follow mode off")
+	}
+}
+
+func TestTUI_GoalShortcutUsesO(t *testing.T) {
+	m := newTuiModel(nil, 2*time.Second)
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'O'}})
+	m = model.(tuiModel)
+	if m.top().kind() != kindGoal {
+		t.Fatalf("O should jump to goal view, top=%s", m.top().kind())
+	}
+}
+
 func TestTUI_DashboardForwardsLoadMsgToOverlay(t *testing.T) {
 	d := newDashboardView()
 	// Prime the dashboard with a snapshot so focus/cursor are meaningful.
@@ -502,6 +654,87 @@ func TestTUI_DashboardForwardsLoadMsgToOverlay(t *testing.T) {
 	}
 }
 
+func TestTUI_DashboardTreePanelTitleUsesBorder(t *testing.T) {
+	d := newDashboardView()
+	d.snap = tuiRichSnapshot()
+
+	out := stripANSI(d.renderTreePanel(60, 8))
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("tree panel rendered too few lines:\n%s", out)
+	}
+	if !strings.Contains(lines[0], "┤ Hypothesis tree ├") {
+		t.Fatalf("top border missing titled border treatment:\n%s", out)
+	}
+	if strings.Contains(lines[1], "Hypothesis tree") {
+		t.Fatalf("title should not consume the first content row:\n%s", out)
+	}
+}
+
+func TestTUI_DashboardRecentEventsPaging(t *testing.T) {
+	s := newStoreWithBuiltins(t)
+	base := time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 70; i++ {
+		if err := s.AppendEvent(store.Event{
+			Ts:      base.Add(time.Duration(i) * time.Second),
+			Kind:    "observation.record",
+			Subject: fmt.Sprintf("O-%03d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	d := newDashboardView()
+	nv, _ := d.update(dashLoadedMsg{snap: baseSnapshot()}, s)
+	d = nv.(*dashboardView)
+	d.focus = dashFocusEvents
+
+	msg := loadDashboardEventsCmd(s, 0, dashboardRecentEventsPageSize, true)()
+	nv, _ = d.update(msg, s)
+	d = nv.(*dashboardView)
+
+	if got, want := len(d.events), dashboardRecentEventsPageSize; got != want {
+		t.Fatalf("initial event page len = %d, want %d", got, want)
+	}
+	if got, want := d.events[0].Subject, "O-069"; got != want {
+		t.Fatalf("newest loaded event = %q, want %q", got, want)
+	}
+	if got, want := d.events[len(d.events)-1].Subject, "O-006"; got != want {
+		t.Fatalf("last event in first page = %q, want %q", got, want)
+	}
+
+	d.cursors[dashFocusEvents] = len(d.events) - 1
+	cmd := d.maybeLoadMoreEvents(s)
+	if cmd == nil {
+		t.Fatal("expected lazy-load command when cursor reaches older edge")
+	}
+	nv, _ = d.update(cmd(), s)
+	d = nv.(*dashboardView)
+
+	if got, want := len(d.events), 70; got != want {
+		t.Fatalf("paged event len = %d, want %d", got, want)
+	}
+	if got, want := d.events[len(d.events)-1].Subject, "O-000"; got != want {
+		t.Fatalf("oldest loaded event = %q, want %q", got, want)
+	}
+	if !d.eventsAllLoaded {
+		t.Fatalf("expected all events to be loaded after paging")
+	}
+}
+
+func TestTUI_DashboardRightColumnGivesEventsRemainder(t *testing.T) {
+	d := newDashboardView()
+	d.snap = tuiRichSnapshot()
+
+	frontierH, inFlightH, eventsH := d.rightColumnHeights(30)
+	if eventsH <= frontierH {
+		t.Fatalf("events panel height = %d, want > frontier height %d", eventsH, frontierH)
+	}
+	if eventsH <= inFlightH {
+		t.Fatalf("events panel height = %d, want > in-flight height %d", eventsH, inFlightH)
+	}
+}
+
 // TestTUI_DashboardVisualDump renders a realistic dashboard snapshot and
 // dumps it with t.Log so `go test -v -run VisualDump` lets a human
 // eyeball the layout. No assertions — this is a development aid.
@@ -514,7 +747,7 @@ func TestTUI_DashboardVisualDump(t *testing.T) {
 	now := snap.CapturedAt
 	for i := 0; i < 10; i++ {
 		snap.RecentEvents = append(snap.RecentEvents, store.Event{
-			Ts: now.Add(time.Duration(i) * time.Second),
+			Ts:   now.Add(time.Duration(i) * time.Second),
 			Kind: "observation.record", Actor: "agent:observer",
 			Subject: "O-00" + string(rune('0'+i)),
 		})
@@ -526,7 +759,7 @@ func TestTUI_DashboardVisualDump(t *testing.T) {
 	m.width, m.height = 130, 40
 	m.chrome = chromeLoadedMsg{
 		paused: true, pauseReason: "10/10 experiment budget reached",
-		mode: "strict",
+		mode:   "strict",
 		counts: map[string]int{"hypotheses": 10, "experiments": 4, "observations": 37, "conclusions": 9},
 	}
 	top := m.top()
@@ -633,7 +866,7 @@ func TestTUI_EventDetailVisualDump(t *testing.T) {
 		Kind:    "conclusion.critic_downgrade",
 		Actor:   "agent:critic",
 		Subject: "C-0042",
-		Data: []byte(`{"from":"supported","to":"inconclusive","hypothesis":"H-0007","reasons":["size_flash exceeded 65536","n_candidate=3 below min_samples=5"],"n_candidate":3,"p_value":0.021,"strict":true,"reviewed_by":null}`),
+		Data:    []byte(`{"from":"supported","to":"inconclusive","hypothesis":"H-0007","reasons":["size_flash exceeded 65536","n_candidate=3 below min_samples=5"],"n_candidate":3,"p_value":0.021,"strict":true,"reviewed_by":null}`),
 	}
 	d := newEventDetailView(ev)
 	t.Log("\n" + d.view(120, 30))
