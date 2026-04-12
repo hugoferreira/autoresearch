@@ -49,6 +49,63 @@ func truncLines(lines []string, width int) []string {
 	return out
 }
 
+// fmtValue formats a numeric value with a compact unit suffix.
+// Seconds are scaled to ns/us/ms/s; bytes shortened to B; everything
+// else gets 2 decimal places + the raw unit.
+func fmtValue(v float64, unit string) string {
+	switch unit {
+	case "seconds", "s":
+		switch {
+		case v == 0:
+			return "0s"
+		case v < 1e-6:
+			return fmt.Sprintf("%.2fns", v*1e9)
+		case v < 1e-3:
+			return fmt.Sprintf("%.2fus", v*1e6)
+		case v < 1:
+			return fmt.Sprintf("%.2fms", v*1e3)
+		default:
+			return fmt.Sprintf("%.2fs", v)
+		}
+	case "bytes":
+		if v >= 1024*1024 {
+			return fmt.Sprintf("%.1fMB", v/(1024*1024))
+		}
+		if v >= 1024 {
+			return fmt.Sprintf("%.1fKB", v/1024)
+		}
+		return fmt.Sprintf("%.0fB", v)
+	default:
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d%s", int64(v), shortUnit(unit))
+		}
+		return fmt.Sprintf("%.2f%s", v, shortUnit(unit))
+	}
+}
+
+func shortUnit(u string) string {
+	switch u {
+	case "cycles":
+		return "cyc"
+	case "instructions":
+		return "ins"
+	case "pass":
+		return ""
+	default:
+		return u
+	}
+}
+
+// stripLeftMargin removes up to `n` leading spaces from each line of s.
+func stripLeftMargin(s string, n int) string {
+	prefix := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimPrefix(l, prefix)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // padRight right-pads s with spaces to the given *visible* width. Shorter
 // strings are extended; longer ones are returned unchanged (truncate first
 // if you need a hard cap).

@@ -54,10 +54,6 @@ func hypothesisAddCmd() *cobra.Command {
 			if strings.TrimSpace(claim) == "" {
 				return errors.New("--claim is required")
 			}
-			if author == "" {
-				author = "human"
-			}
-
 			s, err := openStoreLive()
 			if err != nil {
 				return err
@@ -96,7 +92,7 @@ func hypothesisAddCmd() *cobra.Command {
 				},
 				KillIf:    killIf,
 				Status:    entity.StatusOpen,
-				Author:    author,
+				Author:    or(author, "human"),
 				CreatedAt: nowUTC(),
 				Tags:      tags,
 				Body:      entity.AppendMarkdownSection("", "Rationale", rationale),
@@ -105,11 +101,8 @@ func hypothesisAddCmd() *cobra.Command {
 				return err
 			}
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would add hypothesis (claim=%q)", claim),
-					map[string]any{"status": "dry-run", "hypothesis": h},
-				)
+			if err := dryRun(w, fmt.Sprintf("add hypothesis (claim=%q)", claim), map[string]any{"hypothesis": h}); err != nil {
+				return err
 			}
 
 			id, err := s.AllocID(store.KindHypothesis)
@@ -124,12 +117,7 @@ func hypothesisAddCmd() *cobra.Command {
 			if snippet := truncate(strings.TrimSpace(rationale), 200); snippet != "" {
 				eventData["rationale"] = snippet
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "hypothesis.add",
-				Actor:   author,
-				Subject: id,
-				Data:    jsonRaw(eventData),
-			}); err != nil {
+			if err := emitEvent(s, "hypothesis.add", or(author, "human"), id, eventData); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -145,7 +133,7 @@ func hypothesisAddCmd() *cobra.Command {
 	c.Flags().StringVar(&predDirection, "predicts-direction", "", "predicted direction: increase | decrease (required)")
 	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum fractional effect required to call it supported (required)")
 	c.Flags().StringArrayVar(&killIf, "kill-if", nil, "kill criterion; may be repeated (at least one required)")
-	c.Flags().StringVar(&author, "author", "", "author (e.g. human:alice, agent:generator)")
+	addAuthorFlag(c, &author, "")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&rationale, "rationale", "", "one-line rationale: why this hypothesis, what evidence or lesson led you here (persisted in the hypothesis body under `# Rationale`; first 200 chars also land on the hypothesis.add event)")
 	return c
@@ -239,7 +227,7 @@ func hypothesisShowCmd() *cobra.Command {
 }
 
 func hypothesisPromoteCmd() *cobra.Command {
-	var reason string
+	var reason, author string
 	c := &cobra.Command{
 		Use:   "promote <id>",
 		Short: "Mark a hypothesis as human-priority (picked first by the generator)",
@@ -264,21 +252,13 @@ An explicit --reason is required and recorded in the event log.`,
 				return fmt.Errorf("%s is killed; reopen before promoting", h.ID)
 			}
 			h.Priority = "human"
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would promote %s (%s)", h.ID, reason),
-					map[string]any{"status": "dry-run", "id": h.ID, "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("promote %s (%s)", h.ID, reason), map[string]any{"id": h.ID, "reason": reason}); err != nil {
+				return err
 			}
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "hypothesis.promote",
-				Actor:   "human",
-				Subject: h.ID,
-				Data:    jsonRaw(map[string]string{"reason": reason}),
-			}); err != nil {
+			if err := emitEvent(s, "hypothesis.promote", or(author, "human"), h.ID, map[string]string{"reason": reason}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -288,11 +268,12 @@ An explicit --reason is required and recorded in the event log.`,
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "why the hypothesis is being promoted (required)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 
 func hypothesisKillCmd() *cobra.Command {
-	var reason string
+	var reason, author string
 	c := &cobra.Command{
 		Use:   "kill <id>",
 		Short: "Kill a hypothesis (status -> killed) with a reason",
@@ -314,24 +295,13 @@ func hypothesisKillCmd() *cobra.Command {
 				return fmt.Errorf("%s is already killed", h.ID)
 			}
 			h.Status = entity.StatusKilled
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would kill %s (%s)", h.ID, reason),
-					map[string]any{"status": "dry-run", "id": h.ID, "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("kill %s (%s)", h.ID, reason), map[string]any{"id": h.ID, "reason": reason}); err != nil {
+				return err
 			}
-			// NOTE: we already opened via openStoreLive() so the pause gate
-			// has fired; s is fresh from that call.
-			_ = s
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "hypothesis.kill",
-				Actor:   "human",
-				Subject: h.ID,
-				Data:    jsonRaw(map[string]string{"reason": reason}),
-			}); err != nil {
+			if err := emitEvent(s, "hypothesis.kill", or(author, "human"), h.ID, map[string]string{"reason": reason}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -341,11 +311,12 @@ func hypothesisKillCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "reason for killing (required)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 
 func hypothesisReopenCmd() *cobra.Command {
-	var reason string
+	var reason, author string
 	c := &cobra.Command{
 		Use:   "reopen <id>",
 		Short: "Reopen a killed hypothesis (status killed -> open)",
@@ -371,21 +342,13 @@ and logged.`,
 				return fmt.Errorf("%s has status %q; reopen is only valid for killed hypotheses (refuted/supported are conclusive)", h.ID, h.Status)
 			}
 			h.Status = entity.StatusOpen
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would reopen %s (%s)", h.ID, reason),
-					map[string]any{"status": "dry-run", "id": h.ID, "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("reopen %s (%s)", h.ID, reason), map[string]any{"id": h.ID, "reason": reason}); err != nil {
+				return err
 			}
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "hypothesis.reopen",
-				Actor:   "human",
-				Subject: h.ID,
-				Data:    jsonRaw(map[string]string{"reason": reason}),
-			}); err != nil {
+			if err := emitEvent(s, "hypothesis.reopen", or(author, "human"), h.ID, map[string]string{"reason": reason}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -395,6 +358,7 @@ and logged.`,
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "why the hypothesis is being reopened (required)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 
@@ -572,23 +536,18 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if exp.Branch == "" {
 				return fmt.Errorf("%s has no branch (status=%s)", exp.ID, exp.Status)
 			}
-			if globalDryRun {
-				verb := "cherry-pick"
-				if merge {
-					verb = "merge"
-				}
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would %s branch %s (experiment %s, conclusion %s)",
-						verb, exp.Branch, exp.ID, concl.ID),
-					map[string]any{
-						"status":     "dry-run",
-						"action":     verb,
-						"hypothesis": args[0],
-						"conclusion": concl.ID,
-						"experiment": exp.ID,
-						"branch":     exp.Branch,
-					},
-				)
+			verb := "cherry-pick"
+			if merge {
+				verb = "merge"
+			}
+			if err := dryRun(w, fmt.Sprintf("%s branch %s (experiment %s, conclusion %s)", verb, exp.Branch, exp.ID, concl.ID), map[string]any{
+				"action":     verb,
+				"hypothesis": args[0],
+				"conclusion": concl.ID,
+				"experiment": exp.ID,
+				"branch":     exp.Branch,
+			}); err != nil {
+				return err
 			}
 			var out string
 			if merge {

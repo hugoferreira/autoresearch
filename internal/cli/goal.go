@@ -99,6 +99,7 @@ func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
 
 func goalSetCmd() *cobra.Command {
 	var f goalFlags
+	var author string
 	c := &cobra.Command{
 		Use:   "set",
 		Short: "Bootstrap the first research goal (refuses if any goal already exists)",
@@ -138,11 +139,8 @@ goal.md and point --file at it.`,
 			if err := firewall.ValidateGoal(g, cfg); err != nil {
 				return err
 			}
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would bootstrap goal (objective: %s on %s)", g.Objective.Direction, g.Objective.Instrument),
-					map[string]any{"status": "dry-run", "goal": g},
-				)
+			if err := dryRun(w, fmt.Sprintf("bootstrap goal (objective: %s on %s)", g.Objective.Direction, g.Objective.Instrument), map[string]any{"goal": g}); err != nil {
+				return err
 			}
 			id, err := s.AllocID(store.KindGoal)
 			if err != nil {
@@ -161,14 +159,9 @@ goal.md and point --file at it.`,
 			}); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "goal.set",
-				Actor:   "human",
-				Subject: id,
-				Data: jsonRaw(map[string]any{
-					"instrument": g.Objective.Instrument,
-					"direction":  g.Objective.Direction,
-				}),
+			if err := emitEvent(s, "goal.set", author, id, map[string]any{
+				"instrument": g.Objective.Instrument,
+				"direction":  g.Objective.Direction,
 			}); err != nil {
 				return err
 			}
@@ -180,6 +173,7 @@ goal.md and point --file at it.`,
 		},
 	}
 	addGoalBodyFlags(c, &f)
+	addAuthorFlag(c, &author, "human")
 	return c
 }
 
@@ -188,6 +182,7 @@ func goalNewCmd() *cobra.Command {
 		f       goalFlags
 		from    string
 		trigger string
+		author  string
 	)
 	c := &cobra.Command{
 		Use:   "new",
@@ -253,11 +248,8 @@ a goal after the code has evolved is fundamentally a new circumstance.`,
 				return err
 			}
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would start new goal (objective: %s on %s, from=%q, trigger=%q)", g.Objective.Direction, g.Objective.Instrument, parentID, trigger),
-					map[string]any{"status": "dry-run", "goal": g, "derived_from": parentID, "trigger": trigger},
-				)
+			if err := dryRun(w, fmt.Sprintf("start new goal (objective: %s on %s, from=%q, trigger=%q)", g.Objective.Direction, g.Objective.Instrument, parentID, trigger), map[string]any{"goal": g, "derived_from": parentID, "trigger": trigger}); err != nil {
+				return err
 			}
 
 			id, err := s.AllocID(store.KindGoal)
@@ -279,16 +271,11 @@ a goal after the code has evolved is fundamentally a new circumstance.`,
 			}); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "goal.new",
-				Actor:   "human",
-				Subject: id,
-				Data: jsonRaw(map[string]any{
-					"instrument":   g.Objective.Instrument,
-					"direction":    g.Objective.Direction,
-					"derived_from": parentID,
-					"trigger":      g.Trigger,
-				}),
+			if err := emitEvent(s, "goal.new", author, id, map[string]any{
+				"instrument":   g.Objective.Instrument,
+				"direction":    g.Objective.Direction,
+				"derived_from": parentID,
+				"trigger":      g.Trigger,
 			}); err != nil {
 				return err
 			}
@@ -301,6 +288,7 @@ a goal after the code has evolved is fundamentally a new circumstance.`,
 	addGoalBodyFlags(c, &f)
 	c.Flags().StringVar(&from, "from", "", "parent goal id (defaults to most recently closed goal)")
 	c.Flags().StringVar(&trigger, "trigger", "", "H-/E-/O-/C- id that prompted this new goal (optional)")
+	addAuthorFlag(c, &author, "human")
 	return c
 }
 
@@ -318,7 +306,7 @@ func validateTrigger(trigger string) error {
 }
 
 func goalConcludeCmd() *cobra.Command {
-	var summary string
+	var summary, author string
 	c := &cobra.Command{
 		Use:   "conclude [G-NNNN]",
 		Short: "Mark the active goal (or the named goal) concluded",
@@ -330,15 +318,16 @@ If no id is given, the active goal is concluded. --summary is
 appended as a '# Closure' section on the goal body.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGoalClosure(args, summary, entity.GoalStatusConcluded, "goal.conclude", "concluded")
+			return runGoalClosure(args, summary, author, entity.GoalStatusConcluded, "goal.conclude", "concluded")
 		},
 	}
 	c.Flags().StringVar(&summary, "summary", "", "one-paragraph closure summary (optional, persisted on the goal body)")
+	addAuthorFlag(c, &author, "human")
 	return c
 }
 
 func goalAbandonCmd() *cobra.Command {
-	var reason string
+	var reason, author string
 	c := &cobra.Command{
 		Use:   "abandon [G-NNNN]",
 		Short: "Mark the active goal (or the named goal) abandoned",
@@ -350,14 +339,15 @@ a '# Closure' section.`,
 			if strings.TrimSpace(reason) == "" {
 				return errors.New("--reason is required for abandon")
 			}
-			return runGoalClosure(args, reason, entity.GoalStatusAbandoned, "goal.abandon", "abandoned")
+			return runGoalClosure(args, reason, author, entity.GoalStatusAbandoned, "goal.abandon", "abandoned")
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "why the goal is being abandoned (required)")
+	addAuthorFlag(c, &author, "human")
 	return c
 }
 
-func runGoalClosure(args []string, text, status, eventKind, label string) error {
+func runGoalClosure(args []string, text, author, status, eventKind, label string) error {
 	w := output.Default(globalJSON)
 	s, err := openStoreLive()
 	if err != nil {
@@ -383,11 +373,8 @@ func runGoalClosure(args []string, text, status, eventKind, label string) error 
 	if g.Status != entity.GoalStatusActive {
 		return fmt.Errorf("%s has status %q; only active goals can be %s", g.ID, g.Status, label)
 	}
-	if globalDryRun {
-		return w.Emit(
-			fmt.Sprintf("[dry-run] would mark %s %s", g.ID, label),
-			map[string]any{"status": "dry-run", "id": g.ID, "new_status": status},
-		)
+	if err := dryRun(w, fmt.Sprintf("mark %s %s", g.ID, label), map[string]any{"id": g.ID, "new_status": status}); err != nil {
+		return err
 	}
 	now := nowUTC()
 	g.Status = status
@@ -407,12 +394,7 @@ func runGoalClosure(args []string, text, status, eventKind, label string) error 
 			return err
 		}
 	}
-	if err := s.AppendEvent(store.Event{
-		Kind:    eventKind,
-		Actor:   "human",
-		Subject: g.ID,
-		Data:    jsonRaw(map[string]string{"reason": g.ClosureReason}),
-	}); err != nil {
+	if err := emitEvent(s, eventKind, author, g.ID, map[string]string{"reason": g.ClosureReason}); err != nil {
 		return err
 	}
 	return w.Emit(
@@ -555,14 +537,7 @@ func goalShowCmd() *cobra.Command {
 			w.Textln("")
 			w.Textln("constraints:")
 			for _, cst := range g.Constraints {
-				switch {
-				case cst.Max != nil:
-					w.Textf("  %-16s  max=%g\n", cst.Instrument, *cst.Max)
-				case cst.Min != nil:
-					w.Textf("  %-16s  min=%g\n", cst.Instrument, *cst.Min)
-				case cst.Require != "":
-					w.Textf("  %-16s  require=%s\n", cst.Instrument, cst.Require)
-				}
+				w.Textf("  %s\n", entity.FormatConstraint(cst))
 			}
 			if st := g.Steering(); st != "" {
 				w.Textln("")

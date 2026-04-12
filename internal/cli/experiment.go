@@ -53,10 +53,6 @@ func experimentDesignCmd() *cobra.Command {
 			if len(instruments) == 0 {
 				return errors.New("--instruments is required (at least one)")
 			}
-			if author == "" {
-				author = "agent:orchestrator"
-			}
-
 			s, err := openStoreLive()
 			if err != nil {
 				return err
@@ -88,7 +84,7 @@ func experimentDesignCmd() *cobra.Command {
 				Baseline:    entity.Baseline{Ref: baseline},
 				Instruments: instruments,
 				Budget:      entity.Budget{WallTimeS: wallTimeS, MaxSamples: maxSamples},
-				Author:      author,
+				Author:      or(author, "agent:orchestrator"),
 				CreatedAt:   nowUTC(),
 				Body:        entity.AppendMarkdownSection("", "Design notes", designNotes),
 			}
@@ -102,11 +98,8 @@ func experimentDesignCmd() *cobra.Command {
 			}
 			e.Baseline.SHA = sha
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would design experiment for %s (baseline=%s)", hypID, sha[:12]),
-					map[string]any{"status": "dry-run", "experiment": e},
-				)
+			if err := dryRun(w, fmt.Sprintf("design experiment for %s (baseline=%s)", hypID, sha[:12]), map[string]any{"experiment": e}); err != nil {
+				return err
 			}
 
 			id, err := s.AllocID(store.KindExperiment)
@@ -125,12 +118,7 @@ func experimentDesignCmd() *cobra.Command {
 			if snippet := truncate(strings.TrimSpace(designNotes), 200); snippet != "" {
 				eventData["design_notes"] = snippet
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "experiment.design",
-				Actor:   author,
-				Subject: id,
-				Data:    jsonRaw(eventData),
-			}); err != nil {
+			if err := emitEvent(s, "experiment.design", or(author, "agent:orchestrator"), id, eventData); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -141,7 +129,7 @@ func experimentDesignCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&baseline, "baseline", "HEAD", "git ref to use as baseline")
 	c.Flags().StringSliceVar(&instruments, "instruments", nil, "comma-separated instrument names (required)")
-	c.Flags().StringVar(&author, "author", "", "author (e.g. agent:orchestrator, human:alice)")
+	addAuthorFlag(c, &author, "")
 	c.Flags().IntVar(&wallTimeS, "wall-time-s", 0, "wall-time budget in seconds")
 	c.Flags().IntVar(&maxSamples, "max-samples", 0, "max samples for this experiment")
 	c.Flags().StringVar(&designNotes, "design-notes", "", "prose notes on why these instruments, this baseline (persisted in the experiment body under `# Design notes`; first 200 chars also land on the experiment.design event)")
@@ -177,11 +165,8 @@ func experimentImplementCmd() *cobra.Command {
 			wtPath := filepath.Join(wtRoot, id)
 			branch := "autoresearch/" + id
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would create worktree at %s on branch %s", wtPath, branch),
-					map[string]any{"status": "dry-run", "worktree": wtPath, "branch": branch},
-				)
+			if err := dryRun(w, fmt.Sprintf("create worktree at %s on branch %s", wtPath, branch), map[string]any{"worktree": wtPath, "branch": branch}); err != nil {
+				return err
 			}
 
 			if err := os.MkdirAll(wtRoot, 0o755); err != nil {
@@ -207,12 +192,7 @@ func experimentImplementCmd() *cobra.Command {
 			if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
 				eventData["impl_notes"] = snippet
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "experiment.implement",
-				Actor:   "system",
-				Subject: id,
-				Data:    jsonRaw(eventData),
-			}); err != nil {
+			if err := emitEvent(s, "experiment.implement", "system", id, eventData); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -226,7 +206,7 @@ func experimentImplementCmd() *cobra.Command {
 }
 
 func experimentResetCmd() *cobra.Command {
-	var reason string
+	var reason, author string
 	c := &cobra.Command{
 		Use:   "reset <exp-id>",
 		Short: "Reset an experiment back to 'designed' (preserves the abandoned branch)",
@@ -257,11 +237,8 @@ events.jsonl — the research history tells the truth about retries.`,
 
 			abandoned := fmt.Sprintf("%s@%d", e.Branch, nowUTC().UnixMilli())
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would reset %s (preserving %s as %s)", id, e.Branch, abandoned),
-					map[string]any{"status": "dry-run", "id": id, "abandoned_branch": abandoned, "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("reset %s (preserving %s as %s)", id, e.Branch, abandoned), map[string]any{"id": id, "abandoned_branch": abandoned, "reason": reason}); err != nil {
+				return err
 			}
 
 			if e.Worktree != "" {
@@ -283,16 +260,11 @@ events.jsonl — the research history tells the truth about retries.`,
 			if err := s.WriteExperiment(e); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "experiment.reset",
-				Actor:   "human",
-				Subject: id,
-				Data: jsonRaw(map[string]any{
-					"reason":           reason,
-					"from_status":      prevStatus,
-					"abandoned_branch": abandoned,
-					"preserved_from":   prevBranch,
-				}),
+			if err := emitEvent(s, "experiment.reset", or(author, "human"), id, map[string]any{
+				"reason":           reason,
+				"from_status":      prevStatus,
+				"abandoned_branch": abandoned,
+				"preserved_from":   prevBranch,
 			}); err != nil {
 				return err
 			}
@@ -303,6 +275,7 @@ events.jsonl — the research history tells the truth about retries.`,
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "why the experiment is being reset (required)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 

@@ -341,14 +341,7 @@ func (v *goalView) view(width, height int) string {
 		lines = append(lines, "  "+tuiDim.Render("(none)"))
 	} else {
 		for _, c := range g.Constraints {
-			switch {
-			case c.Max != nil:
-				lines = append(lines, fmt.Sprintf("  %s %s %g", c.Instrument, tuiDim.Render("≤"), *c.Max))
-			case c.Min != nil:
-				lines = append(lines, fmt.Sprintf("  %s %s %g", c.Instrument, tuiDim.Render("≥"), *c.Min))
-			case c.Require != "":
-				lines = append(lines, fmt.Sprintf("  %s require=%s", c.Instrument, tuiCyan.Render(c.Require)))
-			}
+			lines = append(lines, "  "+entity.FormatConstraint(c))
 		}
 	}
 	steering := g.Steering()

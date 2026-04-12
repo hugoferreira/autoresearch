@@ -25,7 +25,7 @@ func lifecycleCommands() []*cobra.Command {
 }
 
 func pauseCmd() *cobra.Command {
-	var reason string
+	var reason, author string
 	c := &cobra.Command{
 		Use:   "pause",
 		Short: "Pause all mutating activity (subagents and humans alike)",
@@ -52,11 +52,8 @@ Re-pausing while already paused is a no-op.`,
 					map[string]any{"status": "noop", "paused": true, "reason": st.PauseReason},
 				)
 			}
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would pause (reason=%q)", reason),
-					map[string]any{"status": "dry-run", "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("pause (reason=%q)", reason), map[string]any{"reason": reason}); err != nil {
+				return err
 			}
 			now := nowUTC()
 			err = s.UpdateState(func(st *store.State) error {
@@ -68,11 +65,7 @@ Re-pausing while already paused is a no-op.`,
 			if err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:  "pause",
-				Actor: "human",
-				Data:  jsonRaw(map[string]string{"reason": reason}),
-			}); err != nil {
+			if err := emitEvent(s, "pause", author, "", map[string]string{"reason": reason}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -82,11 +75,13 @@ Re-pausing while already paused is a no-op.`,
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "human-readable reason for pausing")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 
 func resumeCmd() *cobra.Command {
-	return &cobra.Command{
+	var author string
+	c := &cobra.Command{
 		Use:   "resume",
 		Short: "Resume after a pause",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -106,11 +101,8 @@ func resumeCmd() *cobra.Command {
 				)
 			}
 			prevReason := st.PauseReason
-			if globalDryRun {
-				return w.Emit(
-					"[dry-run] would resume",
-					map[string]any{"status": "dry-run"},
-				)
+			if err := dryRun(w, "resume", nil); err != nil {
+				return err
 			}
 			err = s.UpdateState(func(st *store.State) error {
 				st.Paused = false
@@ -121,11 +113,7 @@ func resumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:  "resume",
-				Actor: "human",
-				Data:  jsonRaw(map[string]string{"previous_reason": prevReason}),
-			}); err != nil {
+			if err := emitEvent(s, "resume", author, "", map[string]string{"previous_reason": prevReason}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -134,6 +122,8 @@ func resumeCmd() *cobra.Command {
 			)
 		},
 	}
+	addAuthorFlag(c, &author, "")
+	return c
 }
 
 func displayReason(reason string) string {

@@ -148,7 +148,7 @@ Spawn Agent:
 If the coder reports failure, reset from the main project:
 
 ```sh
-autoresearch experiment reset <exp-id> --reason "<what went wrong>"
+autoresearch experiment reset <exp-id> --reason "<what went wrong>" --author agent:orchestrator
 ```
 
 ### 4. Observe

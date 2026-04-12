@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -298,14 +299,7 @@ func (v *dashboardView) renderTopStrip(width int) string {
 		if len(snap.Goal.Constraints) > 0 {
 			var cs []string
 			for _, c := range snap.Goal.Constraints {
-				switch {
-				case c.Max != nil:
-					cs = append(cs, fmt.Sprintf("%s%s%g", c.Instrument, tuiDim.Render("≤"), *c.Max))
-				case c.Min != nil:
-					cs = append(cs, fmt.Sprintf("%s%s%g", c.Instrument, tuiDim.Render("≥"), *c.Min))
-				case c.Require != "":
-					cs = append(cs, fmt.Sprintf("%s=%s", c.Instrument, tuiCyan.Render(c.Require)))
-				}
+				cs = append(cs, entity.FormatConstraint(c))
 			}
 			line += tuiDim.Render("  |  ") + strings.Join(cs, tuiDim.Render("  "))
 		}

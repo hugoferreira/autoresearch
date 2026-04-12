@@ -323,18 +323,36 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 	if len(v.obs) == 0 {
 		lines = append(lines, "  "+tuiDim.Render("(none)"))
 	} else {
-		max := len(v.obs)
-		if v.compact && max > 5 {
-			max = 5
+		rows := [][]string{{"id", "instrument", "value", "n", "ci", "pass", "exp"}}
+		for _, o := range v.obs {
+			ci := ""
+			if o.CILow != nil && o.CIHigh != nil {
+				ci = fmt.Sprintf("[%s, %s]", fmtValue(*o.CILow, o.Unit), fmtValue(*o.CIHigh, o.Unit))
+			}
+			pass := ""
+			if o.Pass != nil {
+				if *o.Pass {
+					pass = "pass"
+				} else {
+					pass = "fail"
+				}
+			}
+			rows = append(rows, []string{
+				o.ID, o.Instrument,
+				fmtValue(o.Value, o.Unit),
+				fmt.Sprintf("%d", o.Samples),
+				ci, pass, o.Experiment,
+			})
 		}
-		for i := 0; i < max; i++ {
-			o := v.obs[i]
-			lines = append(lines, fmt.Sprintf("  %s  %s=%.6g %s  n=%d  %s",
-				o.ID, o.Instrument, o.Value, o.Unit, o.Samples, tuiDim.Render(o.Experiment)))
-			links = append(links, hypDetailLink{kind: hypDetailLinkObservation, id: o.ID, line: len(lines) - 1})
-		}
-		if max < len(v.obs) {
-			lines = append(lines, tuiDim.Render(fmt.Sprintf("  … %d more", len(v.obs)-max)))
+		tableLines := strings.Split(renderTable(rows, "  "), "\n")
+		for i, tl := range tableLines {
+			lines = append(lines, tl)
+			if i > 0 { // skip header row for links
+				obsIdx := i - 1
+				if obsIdx < len(v.obs) {
+					links = append(links, hypDetailLink{kind: hypDetailLinkObservation, id: v.obs[obsIdx].ID, line: len(lines) - 1})
+				}
+			}
 		}
 	}
 	if !v.compact && strings.TrimSpace(h.Body) != "" {

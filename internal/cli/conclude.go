@@ -54,10 +54,6 @@ downgraded since there is no comparator).`,
 			if len(obsList) == 0 {
 				return errors.New("--observations is required (at least one observation id)")
 			}
-			if author == "" {
-				author = "agent:analyst"
-			}
-
 			s, err := openStoreLive()
 			if err != nil {
 				return err
@@ -163,17 +159,14 @@ downgraded since there is no comparator).`,
 				Effect:       effect,
 				StatTest:     "mann_whitney_u",
 				Strict:       strictRec,
-				Author:       author,
+				Author:       or(author, "agent:analyst"),
 				ReviewedBy:   reviewedBy,
 				CreatedAt:    nowUTC(),
 				Body:         interpretationBody(interpretation, verdict, decision),
 			}
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would %sconclude %s with verdict=%s", downgradeLabel(decision), hypID, decision.FinalVerdict),
-					map[string]any{"status": "dry-run", "conclusion": concl},
-				)
+			if err := dryRun(w, fmt.Sprintf("%sconclude %s with verdict=%s", downgradeLabel(decision), hypID, decision.FinalVerdict), map[string]any{"conclusion": concl}); err != nil {
+				return err
 			}
 
 			id, err := s.AllocID(store.KindConclusion)
@@ -217,27 +210,22 @@ downgraded since there is no comparator).`,
 
 			// Event.
 			eventData := map[string]any{
-				"verdict":         decision.FinalVerdict,
-				"requested":       verdict,
-				"downgraded":      decision.Downgraded,
-				"reasons":         decision.Reasons,
-				"candidate":       candExp,
-				"baseline":        baselineExp,
-				"observations":    obsList,
-				"delta_frac":      effect.DeltaFrac,
-				"ci_low_frac":     effect.CILowFrac,
-				"ci_high_frac":    effect.CIHighFrac,
+				"verdict":      decision.FinalVerdict,
+				"requested":    verdict,
+				"downgraded":   decision.Downgraded,
+				"reasons":      decision.Reasons,
+				"candidate":    candExp,
+				"baseline":     baselineExp,
+				"observations": obsList,
+				"delta_frac":   effect.DeltaFrac,
+				"ci_low_frac":  effect.CILowFrac,
+				"ci_high_frac": effect.CIHighFrac,
 			}
 			kind := "conclusion.write"
 			if decision.Downgraded {
 				kind = "conclusion.downgrade"
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    kind,
-				Actor:   author,
-				Subject: id,
-				Data:    jsonRaw(eventData),
-			}); err != nil {
+			if err := emitEvent(s, kind, or(author, "agent:analyst"), id, eventData); err != nil {
 				return err
 			}
 
@@ -280,7 +268,7 @@ downgraded since there is no comparator).`,
 	c.Flags().StringSliceVar(&obsList, "observations", nil, "comma-separated observation ids (required)")
 	c.Flags().StringVar(&baselineExp, "baseline-experiment", "", "baseline experiment id (overrides candidate.baseline.experiment)")
 	c.Flags().StringVar(&interpretation, "interpretation", "", "optional prose interpretation")
-	c.Flags().StringVar(&author, "author", "", "author (default agent:analyst)")
+	addAuthorFlag(c, &author, "")
 	c.Flags().StringVar(&reviewedBy, "reviewed-by", "", "critic or human who reviewed")
 	c.Flags().IntVar(&iters, "iters", 0, "bootstrap iterations (0 uses default 2000)")
 	return c

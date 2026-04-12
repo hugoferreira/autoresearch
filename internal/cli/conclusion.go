@@ -7,7 +7,6 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
-	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -165,11 +164,8 @@ marked inconclusive.`,
 			if reviewedBy != "" {
 				c.ReviewedBy = reviewedBy
 			}
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would downgrade %s from %s to inconclusive (%s)", c.ID, prev, reason),
-					map[string]any{"status": "dry-run", "id": c.ID, "from": prev, "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("downgrade %s from %s to inconclusive (%s)", c.ID, prev, reason), map[string]any{"id": c.ID, "from": prev, "reason": reason}); err != nil {
+				return err
 			}
 			if err := s.WriteConclusion(c); err != nil {
 				return err
@@ -180,16 +176,11 @@ marked inconclusive.`,
 				hyp.Status = entity.VerdictInconclusive
 				_ = s.WriteHypothesis(hyp)
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "conclusion.critic_downgrade",
-				Actor:   "agent:critic",
-				Subject: c.ID,
-				Data: jsonRaw(map[string]any{
-					"from":        prev,
-					"reason":      reason,
-					"reviewed_by": reviewedBy,
-					"hypothesis":  c.Hypothesis,
-				}),
+			if err := emitEvent(s, "conclusion.critic_downgrade", "agent:critic", c.ID, map[string]any{
+				"from":        prev,
+				"reason":      reason,
+				"reviewed_by": reviewedBy,
+				"hypothesis":  c.Hypothesis,
 			}); err != nil {
 				return err
 			}

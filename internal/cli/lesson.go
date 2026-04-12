@@ -69,10 +69,6 @@ research apparatus itself).`,
 			if strings.TrimSpace(claim) == "" {
 				return errors.New("--claim is required")
 			}
-			if author == "" {
-				author = "agent:analyst"
-			}
-
 			// Infer scope from the presence of --from when not set.
 			if scope == "" {
 				if len(subjects) > 0 {
@@ -93,7 +89,7 @@ research apparatus itself).`,
 				Subjects:  subjects,
 				Tags:      tags,
 				Status:    entity.LessonStatusActive,
-				Author:    author,
+				Author:    or(author, "agent:analyst"),
 				CreatedAt: nowUTC(),
 			}
 			if strings.TrimSpace(body) != "" {
@@ -115,11 +111,8 @@ research apparatus itself).`,
 				}
 			}
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would add lesson (claim=%q, scope=%s)", claim, scope),
-					map[string]any{"status": "dry-run", "lesson": l},
-				)
+			if err := dryRun(w, fmt.Sprintf("add lesson (claim=%q, scope=%s)", claim, scope), map[string]any{"lesson": l}); err != nil {
+				return err
 			}
 
 			id, err := s.AllocID(store.KindLesson)
@@ -130,21 +123,17 @@ research apparatus itself).`,
 			if err := s.WriteLesson(l); err != nil {
 				return err
 			}
+			resolvedAuthor := or(author, "agent:analyst")
 			eventData := map[string]any{
 				"claim":    truncate(claim, 200),
 				"scope":    scope,
 				"subjects": subjects,
-				"author":   author,
+				"author":   resolvedAuthor,
 			}
 			if len(tags) > 0 {
 				eventData["tags"] = tags
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "lesson.add",
-				Actor:   author,
-				Subject: id,
-				Data:    jsonRaw(eventData),
-			}); err != nil {
+			if err := emitEvent(s, "lesson.add", resolvedAuthor, id, eventData); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -158,7 +147,7 @@ research apparatus itself).`,
 	c.Flags().StringSliceVar(&subjects, "from", nil, "H-/E-/C- ids this lesson was extracted from; may be repeated or comma-separated")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&body, "body", "", "prose expansion of the claim — required for agents. Expected structure: `## Evidence`, `## Mechanism`, `## Scope and counterexamples`, `## For the next generator`. See the research-orchestrator subagent brief for a worked example. A lesson without a body is a one-liner the next generator cannot act on.")
-	c.Flags().StringVar(&author, "author", "", "author (default agent:analyst)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 
@@ -315,11 +304,8 @@ first-class record that can itself be superseded later.`,
 				return fmt.Errorf("--by target: %w", err)
 			}
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would supersede %s by %s (%s)", oldID, by, reason),
-					map[string]any{"status": "dry-run", "from": oldID, "by": by, "reason": reason},
-				)
+			if err := dryRun(w, fmt.Sprintf("supersede %s by %s (%s)", oldID, by, reason), map[string]any{"from": oldID, "by": by, "reason": reason}); err != nil {
+				return err
 			}
 
 			oldLesson.Status = entity.LessonStatusSuperseded
@@ -331,15 +317,10 @@ first-class record that can itself be superseded later.`,
 			if err := s.WriteLesson(newLesson); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "lesson.supersede",
-				Actor:   newLesson.Author,
-				Subject: oldID,
-				Data: jsonRaw(map[string]any{
-					"from":   oldID,
-					"by":     by,
-					"reason": reason,
-				}),
+			if err := emitEvent(s, "lesson.supersede", newLesson.Author, oldID, map[string]any{
+				"from":   oldID,
+				"by":     by,
+				"reason": reason,
 			}); err != nil {
 				return err
 			}

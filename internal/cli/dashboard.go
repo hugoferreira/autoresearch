@@ -424,14 +424,7 @@ func renderDashboardGoal(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 	if len(snap.Goal.Constraints) > 0 {
 		fmt.Fprintln(w, " "+a.bold("Constraints:"))
 		for _, c := range snap.Goal.Constraints {
-			switch {
-			case c.Max != nil:
-				fmt.Fprintf(w, "   %s %s %g\n", c.Instrument, a.dim("≤"), *c.Max)
-			case c.Min != nil:
-				fmt.Fprintf(w, "   %s %s %g\n", c.Instrument, a.dim("≥"), *c.Min)
-			case c.Require != "":
-				fmt.Fprintf(w, "   %s require=%s\n", c.Instrument, a.cyan(c.Require))
-			}
+			fmt.Fprintf(w, "   %s\n", entity.FormatConstraint(c))
 		}
 	}
 }

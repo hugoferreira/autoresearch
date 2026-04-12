@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
+	"github.com/spf13/cobra"
 )
 
 func openStore() (*store.Store, error) {
@@ -37,7 +39,52 @@ func openStoreLive() (*store.Store, error) {
 	return s, nil
 }
 
+// addAuthorFlag registers a --author string flag on c, storing into *dst.
+// defaultVal is the flag's Go default: "human" for goal verbs, "" for
+// everything else (the caller decides).
+func addAuthorFlag(c *cobra.Command, dst *string, defaultVal string) {
+	c.Flags().StringVar(dst, "author", defaultVal, "author (e.g. human:alice, agent:orchestrator)")
+}
+
+// or returns fallback when s is empty.
+func or(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+// emitEvent is a shorthand for appending a structured event to the store.
+func emitEvent(s *store.Store, kind, actor, subject string, data any) error {
+	return s.AppendEvent(store.Event{
+		Kind:    kind,
+		Actor:   actor,
+		Subject: subject,
+		Data:    jsonRaw(data),
+	})
+}
+
+// dryRun checks globalDryRun and, if set, emits a "[dry-run] would ..."
+// message and returns a non-nil sentinel. Callers use it as a guard:
+//
+//	if err := dryRun(w, "add hypothesis", payload); err != nil { return err }
+//
+// When globalDryRun is false it returns nil and the caller continues.
+func dryRun(w *output.Writer, action string, payload map[string]any) error {
+	if !globalDryRun {
+		return nil
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["status"] = "dry-run"
+	return w.Emit(fmt.Sprintf("[dry-run] would %s", action), payload)
+}
+
 func jsonRaw(v any) json.RawMessage {
+	if v == nil {
+		return nil
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil

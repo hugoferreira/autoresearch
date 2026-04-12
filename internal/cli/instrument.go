@@ -73,6 +73,7 @@ func instrumentRegisterCmd() *cobra.Command {
 		unit       string
 		requires   []string
 		minSamples int
+		author     string
 	)
 	c := &cobra.Command{
 		Use:   "register <name>",
@@ -94,21 +95,13 @@ func instrumentRegisterCmd() *cobra.Command {
 				Requires:   requires,
 				MinSamples: minSamples,
 			}
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would register instrument %q (unit=%s)", name, unit),
-					map[string]any{"status": "dry-run", "name": name, "instrument": inst},
-				)
+			if err := dryRun(w, fmt.Sprintf("register instrument %q (unit=%s)", name, unit), map[string]any{"name": name, "instrument": inst}); err != nil {
+				return err
 			}
 			if err := s.RegisterInstrument(name, inst); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "instrument.register",
-				Actor:   "human",
-				Subject: name,
-				Data:    jsonRaw(inst),
-			}); err != nil {
+			if err := emitEvent(s, "instrument.register", author, name, inst); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -123,6 +116,7 @@ func instrumentRegisterCmd() *cobra.Command {
 	c.Flags().StringVar(&unit, "unit", "", "unit of measurement (e.g. cycles, bytes, seconds, instructions)")
 	c.Flags().StringArrayVar(&requires, "requires", nil, "prerequisite as 'instrument=pass' (repeatable); observe will refuse to run this instrument until prerequisites have passing observations")
 	c.Flags().IntVar(&minSamples, "min-samples", 0, "minimum samples required (strict mode)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 

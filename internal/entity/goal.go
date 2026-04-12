@@ -68,6 +68,21 @@ func (g *Goal) Marshal() ([]byte, error) {
 	return WriteFrontmatter(g, body)
 }
 
+// FormatConstraint returns a compact human-readable string for a constraint:
+// "size_flash ≤ 131072", "size_ram ≥ 1024", or "host_test require=pass".
+func FormatConstraint(c Constraint) string {
+	switch {
+	case c.Max != nil:
+		return fmt.Sprintf("%s ≤ %g", c.Instrument, *c.Max)
+	case c.Min != nil:
+		return fmt.Sprintf("%s ≥ %g", c.Instrument, *c.Min)
+	case c.Require != "":
+		return fmt.Sprintf("%s require=%s", c.Instrument, c.Require)
+	default:
+		return c.Instrument
+	}
+}
+
 func (g *Goal) Steering() string {
 	return ExtractSection(g.Body, "Steering")
 }

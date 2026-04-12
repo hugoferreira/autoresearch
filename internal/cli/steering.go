@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/output"
-	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +55,7 @@ func steeringShowCmd() *cobra.Command {
 }
 
 func steeringAppendCmd() *cobra.Command {
+	var author string
 	c := &cobra.Command{
 		Use:   "append <note>",
 		Short: "Append a bullet to the # Steering section of goal.md",
@@ -87,21 +87,14 @@ goal.md themselves.`,
 				return err
 			}
 			newBody := appendSteeringBullet(g.Body, note)
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would append to steering: %s", note),
-					map[string]any{"status": "dry-run", "note": note},
-				)
+			if err := dryRun(w, fmt.Sprintf("append to steering: %s", note), map[string]any{"note": note}); err != nil {
+				return err
 			}
 			g.Body = newBody
 			if err := s.WriteGoal(g); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:  "steering.append",
-				Actor: "human",
-				Data:  jsonRaw(map[string]string{"note": note}),
-			}); err != nil {
+			if err := emitEvent(s, "steering.append", author, "", map[string]string{"note": note}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -110,6 +103,7 @@ goal.md themselves.`,
 			)
 		},
 	}
+	addAuthorFlag(c, &author, "")
 	return c
 }
 

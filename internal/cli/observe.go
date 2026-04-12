@@ -38,10 +38,6 @@ observation firewall, made physical.`,
 			if instName == "" {
 				return errors.New("--instrument is required")
 			}
-			if author == "" {
-				author = "agent:observer"
-			}
-
 			s, err := openStoreLive()
 			if err != nil {
 				return err
@@ -74,11 +70,8 @@ observation firewall, made physical.`,
 				return fmt.Errorf("experiment %s has no worktree; run `autoresearch experiment implement %s` first", expID, expID)
 			}
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would run instrument %q against %s", instName, exp.Worktree),
-					map[string]any{"status": "dry-run", "instrument": instName, "worktree": exp.Worktree},
-				)
+			if err := dryRun(w, fmt.Sprintf("run instrument %q against %s", instName, exp.Worktree), map[string]any{"instrument": instName, "worktree": exp.Worktree}); err != nil {
+				return err
 			}
 
 			ctx := context.Background()
@@ -134,7 +127,7 @@ observation firewall, made physical.`,
 				ExitCode:    result.ExitCode,
 				Worktree:    exp.Worktree,
 				BaselineSHA: exp.Baseline.SHA,
-				Author:      author,
+				Author:      or(author, "agent:observer"),
 				Aux:         result.Aux,
 			}
 			obs.Normalize()
@@ -156,18 +149,13 @@ observation firewall, made physical.`,
 			for _, a := range obsArts {
 				artShas = append(artShas, a.SHA)
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:    "observation.record",
-				Actor:   author,
-				Subject: id,
-				Data: jsonRaw(map[string]any{
-					"experiment":   expID,
-					"instrument":   instName,
-					"value":        result.Value,
-					"unit":         unit,
-					"samples":      result.SamplesN,
-					"artifact_shas": artShas,
-				}),
+			if err := emitEvent(s, "observation.record", or(author, "agent:observer"), id, map[string]any{
+				"experiment":    expID,
+				"instrument":    instName,
+				"value":         result.Value,
+				"unit":          unit,
+				"samples":       result.SamplesN,
+				"artifact_shas": artShas,
 			}); err != nil {
 				return err
 			}
@@ -197,7 +185,7 @@ observation firewall, made physical.`,
 	}
 	c.Flags().StringVar(&instName, "instrument", "", "registered instrument name (required)")
 	c.Flags().IntVar(&samples, "samples", 0, "number of samples (timing); 0 uses instrument min_samples or default 5")
-	c.Flags().StringVar(&author, "author", "", "author (default agent:observer)")
+	addAuthorFlag(c, &author, "")
 	c.Flags().BoolVar(&force, "force", false, "bypass instrument dependency checks")
 	return []*cobra.Command{c}
 }

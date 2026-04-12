@@ -85,6 +85,9 @@ func renderMarkdown(width int, md string) string {
 	if err != nil {
 		return md
 	}
+	// Glamour's "dark" style adds a 2-char left margin to the document
+	// block. Strip it so markdown renders flush inside TUI panels.
+	out = stripLeftMargin(out, 2)
 	return out
 }
 

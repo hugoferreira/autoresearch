@@ -79,6 +79,7 @@ func budgetSetCmd() *cobra.Command {
 		maxExperiments int
 		maxWallTimeH   int
 		frontierStallK int
+		author         string
 	)
 	c := &cobra.Command{
 		Use:   "set",
@@ -107,11 +108,8 @@ touched — finish what you started, open no new fronts.`,
 			applyBudgetDelta(&cfg.Budgets.MaxWallTimeH, maxWallTimeH)
 			applyBudgetDelta(&cfg.Budgets.FrontierStallK, frontierStallK)
 
-			if globalDryRun {
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would update budgets: %+v", cfg.Budgets),
-					map[string]any{"status": "dry-run", "budgets": cfg.Budgets},
-				)
+			if err := dryRun(w, fmt.Sprintf("update budgets: %+v", cfg.Budgets), map[string]any{"budgets": cfg.Budgets}); err != nil {
+				return err
 			}
 			if err := s.UpdateConfig(func(c *store.Config) error {
 				c.Budgets = cfg.Budgets
@@ -119,13 +117,9 @@ touched — finish what you started, open no new fronts.`,
 			}); err != nil {
 				return err
 			}
-			if err := s.AppendEvent(store.Event{
-				Kind:  "budget.set",
-				Actor: "human",
-				Data: jsonRaw(map[string]any{
-					"previous": prev,
-					"updated":  cfg.Budgets,
-				}),
+			if err := emitEvent(s, "budget.set", author, "", map[string]any{
+				"previous": prev,
+				"updated":  cfg.Budgets,
 			}); err != nil {
 				return err
 			}
@@ -141,6 +135,7 @@ touched — finish what you started, open no new fronts.`,
 	c.Flags().IntVar(&maxExperiments, "max-experiments", 0, "cap on total experiments (-1 to clear, 0 to leave unchanged)")
 	c.Flags().IntVar(&maxWallTimeH, "max-wall-time-h", 0, "wall-time budget in hours since init (-1 to clear)")
 	c.Flags().IntVar(&frontierStallK, "frontier-stall-k", 0, "stop suggestion after K conclusions without frontier improvement (-1 to clear)")
+	addAuthorFlag(c, &author, "")
 	return c
 }
 
