@@ -180,7 +180,7 @@ is paused.
 | **lifecycle** | `init`, `status`, `pause`, `resume` |
 | **goal** | `goal set`, `goal new`, `goal show`, `goal list`, `goal conclude`, `goal abandon` |
 | **steering** | `steering show`, `steering append`, `steering edit` |
-| **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen` |
+| **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
 | **experiment** | `design`, `implement`, `reset`, `worktree`, `list`, `show`, `promote` |
 | **observe** | `observe <exp> --instrument <name>` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |

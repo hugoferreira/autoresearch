@@ -51,6 +51,9 @@ YAML authoring or file editing. When a human says:
 | "Resume" | ` + "`autoresearch resume`" + ` |
 | "What's the current best?" | ` + "`autoresearch frontier`" + `, summarize |
 | "Show me the writeup for H-0001" | ` + "`autoresearch report H-0001`" + ` |
+| "What changed in the winning experiment?" | ` + "`autoresearch hypothesis diff H-0001`" + ` |
+| "Ship that optimization" | ` + "`autoresearch hypothesis apply H-0001`" + ` (cherry-picks the winning experiment) |
+| "Where's the worktree for H-0003?" | ` + "`autoresearch hypothesis worktree H-0003`" + ` |
 | "What just happened?" | ` + "`autoresearch log --tail 30`" + ` |
 | "What have we learned so far?" | ` + "`autoresearch lesson list --status active`" + `, summarize |
 
@@ -190,6 +193,9 @@ the firewall sees.
     autoresearch hypothesis kill    <hyp-id> --reason "..."
     autoresearch hypothesis reopen  <hyp-id> --reason "..."
     autoresearch hypothesis promote <hyp-id> --reason "..."  # mark priority:human
+    autoresearch hypothesis worktree <hyp-id> [--conclusion C-NNNN]  # worktree of winning experiment
+    autoresearch hypothesis diff     <hyp-id> [--conclusion C-NNNN]  # unified diff vs baseline
+    autoresearch hypothesis apply    <hyp-id> [--conclusion C-NNNN] [--merge]  # ship it
     autoresearch tree               [--root H-XXXX]
     autoresearch frontier                                  # best-first, stalled_for
     autoresearch report             <hyp-id>               # markdown writeup

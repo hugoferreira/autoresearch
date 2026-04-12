@@ -244,6 +244,19 @@ Completed cycle for H-NNNN
   gate review needed: yes
 ```
 
+After the gate reviewer accepts a supported hypothesis, the human (or
+main session) can inspect and ship the change:
+
+```sh
+autoresearch hypothesis diff  H-NNNN                    # unified diff vs baseline
+autoresearch hypothesis worktree H-NNNN                 # worktree path
+autoresearch hypothesis apply H-NNNN [--merge]          # cherry-pick onto current branch
+```
+
+These resolve the hypothesis → best supported conclusion → candidate
+experiment chain automatically. `apply` requires a supported conclusion;
+`diff` and `worktree` fall back to the latest experiment if none exists.
+
 ## What you don't do
 
 - **Edit `.research/` directly.** Use CLI verbs only.
