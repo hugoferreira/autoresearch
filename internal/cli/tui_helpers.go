@@ -310,7 +310,7 @@ func flattenTree(nodes []*treeNode) []*treeNode {
 
 // renderTreeLines produces one styled line per node in the tree (DFS
 // order). Prefixes are deliberately compact: a nested line is
-// `│ ├─<glyph> <ID> <claim>`, so the status glyph lands at column 4 and
+// `│ ├ <glyph> <ID> <claim>`, so the status glyph lands at column 4 and
 // the ID at column 6 for single-level-nested rows.
 func renderTreeLines(nodes []*treeNode, claimWidth int) []string {
 	out := []string{}
@@ -318,10 +318,10 @@ func renderTreeLines(nodes []*treeNode, claimWidth int) []string {
 	walk = func(ns []*treeNode, prefix string) {
 		for i, n := range ns {
 			last := i == len(ns)-1
-			branch := "├─"
+			branch := "├ "
 			nextPrefix := prefix + "│ "
 			if last {
-				branch = "└─"
+				branch = "└ "
 				nextPrefix = prefix + "  "
 			}
 			glyph := tuiStatusGlyph(n.Status)
@@ -340,6 +340,7 @@ func renderTreeLines(nodes []*treeNode, claimWidth int) []string {
 //   - <50%  → green
 //   - 50-80% → yellow
 //   - ≥80%  → red
+//
 // Thresholds live next to the callers that know what "full" means.
 func tuiMeterColor(used, limit float64, s string) string {
 	if limit <= 0 {

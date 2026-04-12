@@ -37,7 +37,7 @@ func steeringShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			g, err := s.ReadGoal()
+			g, err := s.ActiveGoal()
 			if err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ goal.md themselves.`,
 			if err != nil {
 				return err
 			}
-			g, err := s.ReadGoal()
+			g, err := s.ActiveGoal()
 			if err != nil {
 				return err
 			}

@@ -17,74 +17,206 @@ import (
 func goalCommands() []*cobra.Command {
 	goal := &cobra.Command{
 		Use:   "goal",
-		Short: "Manage the research goal",
+		Short: "Manage the research goal lifecycle",
+		Long: `The research loop is organized into goals. Only one goal is active
+at a time; hypotheses and experiments created while that goal is active
+are bound to it via goal_id. Goals are concluded or abandoned (terminal)
+and replaced by new goals, optionally deriving from a previous one.
+
+Lifecycle:
+
+  goal set     — bootstrap: creates the first goal. Refuses if any goal
+                 already exists. Use this once at project start.
+  goal new     — start a new goal. Refuses if another goal is still active;
+                 conclude or abandon first. Optional --from / --trigger.
+  goal conclude [G-NNNN] — mark the active goal concluded (terminal).
+  goal abandon  [G-NNNN] — mark the active goal abandoned (terminal).
+  goal list     — all goals with status and provenance.
+  goal show [G-NNNN]     — defaults to the active goal.
+
+Concluded and abandoned goals are terminal: there is no reopen verb.
+Revisit a prior goal by creating a new goal with --from G-NNNN — the
+new goal has its own hypotheses, experiments, and observations because
+the circumstances (code, tooling, lessons) are different.`,
 	}
-	goal.AddCommand(goalSetCmd(), goalShowCmd())
+	goal.AddCommand(
+		goalSetCmd(),
+		goalNewCmd(),
+		goalShowCmd(),
+		goalListCmd(),
+		goalConcludeCmd(),
+		goalAbandonCmd(),
+	)
 	return []*cobra.Command{goal}
 }
 
+type goalFlags struct {
+	file            string
+	objInstrument   string
+	objTarget       string
+	objDirection    string
+	objTargetEffect float64
+	constraintMax   []string
+	constraintMin   []string
+	constraintReq   []string
+	steeringText    string
+}
+
+func addGoalBodyFlags(c *cobra.Command, f *goalFlags) {
+	c.Flags().StringVar(&f.file, "file", "", "path to goal.md (mutually exclusive with --objective-*)")
+	c.Flags().StringVar(&f.objInstrument, "objective-instrument", "", "name of the registered instrument the objective targets")
+	c.Flags().StringVar(&f.objTarget, "objective-target", "", "what inside the target is being measured (optional, e.g. 'dsp_fir')")
+	c.Flags().StringVar(&f.objDirection, "objective-direction", "", "increase | decrease")
+	c.Flags().Float64Var(&f.objTargetEffect, "objective-target-effect", 0, "fractional effect the user aspires to (optional)")
+	c.Flags().StringArrayVar(&f.constraintMax, "constraint-max", nil, "max constraint as 'instrument=value' (repeatable)")
+	c.Flags().StringArrayVar(&f.constraintMin, "constraint-min", nil, "min constraint as 'instrument=value' (repeatable)")
+	c.Flags().StringArrayVar(&f.constraintReq, "constraint-require", nil, "require constraint as 'instrument=value' (repeatable, e.g. 'host_test=pass')")
+	c.Flags().StringVar(&f.steeringText, "steering", "", "initial steering note to place in the # Steering section")
+}
+
+// loadGoalFromFlags materializes an in-memory Goal from the common flag set,
+// in either file mode (--file goal.md) or flag mode (--objective-* etc.).
+func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
+	fileMode := f.file != ""
+	flagMode := f.objInstrument != "" || f.objDirection != "" ||
+		len(f.constraintMax) > 0 || len(f.constraintMin) > 0 || len(f.constraintReq) > 0
+	if fileMode && flagMode {
+		return nil, errors.New("--file and --objective-* flags are mutually exclusive")
+	}
+	if !fileMode && !flagMode {
+		return nil, errors.New("provide either --file or --objective-instrument + --objective-direction + at least one --constraint-*")
+	}
+	if fileMode {
+		data, err := os.ReadFile(f.file)
+		if err != nil {
+			return nil, fmt.Errorf("read goal file: %w", err)
+		}
+		return entity.ParseGoal(data)
+	}
+	return buildGoalFromFlags(f.objInstrument, f.objTarget, f.objDirection, f.objTargetEffect,
+		f.constraintMax, f.constraintMin, f.constraintReq, f.steeringText)
+}
+
 func goalSetCmd() *cobra.Command {
-	var (
-		file            string
-		objInstrument   string
-		objTarget       string
-		objDirection    string
-		objTargetEffect float64
-		constraintMax   []string
-		constraintMin   []string
-		constraintReq   []string
-		steeringText    string
-	)
+	var f goalFlags
 	c := &cobra.Command{
 		Use:   "set",
-		Short: "Set the research goal (from a file OR from flags)",
-		Long: `Set the research goal. Two input modes, mutually exclusive:
+		Short: "Bootstrap the first research goal (refuses if any goal already exists)",
+		Long: `Create the very first goal for this project. Refuses if any goal
+already exists on disk — use 'goal new' for subsequent goals.
+
+Two input modes, mutually exclusive:
 
   --file goal.md            Read a YAML-frontmatter goal document.
   --objective-* + --constraint-*   Build the goal from flags directly.
 
 The flag form is the one the main agent session uses when translating a
-human's natural-language request — the session never
-asks the human to author YAML. Humans who prefer an editor-based
-workflow can still write goal.md and point --file at it.
-
-The goal's objective must reference a registered instrument. Goals
-whose objective has no instrument are rejected with a pointer to the
-scope-boundary documentation — they belong to a feature-delivery tool,
-not autoresearch.`,
+human's natural-language request — the session never asks the human to
+author YAML. Humans who prefer an editor-based workflow can still write
+goal.md and point --file at it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
-			fileMode := file != ""
-			flagMode := objInstrument != "" || objDirection != "" ||
-				len(constraintMax) > 0 || len(constraintMin) > 0 || len(constraintReq) > 0
-			if fileMode && flagMode {
-				return errors.New("--file and --objective-* flags are mutually exclusive")
+			g, err := loadGoalFromFlags(&f)
+			if err != nil {
+				return err
 			}
-			if !fileMode && !flagMode {
-				return errors.New("provide either --file or --objective-instrument + --objective-direction + at least one --constraint-*")
-			}
-
-			var g *entity.Goal
-			if fileMode {
-				data, err := os.ReadFile(file)
-				if err != nil {
-					return fmt.Errorf("read goal file: %w", err)
-				}
-				g, err = entity.ParseGoal(data)
-				if err != nil {
-					return fmt.Errorf("parse goal: %w", err)
-				}
-			} else {
-				var err error
-				g, err = buildGoalFromFlags(objInstrument, objTarget, objDirection, objTargetEffect,
-					constraintMax, constraintMin, constraintReq, steeringText)
-				if err != nil {
-					return err
-				}
-			}
-
 			s, err := openStoreLive()
 			if err != nil {
+				return err
+			}
+			existing, err := s.ListGoals()
+			if err != nil {
+				return err
+			}
+			if len(existing) > 0 {
+				return errors.New("a goal already exists; use `autoresearch goal new` to start a new one (conclude or abandon the active goal first if needed)")
+			}
+			cfg, err := s.Config()
+			if err != nil {
+				return err
+			}
+			if err := firewall.ValidateGoal(g, cfg); err != nil {
+				return err
+			}
+			if globalDryRun {
+				return w.Emit(
+					fmt.Sprintf("[dry-run] would bootstrap goal (objective: %s on %s)", g.Objective.Direction, g.Objective.Instrument),
+					map[string]any{"status": "dry-run", "goal": g},
+				)
+			}
+			id, err := s.AllocID(store.KindGoal)
+			if err != nil {
+				return err
+			}
+			now := nowUTC()
+			g.ID = id
+			g.Status = entity.GoalStatusActive
+			g.CreatedAt = &now
+			if err := s.WriteGoal(g); err != nil {
+				return err
+			}
+			if err := s.UpdateState(func(st *store.State) error {
+				st.CurrentGoalID = id
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := s.AppendEvent(store.Event{
+				Kind:    "goal.set",
+				Actor:   "human",
+				Subject: id,
+				Data: jsonRaw(map[string]any{
+					"instrument": g.Objective.Instrument,
+					"direction":  g.Objective.Direction,
+				}),
+			}); err != nil {
+				return err
+			}
+			return w.Emit(
+				fmt.Sprintf("bootstrapped %s: %s on %s (target_effect=%g, %d constraints)",
+					id, g.Objective.Direction, g.Objective.Instrument, g.Objective.TargetEffect, len(g.Constraints)),
+				map[string]any{"status": "ok", "id": id, "goal": g},
+			)
+		},
+	}
+	addGoalBodyFlags(c, &f)
+	return c
+}
+
+func goalNewCmd() *cobra.Command {
+	var (
+		f       goalFlags
+		from    string
+		trigger string
+	)
+	c := &cobra.Command{
+		Use:   "new",
+		Short: "Start a new research goal (refuses if another goal is active)",
+		Long: `Create a new goal and make it the active one. Refuses if another goal
+is currently active — conclude or abandon it first.
+
+--from G-NNNN records the previous goal as the parent (defaults to the
+most recently closed goal if omitted). --trigger records the
+hypothesis/experiment/conclusion/observation that prompted the new goal.
+
+The new goal is independent: hypotheses and experiments created under
+it are bound to its goal_id, not inherited from the parent. Revisiting
+a goal after the code has evolved is fundamentally a new circumstance.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			g, err := loadGoalFromFlags(&f)
+			if err != nil {
+				return err
+			}
+			s, err := openStoreLive()
+			if err != nil {
+				return err
+			}
+			st, err := s.State()
+			if err != nil {
+				return err
+			}
+			if err := firewall.RequireNoActiveGoal(st); err != nil {
 				return err
 			}
 			cfg, err := s.Config()
@@ -95,39 +227,198 @@ not autoresearch.`,
 				return err
 			}
 
+			// Resolve --from: default to most recent closed goal (by id).
+			parentID := strings.TrimSpace(from)
+			if parentID != "" {
+				ok, err := s.GoalExists(parentID)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("--from %s: goal does not exist", parentID)
+				}
+			} else {
+				all, err := s.ListGoals()
+				if err != nil {
+					return err
+				}
+				for i := len(all) - 1; i >= 0; i-- {
+					if all[i].Status == entity.GoalStatusConcluded || all[i].Status == entity.GoalStatusAbandoned {
+						parentID = all[i].ID
+						break
+					}
+				}
+			}
+			if err := validateTrigger(trigger); err != nil {
+				return err
+			}
+
 			if globalDryRun {
 				return w.Emit(
-					fmt.Sprintf("[dry-run] would set goal (objective: %s on %s)", g.Objective.Direction, g.Objective.Instrument),
-					map[string]any{"status": "dry-run", "goal": g},
+					fmt.Sprintf("[dry-run] would start new goal (objective: %s on %s, from=%q, trigger=%q)", g.Objective.Direction, g.Objective.Instrument, parentID, trigger),
+					map[string]any{"status": "dry-run", "goal": g, "derived_from": parentID, "trigger": trigger},
 				)
 			}
+
+			id, err := s.AllocID(store.KindGoal)
+			if err != nil {
+				return err
+			}
+			now := nowUTC()
+			g.ID = id
+			g.Status = entity.GoalStatusActive
+			g.CreatedAt = &now
+			g.DerivedFrom = parentID
+			g.Trigger = strings.TrimSpace(trigger)
 			if err := s.WriteGoal(g); err != nil {
 				return err
 			}
+			if err := s.UpdateState(func(st *store.State) error {
+				st.CurrentGoalID = id
+				return nil
+			}); err != nil {
+				return err
+			}
 			if err := s.AppendEvent(store.Event{
-				Kind:    "goal.set",
+				Kind:    "goal.new",
 				Actor:   "human",
-				Subject: g.Objective.Instrument,
+				Subject: id,
+				Data: jsonRaw(map[string]any{
+					"instrument":   g.Objective.Instrument,
+					"direction":    g.Objective.Direction,
+					"derived_from": parentID,
+					"trigger":      g.Trigger,
+				}),
 			}); err != nil {
 				return err
 			}
 			return w.Emit(
-				fmt.Sprintf("goal set: %s on %s (target_effect=%g, %d constraints)",
-					g.Objective.Direction, g.Objective.Instrument, g.Objective.TargetEffect, len(g.Constraints)),
-				map[string]any{"status": "ok", "goal": g},
+				fmt.Sprintf("started %s: %s on %s", id, g.Objective.Direction, g.Objective.Instrument),
+				map[string]any{"status": "ok", "id": id, "goal": g},
 			)
 		},
 	}
-	c.Flags().StringVar(&file, "file", "", "path to goal.md (mutually exclusive with --objective-*)")
-	c.Flags().StringVar(&objInstrument, "objective-instrument", "", "name of the registered instrument the objective targets")
-	c.Flags().StringVar(&objTarget, "objective-target", "", "what inside the target is being measured (optional, e.g. 'dsp_fir')")
-	c.Flags().StringVar(&objDirection, "objective-direction", "", "increase | decrease")
-	c.Flags().Float64Var(&objTargetEffect, "objective-target-effect", 0, "fractional effect the user aspires to (optional)")
-	c.Flags().StringArrayVar(&constraintMax, "constraint-max", nil, "max constraint as 'instrument=value' (repeatable)")
-	c.Flags().StringArrayVar(&constraintMin, "constraint-min", nil, "min constraint as 'instrument=value' (repeatable)")
-	c.Flags().StringArrayVar(&constraintReq, "constraint-require", nil, "require constraint as 'instrument=value' (repeatable, e.g. 'host_test=pass')")
-	c.Flags().StringVar(&steeringText, "steering", "", "initial steering note to place in the # Steering section")
+	addGoalBodyFlags(c, &f)
+	c.Flags().StringVar(&from, "from", "", "parent goal id (defaults to most recently closed goal)")
+	c.Flags().StringVar(&trigger, "trigger", "", "H-/E-/O-/C- id that prompted this new goal (optional)")
 	return c
+}
+
+func validateTrigger(trigger string) error {
+	t := strings.TrimSpace(trigger)
+	if t == "" {
+		return nil
+	}
+	for _, prefix := range []string{"H-", "E-", "O-", "C-"} {
+		if strings.HasPrefix(t, prefix) {
+			return nil
+		}
+	}
+	return fmt.Errorf("--trigger %q must be an H-/E-/O-/C- id", trigger)
+}
+
+func goalConcludeCmd() *cobra.Command {
+	var summary string
+	c := &cobra.Command{
+		Use:   "conclude [G-NNNN]",
+		Short: "Mark the active goal (or the named goal) concluded",
+		Long: `Mark a goal as concluded. Concluded goals are terminal: there is no
+reopen verb. To continue working in the same problem space after the
+code has evolved, create a new goal with 'goal new --from <id>'.
+
+If no id is given, the active goal is concluded. --summary is
+appended as a '# Closure' section on the goal body.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGoalClosure(args, summary, entity.GoalStatusConcluded, "goal.conclude", "concluded")
+		},
+	}
+	c.Flags().StringVar(&summary, "summary", "", "one-paragraph closure summary (optional, persisted on the goal body)")
+	return c
+}
+
+func goalAbandonCmd() *cobra.Command {
+	var reason string
+	c := &cobra.Command{
+		Use:   "abandon [G-NNNN]",
+		Short: "Mark the active goal (or the named goal) abandoned",
+		Long: `Mark a goal as abandoned. Abandoned goals are terminal: there is no
+reopen verb. --reason is required and persisted on the goal body as
+a '# Closure' section.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(reason) == "" {
+				return errors.New("--reason is required for abandon")
+			}
+			return runGoalClosure(args, reason, entity.GoalStatusAbandoned, "goal.abandon", "abandoned")
+		},
+	}
+	c.Flags().StringVar(&reason, "reason", "", "why the goal is being abandoned (required)")
+	return c
+}
+
+func runGoalClosure(args []string, text, status, eventKind, label string) error {
+	w := output.Default(globalJSON)
+	s, err := openStoreLive()
+	if err != nil {
+		return err
+	}
+	st, err := s.State()
+	if err != nil {
+		return err
+	}
+	var target string
+	if len(args) == 1 {
+		target = args[0]
+	} else {
+		target = st.CurrentGoalID
+	}
+	if target == "" {
+		return store.ErrNoActiveGoal
+	}
+	g, err := s.ReadGoal(target)
+	if err != nil {
+		return err
+	}
+	if g.Status != entity.GoalStatusActive {
+		return fmt.Errorf("%s has status %q; only active goals can be %s", g.ID, g.Status, label)
+	}
+	if globalDryRun {
+		return w.Emit(
+			fmt.Sprintf("[dry-run] would mark %s %s", g.ID, label),
+			map[string]any{"status": "dry-run", "id": g.ID, "new_status": status},
+		)
+	}
+	now := nowUTC()
+	g.Status = status
+	g.ClosedAt = &now
+	g.ClosureReason = strings.TrimSpace(text)
+	if g.ClosureReason != "" {
+		g.Body = entity.AppendMarkdownSection(g.Body, "Closure", g.ClosureReason)
+	}
+	if err := s.WriteGoal(g); err != nil {
+		return err
+	}
+	if st.CurrentGoalID == g.ID {
+		if err := s.UpdateState(func(st *store.State) error {
+			st.CurrentGoalID = ""
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err := s.AppendEvent(store.Event{
+		Kind:    eventKind,
+		Actor:   "human",
+		Subject: g.ID,
+		Data:    jsonRaw(map[string]string{"reason": g.ClosureReason}),
+	}); err != nil {
+		return err
+	}
+	return w.Emit(
+		fmt.Sprintf("%s %s", label, g.ID),
+		map[string]any{"status": "ok", "id": g.ID, "new_status": status},
+	)
 }
 
 func buildGoalFromFlags(
@@ -143,7 +434,7 @@ func buildGoalFromFlags(
 		return nil, fmt.Errorf("--objective-direction must be 'increase' or 'decrease', got %q", direction)
 	}
 	g := &entity.Goal{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Objective: entity.Objective{
 			Instrument:   instrument,
 			Target:       target,
@@ -217,20 +508,42 @@ func parseConstraintKV(spec, op string) (entity.Constraint, error) {
 
 func goalShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show",
-		Short: "Show the current research goal",
+		Use:   "show [G-NNNN]",
+		Short: "Show the active goal (or the named goal)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			g, err := s.ReadGoal()
+			var g *entity.Goal
+			if len(args) == 1 {
+				g, err = s.ReadGoal(args[0])
+			} else {
+				g, err = s.ActiveGoal()
+			}
 			if err != nil {
 				return err
 			}
 			if w.IsJSON() {
 				return w.JSON(g)
+			}
+			w.Textf("id:           %s\n", g.ID)
+			if g.Status != "" {
+				w.Textf("status:       %s\n", g.Status)
+			}
+			if g.DerivedFrom != "" {
+				w.Textf("derived_from: %s\n", g.DerivedFrom)
+			}
+			if g.Trigger != "" {
+				w.Textf("trigger:      %s\n", g.Trigger)
+			}
+			if g.CreatedAt != nil {
+				w.Textf("created_at:   %s\n", g.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+			}
+			if g.ClosedAt != nil {
+				w.Textf("closed_at:    %s\n", g.ClosedAt.Format("2006-01-02T15:04:05Z07:00"))
 			}
 			w.Textf("objective:    %s %s", g.Objective.Direction, g.Objective.Instrument)
 			if g.Objective.Target != "" {
@@ -259,4 +572,59 @@ func goalShowCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func goalListCmd() *cobra.Command {
+	var statusFilter string
+	c := &cobra.Command{
+		Use:   "list",
+		Short: "List all research goals with status and provenance",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			all, err := s.ListGoals()
+			if err != nil {
+				return err
+			}
+			st, err := s.State()
+			if err != nil {
+				return err
+			}
+			var filtered []*entity.Goal
+			for _, g := range all {
+				if statusFilter != "" && g.Status != statusFilter {
+					continue
+				}
+				filtered = append(filtered, g)
+			}
+			if w.IsJSON() {
+				return w.JSON(map[string]any{
+					"current":  st.CurrentGoalID,
+					"goals":    filtered,
+				})
+			}
+			if len(filtered) == 0 {
+				w.Textln("(no goals)")
+				return nil
+			}
+			for _, g := range filtered {
+				marker := "  "
+				if g.ID == st.CurrentGoalID {
+					marker = "* "
+				}
+				from := g.DerivedFrom
+				if from == "" {
+					from = "-"
+				}
+				w.Textf("%s%-8s  %-10s  from=%-8s  %s %s\n",
+					marker, g.ID, g.Status, from, g.Objective.Direction, g.Objective.Instrument)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&statusFilter, "status", "", "filter by status (active|concluded|abandoned)")
+	return c
 }

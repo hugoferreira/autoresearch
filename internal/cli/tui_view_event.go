@@ -163,12 +163,11 @@ func (v *eventDetailView) view(width, height int) string {
 	lines = append(lines, tuiDim.Render("ts=")+v.e.Ts.UTC().Format("2006-01-02 15:04:05 MST"))
 	lines = append(lines, tuiDim.Render("actor=")+emptyDash(v.e.Actor))
 	lines = append(lines, tuiDim.Render("subject=")+emptyDash(v.e.Subject))
-	lines = append(lines, "")
-	lines = append(lines, tuiBold.Render("Payload:"))
+	lines = append(lines, tuiDim.Render("──────────"))
 	if len(v.e.Data) == 0 {
-		lines = append(lines, tuiDim.Render("  (no payload)"))
+		lines = append(lines, tuiDim.Render("(no payload)"))
 	} else {
-		lines = append(lines, prettyJSON(v.e.Data, "  "))
+		lines = append(lines, prettyJSON(v.e.Data, ""))
 	}
 	return clampLines(strings.Join(lines, "\n"), height, width)
 }

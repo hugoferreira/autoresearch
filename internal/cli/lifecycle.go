@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/integration"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
@@ -186,7 +187,7 @@ suite.`,
 				if err != nil {
 					return err
 				}
-				claudePath, err := installClaudeDoc(globalProjectDir, false, true)
+				claudePath, err := writeClaudeDoc(globalProjectDir, false, true)
 				if err != nil {
 					return err
 				}
@@ -198,7 +199,7 @@ suite.`,
 				if err != nil {
 					return err
 				}
-				codexPath, err := installCodexDoc(globalProjectDir, false, true)
+				codexPath, err := writeCodexDoc(globalProjectDir, false, true)
 				if err != nil {
 					return err
 				}
@@ -265,24 +266,27 @@ suite.`,
 				return fmt.Errorf("log init event: %w", err)
 			}
 
-			// Ensure .research/ is gitignored so experiment metadata and
-			// observations don't bleed into the main repo's history.
+			// Ensure .research/ and the worktree brief file are gitignored so
+			// experiment metadata doesn't bleed into the main repo's history.
 			gi, err := integration.EnsureGitignoreLine(globalProjectDir, store.Dir+"/")
 			if err != nil {
 				return fmt.Errorf("update .gitignore: %w", err)
+			}
+			if _, err := integration.EnsureGitignoreLine(globalProjectDir, entity.BriefFileName); err != nil {
+				return fmt.Errorf("update .gitignore for brief: %w", err)
 			}
 
 			// Always install the Claude-facing reference doc. Never touches
 			// the project's top-level CLAUDE.md — the user imports the
 			// reference manually if they want it in the main session.
-			claudePath, err := installClaudeDoc(globalProjectDir, false, false)
+			claudePath, err := writeClaudeDoc(globalProjectDir, false, false)
 			if err != nil {
 				return fmt.Errorf("install claude doc: %w", err)
 			}
 
-			// Install the six subagent prompts alongside the doc so the
-			// main session can invoke them immediately. Non-research agent
-			// files under .claude/agents/ are never touched.
+			// Install the subagent prompts (orchestrator + gate-reviewer)
+			// alongside the doc so the main session can invoke them
+			// immediately. Non-research agent files are never touched.
 			agentRes, err := integration.InstallAgents(globalProjectDir)
 			if err != nil {
 				return fmt.Errorf("install subagents: %w", err)
@@ -299,7 +303,7 @@ suite.`,
 				return fmt.Errorf("update claude settings: %w", err)
 			}
 
-			codexPath, err := installCodexDoc(globalProjectDir, false, false)
+			codexPath, err := writeCodexDoc(globalProjectDir, false, false)
 			if err != nil {
 				return fmt.Errorf("install codex doc: %w", err)
 			}
@@ -420,13 +424,14 @@ func statusCmd() *cobra.Command {
 			}
 
 			payload := map[string]any{
-				"root":          s.Root(),
-				"dir":           s.DirPath(),
-				"mode":          cfg.Mode,
-				"paused":        st.Paused,
-				"pause_reason":  st.PauseReason,
-				"counts":        counts,
-				"last_event_at": st.LastEventAt,
+				"root":            s.Root(),
+				"dir":             s.DirPath(),
+				"mode":            cfg.Mode,
+				"paused":          st.Paused,
+				"pause_reason":    st.PauseReason,
+				"current_goal_id": st.CurrentGoalID,
+				"counts":          counts,
+				"last_event_at":   st.LastEventAt,
 			}
 
 			if w.IsJSON() {
@@ -436,6 +441,11 @@ func statusCmd() *cobra.Command {
 			w.Textf("root:           %s\n", s.Root())
 			w.Textf("dir:            %s\n", s.DirPath())
 			w.Textf("mode:           %s\n", cfg.Mode)
+			if st.CurrentGoalID != "" {
+				w.Textf("active goal:    %s\n", st.CurrentGoalID)
+			} else {
+				w.Textln("active goal:    (none)")
+			}
 			if st.Paused {
 				reason := st.PauseReason
 				if reason == "" {

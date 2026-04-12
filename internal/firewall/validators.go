@@ -16,6 +16,29 @@ import (
 // the hallmark of a feature-delivery request pointed at the wrong tool.
 const ScopeBoundaryHint = `autoresearch optimizes measurable properties of a working system; it does not build features. If your goal is feature delivery, this is the wrong tool.`
 
+// RequireActiveGoal asserts that the store has an active goal. It is called
+// by mutating verbs that create entities bound to a goal (hypothesis.add
+// today; experiment and conclusion inherit via the hypothesis chain).
+// Returns store.ErrNoActiveGoal when no goal is currently active so
+// orchestrators see a stable sentinel.
+func RequireActiveGoal(st *store.State) error {
+	if st == nil || strings.TrimSpace(st.CurrentGoalID) == "" {
+		return store.ErrNoActiveGoal
+	}
+	return nil
+}
+
+// RequireNoActiveGoal asserts that no goal is currently active — the
+// precondition for `goal new`. Returns store.ErrActiveGoalExists with the
+// offending id appended to the message so the caller can surface it.
+func RequireNoActiveGoal(st *store.State) error {
+	if st != nil && strings.TrimSpace(st.CurrentGoalID) != "" {
+		return fmt.Errorf("%w (active goal is %s — run `autoresearch goal conclude` or `autoresearch goal abandon` first)",
+			store.ErrActiveGoalExists, st.CurrentGoalID)
+	}
+	return nil
+}
+
 func ValidateGoal(g *entity.Goal, cfg *store.Config) error {
 	if strings.TrimSpace(g.Objective.Instrument) == "" {
 		return fmt.Errorf("goal.md objective has no `instrument` field. %s", ScopeBoundaryHint)

@@ -11,18 +11,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestEmbeddedAgents_AllSixPresent(t *testing.T) {
+func TestEmbeddedAgents_AllPresent(t *testing.T) {
 	agents, err := integration.EmbeddedAgents()
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
-		"research-generator":   true,
-		"research-designer":    true,
-		"research-implementer": true,
-		"research-observer":    true,
-		"research-analyst":     true,
-		"research-critic":      true,
+		"research-orchestrator":  true,
+		"research-gate-reviewer": true,
 	}
 	got := map[string]bool{}
 	for _, a := range agents {
@@ -79,13 +75,14 @@ func TestEmbeddedAgents_FrontmatterValid(t *testing.T) {
 		if fm.Tools == "" {
 			t.Errorf("%s: empty tools list", a.Name)
 		}
-		// Implementer is the only role with Edit/Write. Verify boundary.
+		// The orchestrator needs Agent + Edit/Write (for spawning helpers).
+		// The gate reviewer is read-only (no Edit/Write).
 		hasEdit := strings.Contains(fm.Tools, "Edit") || strings.Contains(fm.Tools, "Write")
-		if a.Name == "research-implementer" && !hasEdit {
-			t.Errorf("%s: implementer must have Edit/Write", a.Name)
+		if a.Name == "research-orchestrator" && !hasEdit {
+			t.Errorf("%s: orchestrator must have Edit/Write", a.Name)
 		}
-		if a.Name != "research-implementer" && hasEdit {
-			t.Errorf("%s: only implementer may have Edit/Write; got %q", a.Name, fm.Tools)
+		if a.Name == "research-gate-reviewer" && hasEdit {
+			t.Errorf("%s: gate reviewer must not have Edit/Write; got %q", a.Name, fm.Tools)
 		}
 		// Body must reference the firewall or the reference doc.
 		body := rest[end+5:]
@@ -101,8 +98,8 @@ func TestInstallAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Count != 6 {
-		t.Errorf("count: got %d want 6", r.Count)
+	if r.Count != 2 {
+		t.Errorf("count: got %d want 2", r.Count)
 	}
 	for _, fn := range r.Written {
 		path := filepath.Join(dir, ".claude", "agents", fn)

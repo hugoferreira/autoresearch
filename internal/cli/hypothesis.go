@@ -62,6 +62,13 @@ func hypothesisAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			st, err := s.State()
+			if err != nil {
+				return err
+			}
+			if err := firewall.RequireActiveGoal(st); err != nil {
+				return err
+			}
 
 			if parent != "" {
 				ok, err := s.HypothesisExists(parent)
@@ -74,6 +81,7 @@ func hypothesisAddCmd() *cobra.Command {
 			}
 
 			h := &entity.Hypothesis{
+				GoalID: st.CurrentGoalID,
 				Parent: parent,
 				Claim:  claim,
 				Predicts: entity.Predicts{
@@ -108,7 +116,7 @@ func hypothesisAddCmd() *cobra.Command {
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
-			eventData := map[string]any{"claim": claim, "parent": parent}
+			eventData := map[string]any{"claim": claim, "parent": parent, "goal_id": st.CurrentGoalID}
 			if snippet := truncate(strings.TrimSpace(rationale), 200); snippet != "" {
 				eventData["rationale"] = snippet
 			}

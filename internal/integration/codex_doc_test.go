@@ -21,8 +21,8 @@ func TestCodexDoc_RewrittenForCodex(t *testing.T) {
 	if strings.Contains(doc, "CLAUDE.md") {
 		t.Fatal("codex doc should not reference CLAUDE.md")
 	}
-	if !strings.Contains(doc, "autoresearch codex install") {
-		t.Fatal("codex doc should reference autoresearch codex install")
+	if !strings.Contains(doc, "autoresearch install codex") {
+		t.Fatal("codex doc should reference autoresearch install codex")
 	}
 	if !strings.Contains(doc, "treats Codex as an agentic researcher") {
 		t.Fatal("codex doc should mention Codex in the intro")

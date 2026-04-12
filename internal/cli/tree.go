@@ -7,38 +7,94 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 )
 
 func treeCommands() []*cobra.Command {
-	return []*cobra.Command{
-		{
-			Use:   "tree",
-			Short: "Render the hypothesis tree",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				w := output.Default(globalJSON)
-				s, err := openStore()
-				if err != nil {
-					return err
-				}
-				all, err := s.ListHypotheses()
-				if err != nil {
-					return err
-				}
-				roots, children := buildHypothesisForest(all)
+	var goalID string
+	c := &cobra.Command{
+		Use:   "tree",
+		Short: "Render the hypothesis tree for the active goal (or --goal G-NNNN)",
+		Long: `Render the hypothesis forest scoped to a single goal. Defaults to
+the active goal; pass --goal G-NNNN to view a historical goal's tree.
+Hypotheses are bound to a goal at creation time; the tree view never
+mixes contexts.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			scopeID, err := resolveGoalScope(s, goalID)
+			if err != nil {
+				return err
+			}
+			all, err := s.ListHypotheses()
+			if err != nil {
+				return err
+			}
+			filtered := filterHypothesesByGoal(all, scopeID)
+			roots, children := buildHypothesisForest(filtered)
 
-				if w.IsJSON() {
-					return w.JSON(buildTreeJSON(roots, children))
-				}
-				if len(roots) == 0 && len(all) == 0 {
-					w.Textln("(no hypotheses)")
-					return nil
-				}
-				renderForestToWriter(w.Raw(), roots, children, 72, nil)
+			if w.IsJSON() {
+				return w.JSON(map[string]any{
+					"goal_id": scopeID,
+					"tree":    buildTreeJSON(roots, children),
+				})
+			}
+			if scopeID != "" {
+				w.Textf("[goal: %s]\n", scopeID)
+			}
+			if len(roots) == 0 && len(filtered) == 0 {
+				w.Textln("(no hypotheses)")
 				return nil
-			},
+			}
+			renderForestToWriter(w.Raw(), roots, children, 72, nil)
+			return nil
 		},
 	}
+	c.Flags().StringVar(&goalID, "goal", "", "goal to scope the tree to (defaults to active goal)")
+	return []*cobra.Command{c}
+}
+
+// resolveGoalScope picks the goal id a read-only view should scope to. An
+// explicit --goal flag is verified against the store; an empty flag falls
+// back to the active goal id from state (which may itself be empty when
+// the store has no goal yet — callers must handle that).
+func resolveGoalScope(s *store.Store, flag string) (string, error) {
+	if flag != "" {
+		ok, err := s.GoalExists(flag)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("--goal %s: goal does not exist", flag)
+		}
+		return flag, nil
+	}
+	st, err := s.State()
+	if err != nil {
+		return "", err
+	}
+	return st.CurrentGoalID, nil
+}
+
+// filterHypothesesByGoal keeps only hypotheses bound to goalID. When goalID
+// is empty (no active goal, no --goal flag), the filter degrades to pass-
+// through: the caller is asking for "everything we have" on a store with
+// no goal, which is either a fresh init or a corrupt migration.
+func filterHypothesesByGoal(all []*entity.Hypothesis, goalID string) []*entity.Hypothesis {
+	if goalID == "" {
+		return all
+	}
+	out := make([]*entity.Hypothesis, 0, len(all))
+	for _, h := range all {
+		if h.GoalID == goalID {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 type treeNode struct {
@@ -69,8 +125,15 @@ func buildTreeJSON(roots []*entity.Hypothesis, children map[string][]*entity.Hyp
 // with deterministic ID-sorted ordering at every level.
 func buildHypothesisForest(all []*entity.Hypothesis) (roots []*entity.Hypothesis, children map[string][]*entity.Hypothesis) {
 	children = map[string][]*entity.Hypothesis{}
+	byID := map[string]bool{}
 	for _, h := range all {
-		if h.Parent == "" {
+		byID[h.ID] = true
+	}
+	for _, h := range all {
+		// A hypothesis whose parent is not part of the filtered set becomes
+		// a root in the view — useful when scoping by goal and the parent
+		// chain pre-dates this goal.
+		if h.Parent == "" || !byID[h.Parent] {
 			roots = append(roots, h)
 		} else {
 			children[h.Parent] = append(children[h.Parent], h)

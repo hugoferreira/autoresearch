@@ -206,7 +206,7 @@ func (v *frontierView) title() string { return "Frontier" }
 
 func (v *frontierView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
-		goal, err := s.ReadGoal()
+		goal, err := s.ActiveGoal()
 		if err != nil {
 			return frontierLoadedMsg{err: err}
 		}
@@ -299,7 +299,7 @@ func (v *goalView) title() string { return "Goal" }
 
 func (v *goalView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
-		g, err := s.ReadGoal()
+		g, err := s.ActiveGoal()
 		return goalLoadedMsg{g: g, err: err}
 	}
 }

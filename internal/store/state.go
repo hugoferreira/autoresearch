@@ -7,8 +7,14 @@ import (
 	"time"
 )
 
+// StateSchemaVersion is the current state.json schema version.
+// v1: single-goal store (.research/goal.md).
+// v2: multi-goal store (.research/goals/G-NNNN.md) + current_goal_id pointer.
+const StateSchemaVersion = 2
+
 type State struct {
 	SchemaVersion     int            `json:"schema_version"`
+	CurrentGoalID     string         `json:"current_goal_id,omitempty"`
 	Paused            bool           `json:"paused"`
 	PauseReason       string         `json:"pause_reason,omitempty"`
 	PausedAt          *time.Time     `json:"paused_at,omitempty"`
@@ -34,7 +40,7 @@ func (s *Store) State() (*State, error) {
 
 func (s *Store) writeState(st State) error {
 	if st.SchemaVersion == 0 {
-		st.SchemaVersion = 1
+		st.SchemaVersion = StateSchemaVersion
 	}
 	if st.Counters == nil {
 		st.Counters = map[string]int{}

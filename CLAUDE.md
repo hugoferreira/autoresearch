@@ -3,7 +3,7 @@
 Guidance for Claude Code working **on** the `autoresearch` repo itself.
 
 > Not to be confused with `.claude/autoresearch.md` / `.codex/autoresearch.md`,
-> which `autoresearch claude install` / `autoresearch codex install` write into
+> which `autoresearch install claude` / `autoresearch install codex` write into
 > *target* projects to teach an agent how to **use** the CLI. This file is
 > about hacking on the CLI's own source.
 
@@ -136,17 +136,17 @@ a worktree — different tree, different store. Don't "fix" that.
 
 - `claude_doc.go` / `codex_doc.go` generate the agent-facing reference docs.
   When you add or rename a verb, update the verb table here too.
-- `agents.go` embeds six Claude prompts under `agents/`.
+- `agents.go` embeds the two Claude prompts under `agents/`
+  (`research-orchestrator.md` + `research-gate-reviewer.md`).
   `codex_agents.go` derives the Codex role briefs from the same contracts.
-  Each role has a narrow contract; don't widen them casually.
 - `claude_settings.go` merges a Bash allow entry into `.claude/settings.json`
   so subagents can invoke `autoresearch` without permission prompts.
 - `codex_instructions.go` maintains the managed autoresearch block in the
   target project's root `AGENTS.md`.
 - `gitignore.go` adds `.research/` to the project's `.gitignore`.
 
-`autoresearch claude install`, `autoresearch claude agents install`,
-`autoresearch codex install`, and `autoresearch codex agents install`
+`autoresearch install claude`, `autoresearch install claude agents`,
+`autoresearch install codex`, and `autoresearch install codex agents`
 re-run these without re-running `init`.
 
 ## Dashboard and `log --follow`

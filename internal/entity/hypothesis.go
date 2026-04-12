@@ -17,6 +17,7 @@ const (
 
 type Hypothesis struct {
 	ID        string    `yaml:"id"                 json:"id"`
+	GoalID    string    `yaml:"goal_id,omitempty"  json:"goal_id,omitempty"`
 	Parent    string    `yaml:"parent,omitempty"   json:"parent,omitempty"`
 	Claim     string    `yaml:"claim"              json:"claim"`
 	Predicts  Predicts  `yaml:"predicts"           json:"predicts"`

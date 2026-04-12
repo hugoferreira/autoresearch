@@ -182,7 +182,7 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	snap.Paused = st.Paused
 	snap.PauseReason = st.PauseReason
 
-	if g, err := s.ReadGoal(); err == nil {
+	if g, err := s.ActiveGoal(); err == nil {
 		snap.Goal = g
 	}
 

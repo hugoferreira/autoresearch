@@ -10,13 +10,17 @@ import (
 )
 
 func frontierCommands() []*cobra.Command {
-	return []*cobra.Command{
-		{
-			Use:   "frontier",
-			Short: "Show the Pareto frontier of conclusions on the goal's objective",
-			Long: `List supported, feasible conclusions in order of the objective direction
+	var goalID string
+	c := &cobra.Command{
+		Use:   "frontier",
+		Short: "Show the Pareto frontier of conclusions on the goal's objective",
+		Long: `List supported, feasible conclusions in order of the objective direction
 (best first), alongside a "stalled_for" counter: the number of conclusions
 written since the last one that actually improved the frontier.
+
+Defaults to the active goal; pass --goal G-NNNN to view a historical
+goal's frontier. Only conclusions whose hypothesis was bound to the
+scoped goal are considered.
 
 A conclusion is "feasible" if every constraint with op=require is satisfied
 by at least one matching observation in its candidate experiment. For v1
@@ -25,68 +29,106 @@ used to disqualify.
 
 Orchestrators read ` + "`frontier --json`" + `'s ` + "`stalled_for`" + ` field against the
 configured ` + "`budgets.frontier_stall_k`" + ` to decide when to stop the loop.`,
-			RunE: func(cmd *cobra.Command, args []string) error {
-				w := output.Default(globalJSON)
-				s, err := openStore()
-				if err != nil {
-					return err
-				}
-				goal, err := s.ReadGoal()
-				if err != nil {
-					return err
-				}
-				concls, err := s.ListConclusions()
-				if err != nil {
-					return err
-				}
-				rows, stalledFor := computeFrontier(s, goal, concls)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			var goal *entity.Goal
+			if goalID != "" {
+				goal, err = s.ReadGoal(goalID)
+			} else {
+				goal, err = s.ActiveGoal()
+			}
+			if err != nil {
+				return err
+			}
+			concls, err := s.ListConclusions()
+			if err != nil {
+				return err
+			}
+			concls, err = scopeConclusionsToGoal(s, concls, goal.ID)
+			if err != nil {
+				return err
+			}
+			rows, stalledFor := computeFrontier(s, goal, concls)
 
-				cfg, err := s.Config()
-				if err != nil {
-					return err
-				}
+			cfg, err := s.Config()
+			if err != nil {
+				return err
+			}
 
-				if w.IsJSON() {
-					return w.JSON(map[string]any{
-						"objective": map[string]any{
-							"instrument": goal.Objective.Instrument,
-							"direction":  goal.Objective.Direction,
-						},
-						"frontier":         rows,
-						"stalled_for":      stalledFor,
-						"frontier_stall_k": cfg.Budgets.FrontierStallK,
-						"stall_reached":    cfg.Budgets.FrontierStallK > 0 && stalledFor >= cfg.Budgets.FrontierStallK,
-					})
+			if w.IsJSON() {
+				return w.JSON(map[string]any{
+					"goal_id": goal.ID,
+					"objective": map[string]any{
+						"instrument": goal.Objective.Instrument,
+						"direction":  goal.Objective.Direction,
+					},
+					"frontier":         rows,
+					"stalled_for":      stalledFor,
+					"frontier_stall_k": cfg.Budgets.FrontierStallK,
+					"stall_reached":    cfg.Budgets.FrontierStallK > 0 && stalledFor >= cfg.Budgets.FrontierStallK,
+				})
+			}
+			if len(rows) == 0 {
+				w.Textln("(no supported+feasible conclusions yet)")
+				return nil
+			}
+			w.Textf("[goal: %s, objective: %s %s, %d supported conclusions]\n", goal.ID, goal.Objective.Direction, goal.Objective.Instrument, len(rows))
+			w.Textln("")
+			for i, r := range rows {
+				marker := "  "
+				if i == 0 {
+					marker = "* "
 				}
-				if len(rows) == 0 {
-					w.Textln("(no supported+feasible conclusions yet)")
-					return nil
-				}
-				w.Textf("[objective: %s %s, %d supported conclusions]\n", goal.Objective.Direction, goal.Objective.Instrument, len(rows))
-				w.Textln("")
-				for i, r := range rows {
-					marker := "  "
-					if i == 0 {
-						marker = "* "
-					}
-					w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, goal.Objective.Instrument, r.Value)
-				}
-				w.Textln("")
-				w.Textf("stalled_for: %d", stalledFor)
-				if cfg.Budgets.FrontierStallK > 0 {
-					w.Textf(" (stall-k=%d)", cfg.Budgets.FrontierStallK)
-					if stalledFor >= cfg.Budgets.FrontierStallK {
-						w.Textln(" — STALL REACHED, orchestrator should stop")
-					} else {
-						w.Textln("")
-					}
+				w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, goal.Objective.Instrument, r.Value)
+			}
+			w.Textln("")
+			w.Textf("stalled_for: %d", stalledFor)
+			if cfg.Budgets.FrontierStallK > 0 {
+				w.Textf(" (stall-k=%d)", cfg.Budgets.FrontierStallK)
+				if stalledFor >= cfg.Budgets.FrontierStallK {
+					w.Textln(" — STALL REACHED, orchestrator should stop")
 				} else {
 					w.Textln("")
 				}
-				return nil
-			},
+			} else {
+				w.Textln("")
+			}
+			return nil
 		},
 	}
+	c.Flags().StringVar(&goalID, "goal", "", "goal to scope the frontier to (defaults to active goal)")
+	return []*cobra.Command{c}
+}
+
+// scopeConclusionsToGoal drops conclusions whose hypothesis is not bound to
+// goalID. When goalID is empty the list is returned unchanged — the caller
+// has already signalled "no goal scoping".
+func scopeConclusionsToGoal(s *store.Store, concls []*entity.Conclusion, goalID string) ([]*entity.Conclusion, error) {
+	if goalID == "" {
+		return concls, nil
+	}
+	cache := map[string]string{}
+	out := make([]*entity.Conclusion, 0, len(concls))
+	for _, c := range concls {
+		hid := c.Hypothesis
+		gid, ok := cache[hid]
+		if !ok {
+			h, err := s.ReadHypothesis(hid)
+			if err != nil {
+				return nil, err
+			}
+			gid = h.GoalID
+			cache[hid] = gid
+		}
+		if gid == goalID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 type frontierRow struct {
@@ -119,10 +161,6 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 		if !requireSatisfied(s, c, requireByInst) {
 			continue
 		}
-		// The conclusion records the CANDIDATE mean in the effect
-		// indirectly via delta_abs + delta_frac; reconstruct candidate
-		// value as the value that delta_abs implied on top of the baseline.
-		// Simpler: read the first candidate observation and use its Value.
 		value := candidateObjectiveValue(s, c, goal.Objective.Instrument)
 		rows = append(rows, frontierRow{
 			Conclusion: c.ID,
@@ -234,4 +272,3 @@ func candidateObjectiveValue(s *store.Store, c *entity.Conclusion, instrument st
 	}
 	return 0
 }
-

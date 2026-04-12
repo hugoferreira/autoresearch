@@ -15,7 +15,8 @@ const (
 	ConfigFile      = "config.yaml"
 	StateFile       = "state.json"
 	EventsFile      = "events.jsonl"
-	GoalFile        = "goal.md"
+	LegacyGoalFile  = "goal.md"
+	GoalsDir        = "goals"
 	HypothesesDir   = "hypotheses"
 	ExperimentsDir  = "experiments"
 	ObservationsDir = "observations"
@@ -50,7 +51,11 @@ func Open(projectDir string) (*Store, error) {
 		candidate := filepath.Join(dir, Dir)
 		info, err := os.Stat(candidate)
 		if err == nil && info.IsDir() {
-			return &Store{root: dir}, nil
+			s := &Store{root: dir}
+			if err := s.maybeMigrate(); err != nil {
+				return nil, err
+			}
+			return s, nil
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
@@ -87,6 +92,7 @@ func Create(projectDir string, cfg Config) (*Store, error) {
 
 	for _, d := range []string{
 		s.DirPath(),
+		s.GoalsDir(),
 		s.HypothesesDir(),
 		s.ExperimentsDir(),
 		s.ObservationsDir(),
@@ -102,7 +108,7 @@ func Create(projectDir string, cfg Config) (*Store, error) {
 	if err := s.writeConfig(cfg); err != nil {
 		return nil, err
 	}
-	if err := s.writeState(State{SchemaVersion: 1, Counters: map[string]int{}}); err != nil {
+	if err := s.writeState(State{SchemaVersion: StateSchemaVersion, Counters: map[string]int{}}); err != nil {
 		return nil, err
 	}
 	if err := s.initEvents(); err != nil {
@@ -116,7 +122,8 @@ func (s *Store) DirPath() string         { return filepath.Join(s.root, Dir) }
 func (s *Store) ConfigPath() string      { return filepath.Join(s.DirPath(), ConfigFile) }
 func (s *Store) StatePath() string       { return filepath.Join(s.DirPath(), StateFile) }
 func (s *Store) EventsPath() string      { return filepath.Join(s.DirPath(), EventsFile) }
-func (s *Store) GoalPath() string        { return filepath.Join(s.DirPath(), GoalFile) }
+func (s *Store) LegacyGoalPath() string  { return filepath.Join(s.DirPath(), LegacyGoalFile) }
+func (s *Store) GoalsDir() string        { return filepath.Join(s.DirPath(), GoalsDir) }
 func (s *Store) HypothesesDir() string   { return filepath.Join(s.DirPath(), HypothesesDir) }
 func (s *Store) ExperimentsDir() string  { return filepath.Join(s.DirPath(), ExperimentsDir) }
 func (s *Store) ObservationsDir() string { return filepath.Join(s.DirPath(), ObservationsDir) }
@@ -174,6 +181,7 @@ func projectKey(absPath string) string {
 
 func (s *Store) Counts() (map[string]int, error) {
 	dirs := map[string]string{
+		"goals":        s.GoalsDir(),
 		"hypotheses":   s.HypothesesDir(),
 		"experiments":  s.ExperimentsDir(),
 		"observations": s.ObservationsDir(),

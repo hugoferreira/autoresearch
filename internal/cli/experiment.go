@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -223,6 +224,11 @@ func experimentImplementCmd() *cobra.Command {
 			if err := s.WriteExperiment(e); err != nil {
 				return err
 			}
+
+			if err := writeWorktreeBrief(s, e, wtPath, implNotes); err != nil {
+				return fmt.Errorf("write worktree brief: %w", err)
+			}
+
 			eventData := map[string]any{"worktree": wtPath, "branch": branch}
 			if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
 				eventData["impl_notes"] = snippet
@@ -437,6 +443,69 @@ func experimentShowCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// writeWorktreeBrief assembles a frozen context snapshot and writes it into
+// the worktree root as .autoresearch-brief.json. Subagents (implementer,
+// observer) read this file instead of reaching back to the main store,
+// which is unreachable from inside a worktree.
+func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes string) error {
+	hyp, err := s.ReadHypothesis(e.Hypothesis)
+	if err != nil {
+		return fmt.Errorf("read hypothesis %s for brief: %w", e.Hypothesis, err)
+	}
+
+	brief := entity.Brief{
+		GeneratedAt: nowUTC(),
+		GeneratedBy: "autoresearch experiment implement",
+		Hypothesis: entity.BriefHypothesis{
+			ID:       hyp.ID,
+			Claim:    hyp.Claim,
+			Predicts: hyp.Predicts,
+			KillIf:   hyp.KillIf,
+		},
+		Experiment: entity.BriefExperiment{
+			ID:          e.ID,
+			Tier:        e.Tier,
+			Instruments: e.Instruments,
+			Baseline:    e.Baseline.Ref,
+			BaselineSHA: e.Baseline.SHA,
+			Worktree:    e.Worktree,
+			Branch:      e.Branch,
+			DesignNotes: strings.TrimSpace(entity.ExtractSection(e.Body, "Design notes")),
+			ImplNotes:   strings.TrimSpace(implNotes),
+		},
+		Lessons: []entity.BriefLesson{},
+	}
+
+	if g, err := s.ActiveGoal(); err == nil {
+		brief.Goal = entity.BriefGoal{
+			ID:          g.ID,
+			Objective:   g.Objective,
+			Constraints: g.Constraints,
+			Steering:    g.Steering(),
+		}
+	}
+
+	if lessons, err := s.ListLessons(); err == nil {
+		for _, l := range lessons {
+			if l.Status == entity.LessonStatusSuperseded {
+				continue
+			}
+			brief.Lessons = append(brief.Lessons, entity.BriefLesson{
+				ID:    l.ID,
+				Claim: l.Claim,
+				Scope: l.Scope,
+			})
+		}
+	}
+
+	data, err := json.MarshalIndent(&brief, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(wtPath, entity.BriefFileName), data, 0o644)
 }
 
 func experimentPromoteCmd() *cobra.Command {

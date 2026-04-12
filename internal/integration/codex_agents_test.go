@@ -14,8 +14,8 @@ func TestEmbeddedCodexAgents_RewrittenForCodex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(agents) != 6 {
-		t.Fatalf("agent count: got %d want 6", len(agents))
+	if len(agents) != 2 {
+		t.Fatalf("agent count: got %d want 2", len(agents))
 	}
 	for _, a := range agents {
 		if !bytes.Contains(a.Content, []byte(".codex/autoresearch.md")) {
@@ -24,16 +24,12 @@ func TestEmbeddedCodexAgents_RewrittenForCodex(t *testing.T) {
 		if bytes.Contains(a.Content, []byte(".claude/autoresearch.md")) {
 			t.Errorf("%s: still references claude doc", a.Name)
 		}
-		if !bytes.Contains(a.Content, []byte("autoresearch codex agents install")) {
+		if !bytes.Contains(a.Content, []byte("autoresearch install codex agents")) {
 			t.Errorf("%s: missing codex install marker", a.Name)
 		}
 	}
 }
 
-// Per-role notebook-layer invariants. Each brief is rewritten from its
-// Claude source by string replacement, so any regression in the rewriter
-// (or in the source prompts) would silently strip the rationale flags and
-// the lesson contract. Pin the load-bearing strings.
 func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
 	agents, err := integration.EmbeddedCodexAgents()
 	if err != nil {
@@ -48,31 +44,21 @@ func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
 		role    string
 		needles []string
 	}{
-		{"research-generator", []string{
+		{"research-orchestrator", []string{
 			"--rationale",
-			"autoresearch lesson list --status active",
-		}},
-		{"research-designer", []string{
 			"--design-notes",
-		}},
-		{"research-implementer", []string{
 			"--impl-notes",
-		}},
-		{"research-analyst", []string{
 			"--interpretation",
+			"autoresearch lesson list --status active",
 			"autoresearch lesson add",
-			// Body-structure guidance must survive the rewriter so
-			// agents writing lessons don't fall back to one-liners.
 			"## Evidence",
 			"## Mechanism",
 			"## Scope and counterexamples",
 			"## For the next generator",
 		}},
-		{"research-critic", []string{
+		{"research-gate-reviewer", []string{
 			"autoresearch lesson add",
-			// Critic lessons must also carry the structured-body rule;
-			// thin critic lessons are the most common failure mode.
-			"both `--claim` and `--body` are",
+			"conclusion downgrade",
 		}},
 	}
 	for _, c := range cases {
@@ -95,8 +81,8 @@ func TestInstallCodexAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Count != 6 {
-		t.Fatalf("count: got %d want 6", r.Count)
+	if r.Count != 2 {
+		t.Fatalf("count: got %d want 2", r.Count)
 	}
 	for _, fn := range r.Written {
 		path := filepath.Join(dir, ".codex", "agents", fn)

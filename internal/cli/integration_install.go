@@ -5,7 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/spf13/cobra"
 )
+
+func installCommands() []*cobra.Command {
+	install := &cobra.Command{
+		Use:   "install",
+		Short: "Install agent integrations for Claude Code or Codex",
+	}
+	install.AddCommand(installClaudeCmd(), installCodexCmd())
+	return []*cobra.Command{install}
+}
 
 func installManagedDoc(projectDir, relPath, content string, dryRun bool) (string, error) {
 	if projectDir == "" {

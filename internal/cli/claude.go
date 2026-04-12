@@ -15,35 +15,116 @@ var _ = errors.New
 // Version is injected at link time via -ldflags; falls back to "dev" locally.
 var Version = "dev"
 
-func claudeCommands() []*cobra.Command {
+func installClaudeCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "claude",
-		Short: "Manage Claude Code integration (agent-facing docs, subagent prompts)",
+		Short: "Install Claude Code integration (docs, settings, subagent prompts)",
 	}
-	c.AddCommand(claudeInstallCmd(), claudeAgentsCommand())
-	return []*cobra.Command{c}
+	c.AddCommand(installClaudeDocsCmd(), installClaudeAgentsCmd())
+	c.RunE = func(cmd *cobra.Command, args []string) error {
+		w := output.Default(globalJSON)
+		wrote, err := writeClaudeDoc(globalProjectDir, false, globalDryRun)
+		if err != nil {
+			return err
+		}
+		entries := []string{integration.AutoresearchAllowEntry}
+		var settingsRes integration.ClaudeSettingsResult
+		if globalDryRun {
+			settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
+		} else {
+			settingsRes, err = integration.EnsureClaudeSettings(globalProjectDir, entries)
+		}
+		if err != nil {
+			return fmt.Errorf("update claude settings: %w", err)
+		}
+
+		var agentRes integration.AgentInstallResult
+		if globalDryRun {
+			agentRes, err = integration.PreviewAgents(globalProjectDir)
+		} else {
+			agentRes, err = integration.InstallAgents(globalProjectDir)
+		}
+		if err != nil {
+			return fmt.Errorf("install agents: %w", err)
+		}
+
+		payload := map[string]any{
+			"status":   "ok",
+			"path":     wrote,
+			"settings": claudeSettingsResultToMap(settingsRes),
+			"agents":   map[string]any{"dir": agentRes.Dir, "files": agentRes.Written, "count": agentRes.Count},
+		}
+		if globalDryRun {
+			payload["status"] = "dry-run"
+			return w.Emit(
+				fmt.Sprintf("[dry-run] would write %s\n[dry-run] settings: %s\n[dry-run] agents: %d file(s) to %s",
+					wrote, describeClaudeSettingsAction(settingsRes), agentRes.Count, agentRes.Dir),
+				payload,
+			)
+		}
+		return w.Emit(
+			fmt.Sprintf("wrote %s\nsettings: %s\nagents: wrote %d prompt(s) to %s",
+				wrote, describeClaudeSettingsAction(settingsRes), agentRes.Count, agentRes.Dir),
+			payload,
+		)
+	}
+	return c
 }
 
-func claudeAgentsCommand() *cobra.Command {
-	a := &cobra.Command{
-		Use:   "agents",
-		Short: "Manage autoresearch's Claude Code subagent prompts",
-	}
-	a.AddCommand(claudeAgentsInstallCmd())
-	return a
-}
-
-func claudeAgentsInstallCmd() *cobra.Command {
+func installClaudeDocsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "install",
-		Short: "Write the six research-* subagent prompts into .claude/agents/",
-		Long: `Write the generator, designer, implementer, observer, analyst, and
-critic subagent prompts into the target project's .claude/agents/
-directory. Claude Code auto-discovers these when you open the project,
-and the main session invokes them via the Agent tool.
+		Use:   "docs",
+		Short: "Write .claude/autoresearch.md and settings only (no agent prompts)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			wrote, err := writeClaudeDoc(globalProjectDir, false, globalDryRun)
+			if err != nil {
+				return err
+			}
+
+			entries := []string{integration.AutoresearchAllowEntry}
+			var settingsRes integration.ClaudeSettingsResult
+			if globalDryRun {
+				settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
+			} else {
+				settingsRes, err = integration.EnsureClaudeSettings(globalProjectDir, entries)
+			}
+			if err != nil {
+				return fmt.Errorf("update claude settings: %w", err)
+			}
+
+			payload := map[string]any{
+				"status":   "ok",
+				"path":     wrote,
+				"settings": claudeSettingsResultToMap(settingsRes),
+			}
+			if globalDryRun {
+				payload["status"] = "dry-run"
+				return w.Emit(
+					fmt.Sprintf("[dry-run] would write %s\n[dry-run] settings: %s",
+						wrote, describeClaudeSettingsAction(settingsRes)),
+					payload,
+				)
+			}
+			return w.Emit(
+				fmt.Sprintf("wrote %s\nsettings: %s", wrote, describeClaudeSettingsAction(settingsRes)),
+				payload,
+			)
+		},
+	}
+}
+
+func installClaudeAgentsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "agents",
+		Short: "Write the research-* subagent prompts into .claude/agents/",
+		Long: `Write the orchestrator and gate-reviewer subagent prompts into the
+target project's .claude/agents/ directory. Claude Code auto-discovers
+these when you open the project, and the main session invokes them via
+the Agent tool.
 
 This command never touches non-research agent files in .claude/agents/.
-The six research-*.md files are fully managed — re-running this command
+The research-*.md files are fully managed — re-running this command
 overwrites them with the current bundled version, so any hand edits you
 made will be lost. If you want custom behavior, create a sibling agent
 file with a different name.
@@ -83,68 +164,9 @@ updated prompts.`,
 	}
 }
 
-func claudeInstallCmd() *cobra.Command {
-	var force bool
-	c := &cobra.Command{
-		Use:   "install",
-		Short: "Write .claude/autoresearch.md so agents know about autoresearch",
-		Long: `Write a Claude-facing reference document to
-.claude/autoresearch.md in the target project. The file describes the CLI
-surface, the strict-mode firewall, the entity lifecycle, and the agent
-safety notes about bounded output.
-
-This command NEVER touches the user's top-level CLAUDE.md. To make the main
-session read the reference, add the line "@.claude/autoresearch.md" to your
-CLAUDE.md yourself, or instruct subagents to read it directly.
-
-The file is fully managed: running this command or ` + "`autoresearch init`" + `
-again overwrites it with the current version. Do not edit it by hand —
-your edits will be lost on the next refresh.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			w := output.Default(globalJSON)
-			wrote, err := installClaudeDoc(globalProjectDir, force, globalDryRun)
-			if err != nil {
-				return err
-			}
-
-			entries := []string{integration.AutoresearchAllowEntry}
-			var settingsRes integration.ClaudeSettingsResult
-			if globalDryRun {
-				settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
-			} else {
-				settingsRes, err = integration.EnsureClaudeSettings(globalProjectDir, entries)
-			}
-			if err != nil {
-				return fmt.Errorf("update claude settings: %w", err)
-			}
-
-			payload := map[string]any{
-				"status":   "ok",
-				"path":     wrote,
-				"settings": claudeSettingsResultToMap(settingsRes),
-			}
-			if globalDryRun {
-				payload["status"] = "dry-run"
-				return w.Emit(
-					fmt.Sprintf("[dry-run] would write %s\n[dry-run] settings: %s",
-						wrote, describeClaudeSettingsAction(settingsRes)),
-					payload,
-				)
-			}
-			return w.Emit(
-				fmt.Sprintf("wrote %s\nsettings: %s", wrote, describeClaudeSettingsAction(settingsRes)),
-				payload,
-			)
-		},
-	}
-	c.Flags().BoolVar(&force, "force", false, "overwrite the file even if it exists (default: yes — this file is always managed)")
-	_ = force // currently unconditional overwrite; flag reserved for a future "refuse if modified" mode
-	return c
-}
-
 // describeClaudeSettingsAction is the one-line human-readable summary of what
 // EnsureClaudeSettings did, used in text output from `init` and
-// `claude install`.
+// `install claude`.
 func describeClaudeSettingsAction(r integration.ClaudeSettingsResult) string {
 	switch {
 	case r.Created:
@@ -175,10 +197,7 @@ func claudeSettingsResultToMap(r integration.ClaudeSettingsResult) map[string]an
 	}
 }
 
-// installClaudeDoc writes .claude/autoresearch.md under projectDir. The file
-// is fully managed by autoresearch: we overwrite unconditionally, since the
-// doc is refreshed on every `init` / `claude install` call. We do NOT touch
-// any sibling files (no CLAUDE.md, no .claude/agents/*).
-func installClaudeDoc(projectDir string, _force, dryRun bool) (string, error) {
+// writeClaudeDoc writes .claude/autoresearch.md under projectDir.
+func writeClaudeDoc(projectDir string, _force, dryRun bool) (string, error) {
 	return installManagedDoc(projectDir, integration.ClaudeDocRelPath, integration.ClaudeDoc(Version), dryRun)
 }

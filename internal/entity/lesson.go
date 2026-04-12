@@ -63,7 +63,7 @@ func (l *Lesson) Marshal() ([]byte, error) {
 		// --body flag and the lesson is underspecified.
 		body = "_No body provided — pass `--body` with Evidence, Mechanism, " +
 			"Scope, and For-the-next-generator sections. See " +
-			"`.claude/agents/research-analyst.md`._\n"
+			"`.claude/agents/research-orchestrator.md`._\n"
 	}
 	return WriteFrontmatter(l, body)
 }

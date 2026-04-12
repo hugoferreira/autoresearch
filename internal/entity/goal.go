@@ -2,12 +2,26 @@ package entity
 
 import (
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	GoalStatusActive    = "active"
+	GoalStatusConcluded = "concluded"
+	GoalStatusAbandoned = "abandoned"
+)
+
 type Goal struct {
 	SchemaVersion int          `yaml:"schema_version,omitempty" json:"schema_version,omitempty"`
+	ID            string       `yaml:"id,omitempty"             json:"id,omitempty"`
+	Status        string       `yaml:"status,omitempty"         json:"status,omitempty"`
+	DerivedFrom   string       `yaml:"derived_from,omitempty"   json:"derived_from,omitempty"`
+	Trigger       string       `yaml:"trigger,omitempty"        json:"trigger,omitempty"`
+	CreatedAt     *time.Time   `yaml:"created_at,omitempty"     json:"created_at,omitempty"`
+	ClosedAt      *time.Time   `yaml:"closed_at,omitempty"      json:"closed_at,omitempty"`
+	ClosureReason string       `yaml:"closure_reason,omitempty" json:"closure_reason,omitempty"`
 	Objective     Objective    `yaml:"objective"                json:"objective"`
 	Constraints   []Constraint `yaml:"constraints"              json:"constraints"`
 	Body          string       `yaml:"-"                        json:"body,omitempty"`
@@ -38,14 +52,14 @@ func ParseGoal(data []byte) (*Goal, error) {
 	}
 	g.Body = string(body)
 	if g.SchemaVersion == 0 {
-		g.SchemaVersion = 1
+		g.SchemaVersion = 2
 	}
 	return &g, nil
 }
 
 func (g *Goal) Marshal() ([]byte, error) {
 	if g.SchemaVersion == 0 {
-		g.SchemaVersion = 1
+		g.SchemaVersion = 2
 	}
 	body := g.Body
 	if body == "" {

@@ -17,6 +17,31 @@ func cfgWith(names ...string) *store.Config {
 	return cfg
 }
 
+func TestRequireActiveGoal(t *testing.T) {
+	if err := firewall.RequireActiveGoal(nil); err == nil {
+		t.Error("nil state should be rejected")
+	}
+	if err := firewall.RequireActiveGoal(&store.State{}); err == nil {
+		t.Error("empty current_goal_id should be rejected")
+	}
+	if err := firewall.RequireActiveGoal(&store.State{CurrentGoalID: "G-0001"}); err != nil {
+		t.Errorf("active goal should pass, got %v", err)
+	}
+}
+
+func TestRequireNoActiveGoal(t *testing.T) {
+	if err := firewall.RequireNoActiveGoal(nil); err != nil {
+		t.Errorf("nil state counts as no active goal, got %v", err)
+	}
+	if err := firewall.RequireNoActiveGoal(&store.State{}); err != nil {
+		t.Errorf("empty current_goal_id counts as no active goal, got %v", err)
+	}
+	err := firewall.RequireNoActiveGoal(&store.State{CurrentGoalID: "G-0007"})
+	if err == nil || !strings.Contains(err.Error(), "G-0007") {
+		t.Errorf("existing active goal should be rejected with id, got %v", err)
+	}
+}
+
 func TestValidateGoal_FeatureStyle(t *testing.T) {
 	g := &entity.Goal{}
 	err := firewall.ValidateGoal(g, cfgWith())

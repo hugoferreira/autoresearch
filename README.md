@@ -21,10 +21,50 @@ files or typing into a dashboard.
 
 You define a goal: an objective metric (with a direction and target effect)
 plus a set of constraints (other instruments that must pass or stay within
-bounds). Claude Code or Codex, driven by six embedded role contracts, then loops:
+bounds). Claude Code or Codex, driven by two embedded agent contracts, then
+loops:
 
-```
-goal → hypothesis → experiment → observe → analyze → conclude → report
+```mermaid
+sequenceDiagram
+    actor H as Human
+    participant M as Main Agent
+    participant O as Orchestrator
+    participant C as Coder Helper
+    participant GR as Gate Reviewer
+
+    H ->> M: Define goal & constraints
+    M ->> M: goal set / goal new
+
+    loop One hypothesis cycle (repeats until budget exhausted or frontier stalls)
+        M ->> O: Run next cycle
+
+        note right of O: Reads goal, lessons,<br/>frontier, tree, codebase
+
+        O ->> O: hypothesis add → H-NNNN
+        O ->> O: experiment design → E-NNNN
+        O ->> O: experiment implement → worktree
+
+        O ->> C: Apply change in worktree
+        note right of C: Pure coder — reads<br/>.autoresearch-brief.json<br/>for context
+        C -->> O: commit SHA + build/test status
+
+        O ->> O: observe (each instrument)
+        O ->> O: analyze + conclude → C-NNNN
+        note right of O: Strict firewall may<br/>downgrade "supported"<br/>→ "inconclusive"
+
+        O -->> M: Verdict + summary
+
+        alt Verdict is supported or refuted
+            M ->> GR: Review C-NNNN independently
+            note right of GR: No orchestrator context —<br/>re-checks stats, artifacts,<br/>commit diff from scratch
+            GR -->> M: Accept or downgrade
+        end
+    end
+
+    H ->> M: Conclude / abandon goal
+    M ->> M: goal conclude / goal abandon
+    H ->> M: Start next goal
+    M ->> M: goal new --from G-NNNN
 ```
 
 Every experiment runs in its own git worktree against the same baseline. Every
@@ -95,7 +135,7 @@ is paused.
 | Group | Verbs |
 | --- | --- |
 | **lifecycle** | `init`, `status`, `pause`, `resume` |
-| **goal** | `goal set`, `goal show` |
+| **goal** | `goal set`, `goal new`, `goal show`, `goal list`, `goal conclude`, `goal abandon` |
 | **steering** | `steering show`, `steering append`, `steering edit` |
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen` |
 | **experiment** | `design`, `implement`, `reset`, `worktree`, `list`, `show`, `promote` |
@@ -103,26 +143,47 @@ is paused.
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
 | **conclusion** | `list`, `show`, `downgrade` (critic-only) |
-| **tree / frontier** | `tree`, `frontier` |
+| **tree / frontier** | `tree [--goal G-NNNN]`, `frontier [--goal G-NNNN]` |
 | **log** | `log [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
 | **artifact** | `list`, `stat`, `path`, `head`, `tail`, `range`, `grep`, `diff`, `show` |
 | **instrument** | `list`, `register`, `run` |
 | **budget** | `show`, `set` |
 | **gc** | `gc` |
-| **claude** | `claude install`, `claude agents install` |
-| **codex** | `codex install`, `codex agents install` |
+| **install** | `install claude [docs\|agents]`, `install codex [docs\|agents]` |
 | **dashboard** | `dashboard [--refresh N] [--color auto\|always\|never]`, `dashboard tui` |
 
 Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,
 `4` budget exhausted. The orchestrator loop uses 3/4 to decide when to stop.
 
+## Goal lifecycle
+
+Goals are serialized: at most one is active at a time. `goal set` bootstraps
+the first goal; `goal new` starts subsequent ones after the active goal is
+concluded or abandoned. Closed goals are terminal — revisiting a problem space
+after the code has evolved means creating a new goal via `goal new --from
+G-NNNN`, which records the provenance link. Every hypothesis created while a
+goal is active is bound to it via `goal_id`.
+
+```sh
+autoresearch goal set   --objective-instrument host_timing --objective-direction decrease \
+                        --constraint-max 'size_flash=131072' --constraint-require 'host_test=pass'
+autoresearch goal conclude --summary "demonstrated 18% gain"
+autoresearch goal new   --from G-0001 --trigger C-0012 \
+                        --objective-instrument host_timing --objective-direction decrease \
+                        --constraint-max 'size_flash=131072'
+```
+
 ## Goal format
 
-Goals are markdown with YAML frontmatter:
+Goals are markdown with YAML frontmatter, stored as `.research/goals/G-NNNN.md`:
 
 ```yaml
 ---
+schema_version: 2
+id: G-0001
+status: active
+created_at: 2026-04-12T10:00:00Z
 objective:
   instrument: host_timing
   target: dsp_fir
@@ -172,13 +233,14 @@ than the hypothesis's declared `min_effect`.
 ```
 .research/
   config.yaml          # build/test cmds, instruments, budgets
-  state.json           # pause flag, counters, started_at
+  state.json           # pause flag, counters, current_goal_id, started_at
   events.jsonl         # append-only event log
-  goal.md              # frontmatter + steering
-  hypotheses/H-NNNN.md
+  goals/G-NNNN.md      # objective + constraints + steering + lifecycle status
+  hypotheses/H-NNNN.md # each bound to a goal via goal_id
   experiments/E-NNNN.md
   observations/O-NNNN.md
   conclusions/C-NNNN.md
+  lessons/L-NNNN.md
   artifacts/<sha256>/…
 ```
 
@@ -238,10 +300,10 @@ The TUI surfaces every read-only CLI verb as a navigable view:
 Top-level jump keys reach every view from anywhere:
 
 ```
-H hypotheses   E experiments  C conclusions   L event log
-T tree         F frontier     G goal          S status
-A artifacts    I instruments  R report picker D dashboard
-?  help overlay      Esc / ⌫  pop current view      q / Ctrl-C  quit
+H hypotheses      E experiments     C conclusions     L event log
+T tree            F frontier        G goal            S status
+A artifacts       I instruments     R report picker   D dashboard
+? help overlay    Esc / ⌫  pop current view           q / Ctrl-C  quit
 ```
 
 Jumps canonicalize the view stack, so pressing `H` twice does not grow

@@ -5,6 +5,7 @@ import "fmt"
 type EntityKind string
 
 const (
+	KindGoal        EntityKind = "G"
 	KindHypothesis  EntityKind = "H"
 	KindExperiment  EntityKind = "E"
 	KindObservation EntityKind = "O"
