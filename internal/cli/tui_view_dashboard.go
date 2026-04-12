@@ -473,7 +473,7 @@ func (v *dashboardView) renderEventsPanel(width, height int) string {
 		if subject == "" {
 			subject = "-"
 		}
-		lines = append(lines, fmt.Sprintf("%s  %s  %-12s  %s",
+		lines = append(lines, fmt.Sprintf("%s  %s  %-8s  %s",
 			tuiDim.Render(e.Ts.UTC().Format("15:04:05")),
 			padRight(tuiEventKindColor(e.Kind), 24),
 			subject,
