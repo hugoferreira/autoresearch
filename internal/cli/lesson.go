@@ -258,12 +258,7 @@ func lessonShowCmd() *cobra.Command {
 				w.Textf("tags:        %s\n", strings.Join(l.Tags, ", "))
 			}
 			if l.PredictedEffect != nil {
-				pe := l.PredictedEffect
-				pred := fmt.Sprintf("%s %s by ≥%.4f", pe.Direction, pe.Instrument, pe.MinEffect)
-				if pe.MaxEffect > 0 {
-					pred += fmt.Sprintf(" (up to %.4f)", pe.MaxEffect)
-				}
-				w.Textf("predicted:   %s\n", pred)
+				w.Textf("predicted:   %s\n", formatPredictedEffect(l.PredictedEffect))
 			}
 			if l.SupersedesID != "" {
 				w.Textf("supersedes:  %s\n", l.SupersedesID)
@@ -527,10 +522,12 @@ may be exhausted.`,
 			}
 
 			for _, la := range results {
-				pred := fmt.Sprintf("%s %s by ≥%.4f", la.Direction, la.Instrument, la.MinEffect)
-				if la.MaxEffect > 0 {
-					pred += fmt.Sprintf(" (up to %.4f)", la.MaxEffect)
-				}
+				pred := formatPredictedEffect(&entity.PredictedEffect{
+					Instrument: la.Instrument,
+					Direction:  la.Direction,
+					MinEffect:  la.MinEffect,
+					MaxEffect:  la.MaxEffect,
+				})
 				w.Textf("  %s  predicted: %s\n", la.LessonID, pred)
 				w.Textf("         %s\n", truncate(la.Claim, 70))
 				for _, r := range la.Comparisons {

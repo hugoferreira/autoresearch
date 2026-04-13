@@ -246,9 +246,9 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 			Status:      e.Status,
 			Instruments: append([]string{}, e.Instruments...),
 		}
-		if impAt := findImplementedAt(allEvents, e.ID); impAt != nil {
-			row.ImplementedAt = impAt
-			row.ElapsedS = time.Since(*impAt).Seconds()
+		if ts, kind := findLastEventForExperiment(allEvents, e.ID); ts != nil && kind == "experiment.implement" {
+			row.ImplementedAt = ts
+			row.ElapsedS = time.Since(*ts).Seconds()
 		}
 		snap.InFlight = append(snap.InFlight, row)
 	}
@@ -338,19 +338,6 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
 
 	return snap, nil
-}
-
-// findImplementedAt scans a pre-loaded event list for the experiment.implement
-// event matching expID and returns its timestamp.
-func findImplementedAt(events []store.Event, expID string) *time.Time {
-	for i := len(events) - 1; i >= 0; i-- {
-		e := events[i]
-		if e.Subject == expID && e.Kind == "experiment.implement" {
-			ts := e.Ts
-			return &ts
-		}
-	}
-	return nil
 }
 
 // findLastEventForExperiment scans a pre-loaded event list backward for the
@@ -664,11 +651,7 @@ func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		}
 		pred := ""
 		if l.PredictedEffect != nil {
-			pe := l.PredictedEffect
-			pred = fmt.Sprintf(" → predicts %s %s ≥%.2f", pe.Direction, pe.Instrument, pe.MinEffect)
-			if pe.MaxEffect > 0 {
-				pred += fmt.Sprintf("–%.2f", pe.MaxEffect)
-			}
+			pred = " → predicts " + formatPredictedEffect(l.PredictedEffect)
 		}
 		fmt.Fprintf(w, "   %-8s  %s  %s%s%s\n",
 			a.cyan(l.ID), scopeCell, truncate(l.Claim, 60), a.dim(subj), a.yellow(pred))

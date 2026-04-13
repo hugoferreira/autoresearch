@@ -414,6 +414,27 @@ func tuiMeterColor(used, limit float64, s string) string {
 	}
 }
 
+// ---- shared formatting ----
+
+// formatPredictedEffect renders a PredictedEffect as a human-readable string
+// like "decrease host_timing by ≥0.0500 (up to 0.1000)".
+func formatPredictedEffect(pe *entity.PredictedEffect) string {
+	s := fmt.Sprintf("%s %s by ≥%.4f", pe.Direction, pe.Instrument, pe.MinEffect)
+	if pe.MaxEffect > 0 {
+		s += fmt.Sprintf(" (up to %.4f)", pe.MaxEffect)
+	}
+	return s
+}
+
+// formatPredictedEffectCompact renders a short form like "↓≥5%" for dashboard panels.
+func formatPredictedEffectCompact(pe *entity.PredictedEffect) string {
+	arrow := "↓"
+	if pe.Direction == "increase" {
+		arrow = "↑"
+	}
+	return fmt.Sprintf("%s≥%.0f%%", arrow, pe.MinEffect*100)
+}
+
 // Compile-time anchor: all view files can refer to entity.Hypothesis via
 // this without each having to carry a dead import. Replaces the per-file
 // `var _ = entity.Hypothesis{}` anchors that used to clutter the views.

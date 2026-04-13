@@ -392,12 +392,7 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 		// Predicted effect indicator
 		pred := ""
 		if l.PredictedEffect != nil {
-			pe := l.PredictedEffect
-			arrow := "↓"
-			if pe.Direction == "increase" {
-				arrow = "↑"
-			}
-			pred = tuiYellow.Render(fmt.Sprintf(" %s≥%.0f%%", arrow, pe.MinEffect*100))
+			pred = tuiYellow.Render(" " + formatPredictedEffectCompact(l.PredictedEffect))
 		}
 		// ID(8) + " " + scope(3) + " " + claim + extras
 		claimW := max(innerW-16, 20)

@@ -110,13 +110,7 @@ func (v *lessonListView) view(width, height int) string {
 		}
 		pred := tuiDim.Render("     ")
 		if l.PredictedEffect != nil {
-			pe := l.PredictedEffect
-			arrow := "↓"
-			if pe.Direction == "increase" {
-				arrow = "↑"
-			}
-			pred = tuiYellow.Render(fmt.Sprintf("%s%.0f%%", arrow, pe.MinEffect*100))
-			pred = padRight(pred, 5)
+			pred = padRight(tuiYellow.Render(formatPredictedEffectCompact(l.PredictedEffect)), 5)
 		}
 		rows[i] = fmt.Sprintf("%-8s %-11s %-11s %s from=%-18s %s",
 			l.ID,
@@ -211,13 +205,8 @@ func (v *lessonDetailView) ensureRendered(width int) string {
 		lines = append(lines, tuiBold.Render("Tags:")+" "+strings.Join(l.Tags, ", "))
 	}
 	if l.PredictedEffect != nil {
-		pe := l.PredictedEffect
 		lines = append(lines, "")
-		pred := fmt.Sprintf("%s %s by ≥%.4f", pe.Direction, pe.Instrument, pe.MinEffect)
-		if pe.MaxEffect > 0 {
-			pred += fmt.Sprintf(" (up to %.4f)", pe.MaxEffect)
-		}
-		lines = append(lines, tuiBold.Render("Predicted effect:")+" "+tuiYellow.Render(pred))
+		lines = append(lines, tuiBold.Render("Predicted effect:")+" "+tuiYellow.Render(formatPredictedEffect(l.PredictedEffect)))
 	}
 	if l.SupersedesID != "" || l.SupersededByID != "" {
 		lines = append(lines, "")
