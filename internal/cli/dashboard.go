@@ -658,8 +658,20 @@ func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		case entity.LessonScopeHypothesis:
 			scopeCell = a.cyan(scopeCell)
 		}
-		fmt.Fprintf(w, "   %-8s  %s  %s\n",
-			a.cyan(l.ID), scopeCell, truncate(l.Claim, 70))
+		subj := ""
+		if len(l.Subjects) > 0 {
+			subj = " from=" + strings.Join(l.Subjects, ",")
+		}
+		pred := ""
+		if l.PredictedEffect != nil {
+			pe := l.PredictedEffect
+			pred = fmt.Sprintf(" → predicts %s %s ≥%.2f", pe.Direction, pe.Instrument, pe.MinEffect)
+			if pe.MaxEffect > 0 {
+				pred += fmt.Sprintf("–%.2f", pe.MaxEffect)
+			}
+		}
+		fmt.Fprintf(w, "   %-8s  %s  %s%s%s\n",
+			a.cyan(l.ID), scopeCell, truncate(l.Claim, 60), a.dim(subj), a.yellow(pred))
 	}
 }
 

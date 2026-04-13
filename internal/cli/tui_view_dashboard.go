@@ -367,12 +367,33 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 		return boxPanel(title, tuiDim.Render("(no active lessons)"), width, height, false)
 	}
 	innerW := width - 4
-	// Prefix: "L-0006  " = 8 visible chars.
-	claimW := max(innerW-8, 20)
 	var lines []string
 	for _, l := range snap.RecentLessons {
-		lines = append(lines, fmt.Sprintf("%s  %s",
-			tuiCyan.Render(l.ID), truncate(l.Claim, claimW)))
+		// Scope badge: 3 chars (sys/hyp)
+		scope := tuiCyan.Render("hyp")
+		if l.Scope == entity.LessonScopeSystem {
+			scope = tuiMag.Render("sys")
+		}
+		// Subjects (compact)
+		subj := ""
+		if len(l.Subjects) > 0 {
+			subj = tuiDim.Render(" " + strings.Join(l.Subjects, ","))
+		}
+		// Predicted effect indicator
+		pred := ""
+		if l.PredictedEffect != nil {
+			pe := l.PredictedEffect
+			arrow := "↓"
+			if pe.Direction == "increase" {
+				arrow = "↑"
+			}
+			pred = tuiYellow.Render(fmt.Sprintf(" %s≥%.0f%%", arrow, pe.MinEffect*100))
+		}
+		// ID(8) + " " + scope(3) + " " + claim + extras
+		claimW := max(innerW-16, 20)
+		line := fmt.Sprintf("%s %s %s%s%s",
+			tuiCyan.Render(l.ID), scope, truncate(l.Claim, claimW), subj, pred)
+		lines = append(lines, line)
 	}
 	lines = truncLines(lines, innerW)
 	return boxPanel(title, strings.Join(lines, "\n"), width, height, false)
