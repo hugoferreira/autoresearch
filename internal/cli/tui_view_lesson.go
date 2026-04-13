@@ -219,7 +219,9 @@ func (v *lessonDetailView) ensureRendered(width int) string {
 	}
 	if body := strings.TrimSpace(l.Body); body != "" {
 		lines = append(lines, "")
-		lines = append(lines, strings.TrimRight(renderMarkdown(width, body), "\n"))
+		// Subtract margin for glamour's block-level decorations so the
+		// rendered markdown fits flush inside the panel without overflow.
+		lines = append(lines, strings.TrimRight(renderMarkdown(max(width-4, 20), body), "\n"))
 	}
 	v.rendered = strings.Join(lines, "\n")
 	v.renderedWidth = width

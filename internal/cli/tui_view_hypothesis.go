@@ -361,7 +361,7 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 	}
 	if !v.compact && strings.TrimSpace(h.Body) != "" {
 		lines = append(lines, "")
-		lines = append(lines, strings.TrimRight(renderMarkdown(width, h.Body), "\n"))
+		lines = append(lines, strings.TrimRight(renderMarkdown(max(width-4, 20), h.Body), "\n"))
 	}
 	return lines, links
 }
