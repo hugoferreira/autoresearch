@@ -20,18 +20,30 @@ import (
 //   - "system" — free-floating incidental findings about the target codebase
 //     or the research apparatus itself. Example: "the test harness caches
 //     stale fixtures across runs; always make clean before observing."
+// PredictedEffect records what effect the lesson author expects from
+// future work in the same direction. When a subsequent hypothesis
+// concludes, the predicted vs actual delta can be compared to detect
+// diminishing returns.
+type PredictedEffect struct {
+	Instrument string  `yaml:"instrument"              json:"instrument"`
+	Direction  string  `yaml:"direction"               json:"direction"`
+	MinEffect  float64 `yaml:"min_effect"              json:"min_effect"`
+	MaxEffect  float64 `yaml:"max_effect,omitempty"    json:"max_effect,omitempty"`
+}
+
 type Lesson struct {
-	ID             string    `yaml:"id"                      json:"id"`
-	Claim          string    `yaml:"claim"                   json:"claim"`
-	Scope          string    `yaml:"scope"                   json:"scope"`
-	Subjects       []string  `yaml:"subjects,omitempty"      json:"subjects,omitempty"`
-	Tags           []string  `yaml:"tags,omitempty"          json:"tags,omitempty"`
-	Status         string    `yaml:"status"                  json:"status"`
-	SupersedesID   string    `yaml:"supersedes,omitempty"    json:"supersedes,omitempty"`
-	SupersededByID string    `yaml:"superseded_by,omitempty" json:"superseded_by,omitempty"`
-	Author         string    `yaml:"author"                  json:"author"`
-	CreatedAt      time.Time `yaml:"created_at"              json:"created_at"`
-	Body           string    `yaml:"-"                       json:"body,omitempty"`
+	ID              string           `yaml:"id"                          json:"id"`
+	Claim           string           `yaml:"claim"                       json:"claim"`
+	Scope           string           `yaml:"scope"                       json:"scope"`
+	Subjects        []string         `yaml:"subjects,omitempty"          json:"subjects,omitempty"`
+	Tags            []string         `yaml:"tags,omitempty"              json:"tags,omitempty"`
+	PredictedEffect *PredictedEffect `yaml:"predicted_effect,omitempty"  json:"predicted_effect,omitempty"`
+	Status          string           `yaml:"status"                      json:"status"`
+	SupersedesID    string           `yaml:"supersedes,omitempty"        json:"supersedes,omitempty"`
+	SupersededByID  string           `yaml:"superseded_by,omitempty"     json:"superseded_by,omitempty"`
+	Author          string           `yaml:"author"                      json:"author"`
+	CreatedAt       time.Time        `yaml:"created_at"                  json:"created_at"`
+	Body            string           `yaml:"-"                           json:"body,omitempty"`
 }
 
 const (

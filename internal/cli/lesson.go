@@ -41,18 +41,23 @@ the whole point — the loop should not re-derive what it already knows.`,
 		lessonListCmd(),
 		lessonShowCmd(),
 		lessonSupersedeCmd(),
+		lessonAccuracyCmd(),
 	)
 	return []*cobra.Command{l}
 }
 
 func lessonAddCmd() *cobra.Command {
 	var (
-		claim    string
-		scope    string
-		subjects []string
-		tags     []string
-		body     string
-		author   string
+		claim            string
+		scope            string
+		subjects         []string
+		tags             []string
+		body             string
+		author           string
+		predictInst      string
+		predictDir       string
+		predictMinEffect float64
+		predictMaxEffect float64
 	)
 	c := &cobra.Command{
 		Use:   "add",
@@ -91,6 +96,14 @@ research apparatus itself).`,
 				Status:    entity.LessonStatusActive,
 				Author:    or(author, "agent:analyst"),
 				CreatedAt: nowUTC(),
+			}
+			if predictInst != "" {
+				l.PredictedEffect = &entity.PredictedEffect{
+					Instrument: predictInst,
+					Direction:  predictDir,
+					MinEffect:  predictMinEffect,
+					MaxEffect:  predictMaxEffect,
+				}
 			}
 			if strings.TrimSpace(body) != "" {
 				l.Body = entity.AppendMarkdownSection("", "Lesson", body)
@@ -147,6 +160,10 @@ research apparatus itself).`,
 	c.Flags().StringSliceVar(&subjects, "from", nil, "H-/E-/C- ids this lesson was extracted from; may be repeated or comma-separated")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&body, "body", "", "prose expansion of the claim — required for agents. Expected structure: `## Evidence`, `## Mechanism`, `## Scope and counterexamples`, `## For the next generator`. See the research-orchestrator subagent brief for a worked example. A lesson without a body is a one-liner the next generator cannot act on.")
+	c.Flags().StringVar(&predictInst, "predict-instrument", "", "instrument for predicted future effect (sets predicted_effect)")
+	c.Flags().StringVar(&predictDir, "predict-direction", "", "increase | decrease (required with --predict-instrument)")
+	c.Flags().Float64Var(&predictMinEffect, "predict-min-effect", 0, "minimum predicted fractional effect (required with --predict-instrument)")
+	c.Flags().Float64Var(&predictMaxEffect, "predict-max-effect", 0, "maximum predicted fractional effect (optional, 0 = unbounded)")
 	addAuthorFlag(c, &author, "")
 	return c
 }
@@ -239,6 +256,14 @@ func lessonShowCmd() *cobra.Command {
 			}
 			if len(l.Tags) > 0 {
 				w.Textf("tags:        %s\n", strings.Join(l.Tags, ", "))
+			}
+			if l.PredictedEffect != nil {
+				pe := l.PredictedEffect
+				pred := fmt.Sprintf("%s %s by ≥%.4f", pe.Direction, pe.Instrument, pe.MinEffect)
+				if pe.MaxEffect > 0 {
+					pred += fmt.Sprintf(" (up to %.4f)", pe.MaxEffect)
+				}
+				w.Textf("predicted:   %s\n", pred)
 			}
 			if l.SupersedesID != "" {
 				w.Textf("supersedes:  %s\n", l.SupersedesID)
@@ -333,6 +358,154 @@ first-class record that can itself be superseded later.`,
 	c.Flags().StringVar(&by, "by", "", "newer lesson id (must already exist, required)")
 	c.Flags().StringVar(&reason, "reason", "", "why this lesson is being superseded (required)")
 	return c
+}
+
+func lessonAccuracyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "accuracy",
+		Short: "Compare predicted effects against actual conclusion outcomes",
+		Long: `For each active lesson with a predicted_effect, find subsequent
+conclusions on the same instrument and compare the predicted range
+against the actual absolute delta_frac. Classify each as HIT
+(within range), OVERSHOOT (predicted more than actual), or
+UNDERSHOOT (predicted less than actual).
+
+This is a read-only diagnostic for detecting diminishing returns:
+when predictions consistently overshoot, the optimization direction
+may be exhausted.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+
+			lessons, err := s.ListLessons()
+			if err != nil {
+				return err
+			}
+			concls, err := s.ListConclusions()
+			if err != nil {
+				return err
+			}
+
+			type accuracyRow struct {
+				LessonID     string  `json:"lesson_id"`
+				ConclusionID string  `json:"conclusion_id"`
+				Predicted    string  `json:"predicted"`
+				ActualDelta  float64 `json:"actual_delta_frac"`
+				Classification string `json:"classification"`
+			}
+			type lessonAccuracy struct {
+				LessonID    string        `json:"lesson_id"`
+				Claim       string        `json:"claim"`
+				Instrument  string        `json:"instrument"`
+				Direction   string        `json:"direction"`
+				MinEffect   float64       `json:"min_effect"`
+				MaxEffect   float64       `json:"max_effect,omitempty"`
+				Comparisons []accuracyRow `json:"comparisons"`
+			}
+
+			var results []lessonAccuracy
+			var totalHit, totalOver, totalUnder int
+
+			for _, l := range lessons {
+				if l.Status != entity.LessonStatusActive || l.PredictedEffect == nil {
+					continue
+				}
+				pe := l.PredictedEffect
+				la := lessonAccuracy{
+					LessonID:   l.ID,
+					Claim:      l.Claim,
+					Instrument: pe.Instrument,
+					Direction:  pe.Direction,
+					MinEffect:  pe.MinEffect,
+					MaxEffect:  pe.MaxEffect,
+				}
+
+				// Find conclusions written after this lesson on the same instrument.
+				for _, c := range concls {
+					if c.CreatedAt.Before(l.CreatedAt) {
+						continue
+					}
+					if c.Effect.Instrument != pe.Instrument {
+						continue
+					}
+					if c.Verdict != entity.VerdictSupported && c.Verdict != entity.VerdictRefuted {
+						continue
+					}
+
+					// Use absolute value of delta_frac for comparison.
+					actual := c.Effect.DeltaFrac
+					if pe.Direction == "decrease" {
+						actual = -actual // normalize to positive = improvement
+					}
+
+					predicted := fmt.Sprintf("%.4f", pe.MinEffect)
+					if pe.MaxEffect > 0 {
+						predicted = fmt.Sprintf("%.4f–%.4f", pe.MinEffect, pe.MaxEffect)
+					}
+
+					class := "HIT"
+					if actual < pe.MinEffect {
+						class = "OVERSHOOT" // predicted more than delivered
+						totalOver++
+					} else if pe.MaxEffect > 0 && actual > pe.MaxEffect {
+						class = "UNDERSHOOT" // delivered more than predicted
+						totalUnder++
+					} else {
+						totalHit++
+					}
+
+					la.Comparisons = append(la.Comparisons, accuracyRow{
+						LessonID:       l.ID,
+						ConclusionID:   c.ID,
+						Predicted:      predicted,
+						ActualDelta:    c.Effect.DeltaFrac,
+						Classification: class,
+					})
+				}
+
+				if len(la.Comparisons) > 0 {
+					results = append(results, la)
+				}
+			}
+
+			total := totalHit + totalOver + totalUnder
+
+			if w.IsJSON() {
+				return w.JSON(map[string]any{
+					"lessons":    results,
+					"total":      total,
+					"hit":        totalHit,
+					"overshoot":  totalOver,
+					"undershoot": totalUnder,
+				})
+			}
+
+			if len(results) == 0 {
+				w.Textln("(no lessons with predicted effects or no subsequent conclusions to compare)")
+				return nil
+			}
+
+			for _, la := range results {
+				pred := fmt.Sprintf("%s %s by ≥%.4f", la.Direction, la.Instrument, la.MinEffect)
+				if la.MaxEffect > 0 {
+					pred += fmt.Sprintf(" (up to %.4f)", la.MaxEffect)
+				}
+				w.Textf("  %s  predicted: %s\n", la.LessonID, pred)
+				w.Textf("         %s\n", truncate(la.Claim, 70))
+				for _, r := range la.Comparisons {
+					w.Textf("    %s: actual delta_frac=%+.4f  %s\n", r.ConclusionID, r.ActualDelta, r.Classification)
+				}
+				w.Textln("")
+			}
+
+			w.Textf("  prediction accuracy: %d total — %d hit, %d overshoot, %d undershoot\n",
+				total, totalHit, totalOver, totalUnder)
+			return nil
+		},
+	}
 }
 
 // entityExists checks whether a referenced subject id (H-/E-/C-) still lives

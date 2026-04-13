@@ -283,6 +283,27 @@ func CheckInstrumentDependencies(instName string, cfg *store.Config, observation
 // prefixes on Subjects and SupersedesID. Existence of referenced entities is
 // NOT checked here — that's the CLI handler's job, matching the pattern used
 // for Hypothesis parent references.
+func ValidatePredictedEffect(pe *entity.PredictedEffect, scope string) error {
+	if strings.TrimSpace(pe.Instrument) == "" {
+		return errors.New("predicted_effect.instrument is required")
+	}
+	switch pe.Direction {
+	case "increase", "decrease":
+	default:
+		return fmt.Errorf("predicted_effect.direction must be 'increase' or 'decrease', got %q", pe.Direction)
+	}
+	if pe.MinEffect <= 0 {
+		return errors.New("predicted_effect.min_effect must be > 0")
+	}
+	if pe.MaxEffect > 0 && pe.MaxEffect < pe.MinEffect {
+		return errors.New("predicted_effect.max_effect must be >= min_effect when set")
+	}
+	if scope == entity.LessonScopeSystem {
+		return errors.New("predicted_effect is only valid for scope=hypothesis lessons")
+	}
+	return nil
+}
+
 func ValidateLesson(l *entity.Lesson) error {
 	if strings.TrimSpace(l.Claim) == "" {
 		return errors.New("lesson claim is required")
@@ -309,6 +330,11 @@ func ValidateLesson(l *entity.Lesson) error {
 	default:
 		return fmt.Errorf("lesson status must be %q or %q, got %q",
 			entity.LessonStatusActive, entity.LessonStatusSuperseded, l.Status)
+	}
+	if l.PredictedEffect != nil {
+		if err := ValidatePredictedEffect(l.PredictedEffect, l.Scope); err != nil {
+			return err
+		}
 	}
 	return nil
 }
