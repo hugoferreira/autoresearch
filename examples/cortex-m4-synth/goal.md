@@ -1,15 +1,15 @@
 ---
 objective:
-  instrument: host_timing
+  instrument: timing
   target: dsp_fir
   direction: decrease
   target_effect: 0.20
 constraints:
-  - instrument: size_flash
+  - instrument: binary_size
     max: 131072
-  - instrument: host_test
+  - instrument: test
     require: pass
-  - instrument: host_compile
+  - instrument: compile
     require: pass
 ---
 
@@ -30,7 +30,7 @@ Hard rules:
 
 - Do not rewrite in assembly. Portable C only.
 - Do not change the test vectors or the output format.
-- `host_test` must remain PASS on every candidate.
+- `test` must remain PASS on every candidate.
 
 Budget: no more than 20 experiments on this hypothesis tree before asking
 for human re-steering.

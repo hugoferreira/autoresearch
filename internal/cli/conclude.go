@@ -251,7 +251,7 @@ downgraded since there is no comparator).`,
 				w.Textln("")
 			}
 			w.Textf("wrote %s\n", id)
-			w.Textf("  hypothesis:  %s (now %s)\n", hypID, decision.FinalVerdict)
+			w.Textf("  hypothesis:  %s (now %s)\n", hypID, hyp.Status)
 			w.Textf("  candidate:   %s  (n=%d)\n", candExp, effect.NCandidate)
 			if baselineExp != "" {
 				w.Textf("  baseline:    %s  (n=%d)\n", baselineExp, effect.NBaseline)

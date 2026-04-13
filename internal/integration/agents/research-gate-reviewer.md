@@ -112,7 +112,7 @@ a reason. Good reasons:
   the diff (git show autoresearch/E-NNNN) shows the inner loop is
   unchanged — the actual change was a deleted debug branch."
 - **Inconclusive called refuted**: "kill_if clause 'flash grew > 64K'
-  cited, but size_flash observation O-NNNN shows 61440 bytes — below
+  cited, but binary_size observation O-NNNN shows 61440 bytes — below
   the threshold. CI straddles zero; this is inconclusive, not refuted."
 
 ### Record a lesson (cross-cutting patterns only)

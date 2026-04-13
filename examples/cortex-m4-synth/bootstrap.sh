@@ -61,26 +61,28 @@ echo "=> autoresearch init"
 "$AR" init --build-cmd "make all" --test-cmd "make test"
 
 echo "=> registering instruments"
-"$AR" instrument register host_compile \
+"$AR" instrument register compile \
     --cmd make,all \
     --parser builtin:passfail \
     --unit pass
 
-"$AR" instrument register host_test \
+"$AR" instrument register test \
     --cmd make,test \
     --parser builtin:passfail \
-    --unit pass
+    --unit pass \
+    --requires compile=pass
 
-"$AR" instrument register host_timing \
+"$AR" instrument register timing \
     --cmd build/main \
     --parser builtin:timing \
     --unit seconds --min-samples 8 \
-    --requires host_test=pass
+    --requires test=pass
 
-"$AR" instrument register size_flash \
+"$AR" instrument register binary_size \
     --cmd size,build/main \
     --parser builtin:size \
-    --unit bytes
+    --unit bytes \
+    --requires compile=pass
 
 if command -v arm-none-eabi-gcc >/dev/null 2>&1 && command -v qemu-system-arm >/dev/null 2>&1; then
     echo "=> building firmware"
@@ -91,7 +93,7 @@ if command -v arm-none-eabi-gcc >/dev/null 2>&1 && command -v qemu-system-arm >/
         --parser builtin:scalar \
         --pattern 'cycles:\s*(\d+)' \
         --unit cycles --min-samples 3 \
-        --requires host_test=pass
+        --requires test=pass
 else
     echo "=> skipping qemu_cycles (install arm-none-eabi-gcc and qemu-system-arm to enable)"
 fi

@@ -108,8 +108,8 @@ autoresearch experiment design <hyp-id> \
 - Run cheap, fast instruments (compile checks, test suites) first. Their
   results gate expensive instruments via `--requires` dependencies declared
   at registration time.
-- If an instrument declares `--requires host_test=pass`, `observe` will
-  refuse until `host_test` has been observed with a passing result on the
+- If an instrument declares `--requires test=pass`, `observe` will
+  refuse until `test` has been observed with a passing result on the
   same experiment. Use `observe --force` only when the human explicitly
   approves.
 - Order your `observe` calls so that dependency-free instruments run first,
@@ -117,8 +117,8 @@ autoresearch experiment design <hyp-id> \
 
 **Instrument choice** — include the minimum set that answers:
 
-1. Does it build? → `host_compile`
-2. Does it pass tests? → `host_test`
+1. Does it build? → `compile`
+2. Does it pass tests? → `test`
 3. Does it move the predicted instrument? → the hypothesis's instrument
 4. Does it violate constraints? → every constraint instrument from the goal
 

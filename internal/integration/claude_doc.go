@@ -161,15 +161,15 @@ the circumstances are different.
         --objective-target dsp_fir \
         --objective-direction decrease \
         --objective-target-effect 0.20 \
-        --constraint-max 'size_flash=65536' \
-        --constraint-require 'host_test=pass' \
+        --constraint-max 'binary_size=65536' \
+        --constraint-require 'test=pass' \
         --steering "start with loop unrolling"
     autoresearch goal set --file goal.md        # for humans who prefer editor workflows
 
     # Subsequent goals — refuses if another goal is still active
     autoresearch goal new --from G-0001 --trigger C-0012 \
         --objective-instrument qemu_cycles --objective-direction decrease \
-        --constraint-max 'size_flash=65536' --constraint-require 'host_test=pass'
+        --constraint-max 'binary_size=65536' --constraint-require 'test=pass'
 
     autoresearch goal conclude [G-NNNN] [--summary "..."]   # mark active goal concluded
     autoresearch goal abandon  [G-NNNN] --reason "..."      # mark active goal abandoned
@@ -214,7 +214,7 @@ the firewall sees.
     autoresearch experiment show       <exp-id>
 
 Instrument dependencies: instruments may declare ` + "`--requires`" + ` dependencies
-(e.g. ` + "`host_test=pass`" + `). When you ` + "`observe`" + `, the CLI checks that all required
+(e.g. ` + "`test=pass`" + `). When you ` + "`observe`" + `, the CLI checks that all required
 instruments have already been observed with a passing result on the same
 experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 ` + "`observe --force`" + ` to bypass the dependency gate when you know what you're doing.
@@ -283,7 +283,7 @@ Examples of ` + "`builtin:scalar`" + ` instruments (the name is your choice):
         --cmd qemu-system-arm,-machine,mps2-an386,-kernel,firmware.elf,-icount,shift=0,-nographic,-semihosting-config,enable=on,target=native \
         --parser builtin:scalar \
         --pattern 'cycles:\s*(\d+)' \
-        --unit cycles --requires host_test=pass --min-samples 3
+        --unit cycles --requires test=pass --min-samples 3
 
     # Retired instructions from perf stat on host:
     autoresearch instrument register perf_instructions \
@@ -430,7 +430,7 @@ response. Capture with:
 
     H1=$(autoresearch hypothesis add ...  --json | jq -r .id)
     E1=$(autoresearch experiment design $H1 ... --json | jq -r .id)
-    O1=$(autoresearch observe $E1 --instrument host_timing --json | jq -r .id)
+    O1=$(autoresearch observe $E1 --instrument timing --json | jq -r .id)
     C1=$(autoresearch conclude $H1 --verdict supported --observations $O1 ... --json | jq -r .id)
 
 The same works from any JSON library. In text mode, the first line of the
