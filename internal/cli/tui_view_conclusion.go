@@ -99,7 +99,7 @@ func (v *conclusionListView) view(width, height int) string {
 		if c.ReviewedBy != "" {
 			review = tuiGreen.Render("✓")
 		} else if c.Verdict == entity.VerdictSupported || c.Verdict == entity.VerdictRefuted {
-			review = tuiYellow.Render("⧖")
+			review = tuiYellow.Render("±")
 		}
 		rows[i] = fmt.Sprintf("%-8s  %s %s hyp=%-8s  Δfrac=%+.4f  p=%.4g%s",
 			c.ID, padRight(tuiVerdictBadge(c.Verdict), 12), review,

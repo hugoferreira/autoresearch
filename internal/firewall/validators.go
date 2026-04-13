@@ -319,6 +319,17 @@ func isValidSubjectID(id string) bool {
 		strings.HasPrefix(id, "C-")
 }
 
+// CheckParentReviewed ensures that a hypothesis's parent (if any) has been
+// through gate review before new sub-hypotheses are derived from it. A parent
+// in "unreviewed" status means its conclusion hasn't been independently
+// validated — building on it would bypass the two-agent safety model.
+func CheckParentReviewed(parent *entity.Hypothesis) error {
+	if parent.Status == entity.StatusUnreviewed {
+		return fmt.Errorf("parent hypothesis %s is unreviewed — dispatch the gate reviewer before deriving sub-hypotheses from it", parent.ID)
+	}
+	return nil
+}
+
 func ValidateHypothesis(h *entity.Hypothesis, cfg *store.Config) error {
 	if strings.TrimSpace(h.Claim) == "" {
 		return errors.New("hypothesis claim is required")

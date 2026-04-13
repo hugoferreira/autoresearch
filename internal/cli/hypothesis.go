@@ -71,12 +71,12 @@ func hypothesisAddCmd() *cobra.Command {
 			}
 
 			if parent != "" {
-				ok, err := s.HypothesisExists(parent)
+				ph, err := s.ReadHypothesis(parent)
 				if err != nil {
-					return err
+					return fmt.Errorf("parent hypothesis %q: %w", parent, err)
 				}
-				if !ok {
-					return fmt.Errorf("parent hypothesis %q does not exist", parent)
+				if err := firewall.CheckParentReviewed(ph); err != nil {
+					return err
 				}
 			}
 

@@ -61,10 +61,10 @@ sequenceDiagram
 
         alt Verdict is supported or refuted
             O ->> O: lesson add → L-NNNN
-            O -->> M: Verdict + summary
-            M ->> GR: Review C-NNNN independently
+            O ->> GR: Review C-NNNN independently
             note right of GR: No orchestrator context —<br/>re-checks stats, artifacts,<br/>commit diff from scratch
-            GR -->> M: Accept or downgrade
+            GR -->> O: Accept or downgrade
+            O -->> M: Verdict + review outcome
         else Inconclusive
             O -->> M: Inconclusive — next hypothesis
         end

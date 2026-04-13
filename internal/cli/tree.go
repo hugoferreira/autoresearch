@@ -183,7 +183,7 @@ func statusGlyph(status string) string {
 	case entity.StatusRefuted:
 		return "✗"
 	case entity.StatusUnreviewed:
-		return "⧖"
+		return "±"
 	case entity.StatusInconclusive:
 		return "?"
 	case entity.StatusKilled:
