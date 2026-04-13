@@ -142,8 +142,9 @@ flag details.
 
 ### Budgets
     autoresearch budget show
-    autoresearch budget set --max-experiments N --max-wall-time-h H --frontier-stall-k K
+    autoresearch budget set --max-experiments N --max-wall-time-h H --frontier-stall-k K --stale-experiment-minutes M
         # Pass -1 to clear a specific limit; 0 leaves it unchanged.
+        # stale-experiment-minutes: when > 0, status and dashboard flag idle experiments.
 
 ### Goal lifecycle (serialized, one active at a time)
 
@@ -226,8 +227,10 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
         --observations O-XXXX,O-YYYY \
-        [--baseline-experiment E-XXXX] \
+        [--baseline-experiment E-XXXX] \   # override; auto-derived from goal baseline if omitted
         [--interpretation "..."]
+        # Dual baseline: auto-derives absolute (goal baseline) and incremental
+        # (frontier best). JSON output includes both effect and incremental_effect.
 
 ### Conclusions (review and gate reviewer)
     autoresearch conclusion list       [--hypothesis H-XXXX] [--verdict X]
@@ -367,9 +370,11 @@ are meant to inform the next cycle. Two scopes:
 Verbs:
 
     autoresearch lesson add --claim "..." --body "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
+        [--predict-instrument X --predict-direction {increase|decrease} --predict-min-effect N [--predict-max-effect M]]
     autoresearch lesson list [--scope ...] [--status ...] [--subject ...] [--tag ...]
     autoresearch lesson show <L-id>
     autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
+    autoresearch lesson accuracy   # compare predicted effects vs actual outcomes (read-only)
 
 Scope is inferred from ` + "`--from`" + ` when not explicit: subjects given →
 ` + "`hypothesis`" + `; none → ` + "`system`" + `.

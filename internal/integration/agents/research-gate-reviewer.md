@@ -23,8 +23,10 @@ positives, which are far more expensive than false negatives.
 ## Read before deciding
 
 1. `@.claude/autoresearch.md` — the CLI and firewall reference.
-2. `autoresearch conclusion show <C-id> --json` — the verdict, effect,
-   `strict_check` (firewall's own assessment), interpretation, author.
+2. `autoresearch conclusion show <C-id> --json` — the verdict, effect
+   (vs absolute baseline), `incremental_effect` (vs frontier best, if
+   present), `strict_check` (firewall's own assessment), interpretation,
+   author.
 3. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
    instrument, `min_effect`, `kill_if` clauses.
 4. Recompute the stats yourself:

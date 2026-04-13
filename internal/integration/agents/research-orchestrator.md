@@ -31,12 +31,15 @@ load-bearing.
    notebook. If a lesson rules out a class of intervention, do not
    propose that class without new evidence. If a lesson recommends a
    direction, lean into it.
-4. `autoresearch tree --json` — every existing hypothesis. Do not
+4. `autoresearch lesson accuracy --json` — if lessons have predicted
+   effects, check whether predictions are consistently overshooting.
+   If so, the current direction may be hitting diminishing returns.
+5. `autoresearch tree --json` — every existing hypothesis. Do not
    duplicate open work.
-5. `autoresearch frontier --json` — the current best (if any) and the
+6. `autoresearch frontier --json` — the current best (if any) and the
    `stalled_for` counter. If it's climbing, diversify.
-6. `autoresearch instrument list --json` — what you can measure.
-7. Enough of the codebase (via Read / Grep / Glob) to understand what's
+7. `autoresearch instrument list --json` — what you can measure.
+8. Enough of the codebase (via Read / Grep / Glob) to understand what's
    being optimized. Focus on `goal.objective.target`.
 
 ### 0. Ensure a baseline exists
@@ -50,8 +53,8 @@ If the list is empty, create one:
 
     autoresearch experiment baseline --json
 
-Capture the experiment ID from the response — you will use it as
-`--baseline-experiment` in every `conclude` call.
+The `conclude` command auto-derives the baseline — you do not need to
+pass `--baseline-experiment` manually.
 
 ## The cycle
 
@@ -204,10 +207,15 @@ Read the `comparison` object: `delta_frac`, `ci_low_frac`,
 autoresearch conclude <hyp-id> \
     --verdict {supported|refuted|inconclusive} \
     --observations <O-ids> \
-    --baseline-experiment <baseline-exp-id> \
     --interpretation "<one paragraph, grounded in the observed numbers>" \
     --author agent:orchestrator --json
 ```
+
+The CLI auto-derives two baselines: absolute (the goal's baseline
+experiment) and incremental (the current frontier best). The JSON
+response includes both `effect` (vs absolute) and `incremental_effect`
+(vs frontier best). The strict firewall always evaluates against the
+absolute baseline.
 
 If the firewall downgrades your verdict, **the downgrade is
 authoritative**. Report it in the yield summary.
@@ -247,6 +255,23 @@ EOF
 
 Both `--claim` AND `--body` are required. If you can't fill all four
 sections, the conclusion wasn't decisive — mark it `inconclusive`.
+
+**Predicted effect (when the lesson implies a continuing direction):**
+
+If the lesson suggests more of the same approach could yield further
+gains (e.g. "unrolling 4x helped; 8x might help more"), attach a
+quantitative prediction:
+
+```sh
+    --predict-instrument host_timing \
+    --predict-direction decrease \
+    --predict-min-effect 0.03 \
+    --predict-max-effect 0.08
+```
+
+This makes the diminishing-returns signal falsifiable. Before proposing
+new hypotheses, check `lesson accuracy --json` — if predictions
+consistently overshoot, consider a different direction.
 
 ### 7. Dispatch the gate reviewer
 

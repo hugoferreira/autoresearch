@@ -191,11 +191,12 @@ is paused.
 | **observe** | `observe <exp> --instrument <name>` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
-| **conclusion** | `list`, `show`, `downgrade` (gate-reviewer-only) |
+| **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |
 | **tree / frontier** | `tree [--goal G-NNNN]`, `frontier [--goal G-NNNN]` |
 | **log** | `log [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
 | **artifact** | `list`, `stat`, `path`, `head`, `tail`, `range`, `grep`, `diff`, `show` |
+| **lesson** | `add`, `list`, `show`, `supersede`, `accuracy` |
 | **instrument** | `list`, `register` |
 | **budget** | `show`, `set` |
 | **gc** | `gc` |
@@ -276,6 +277,29 @@ resamples. Strict-mode `conclude` downgrades a "supported" verdict whenever
 the CI crosses zero in the wrong direction or the observed effect is smaller
 than the hypothesis's declared `min_effect`.
 
+### Dual baseline
+
+Every conclusion automatically compares against two baselines:
+
+- **Absolute** — the goal's baseline experiment (created by
+  `experiment baseline`). This is "how much did we improve over the
+  original unoptimized code?" The strict firewall always evaluates
+  against this baseline.
+- **Incremental** — the current frontier best. This is "how much did we
+  improve over the best result so far?" Informational only — it does not
+  gate the verdict.
+
+The `conclude` command derives both automatically. `--baseline-experiment`
+overrides only the absolute baseline.
+
+### Predicted effects and diminishing returns
+
+Lessons may carry an optional `predicted_effect` — what effect size the
+author expects from future work in the same direction. `lesson accuracy`
+compares predictions against actual outcomes, classifying each as HIT,
+OVERSHOOT, or UNDERSHOOT. When predictions consistently overshoot, the
+optimization direction may be hitting diminishing returns.
+
 ## State layout
 
 `autoresearch init` creates a `.research/` directory at the project root
@@ -318,6 +342,11 @@ autoresearch log --follow               # tail events.jsonl as they arrive
 external polling loop if you want streaming JSON). `log --follow` polls
 `events.jsonl` every 200 ms — no fsnotify dep, works the same over SSH.
 Both verbs work while the project is paused.
+
+When `stale_experiment_minutes` is configured (via `budget set`), both
+`status` and `dashboard` flag experiments idle beyond the threshold — a
+signal that a coder helper may have crashed or the orchestrator got
+distracted.
 
 ### `dashboard tui`
 
