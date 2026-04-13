@@ -42,6 +42,7 @@ func hypothesisAddCmd() *cobra.Command {
 		predDirection  string
 		predMinEffect  float64
 		killIf         []string
+		inspiredBy     []string
 		author         string
 		tags           []string
 		rationale      string
@@ -80,6 +81,13 @@ func hypothesisAddCmd() *cobra.Command {
 				}
 			}
 
+			// Validate inspired_by references exist.
+			for _, lid := range inspiredBy {
+				if _, err := s.ReadLesson(lid); err != nil {
+					return fmt.Errorf("--inspired-by %s: %w", lid, err)
+				}
+			}
+
 			h := &entity.Hypothesis{
 				GoalID: st.CurrentGoalID,
 				Parent: parent,
@@ -90,12 +98,13 @@ func hypothesisAddCmd() *cobra.Command {
 					Direction:  predDirection,
 					MinEffect:  predMinEffect,
 				},
-				KillIf:    killIf,
-				Status:    entity.StatusOpen,
-				Author:    or(author, "human"),
-				CreatedAt: nowUTC(),
-				Tags:      tags,
-				Body:      entity.AppendMarkdownSection("", "Rationale", rationale),
+				KillIf:     killIf,
+				InspiredBy: inspiredBy,
+				Status:     entity.StatusOpen,
+				Author:     or(author, "human"),
+				CreatedAt:  nowUTC(),
+				Tags:       tags,
+				Body:       entity.AppendMarkdownSection("", "Rationale", rationale),
 			}
 			if err := firewall.ValidateHypothesis(h, cfg); err != nil {
 				return err
@@ -117,6 +126,9 @@ func hypothesisAddCmd() *cobra.Command {
 			if snippet := truncate(strings.TrimSpace(rationale), 200); snippet != "" {
 				eventData["rationale"] = snippet
 			}
+			if len(inspiredBy) > 0 {
+				eventData["inspired_by"] = inspiredBy
+			}
 			if err := emitEvent(s, "hypothesis.add", or(author, "human"), id, eventData); err != nil {
 				return err
 			}
@@ -133,6 +145,7 @@ func hypothesisAddCmd() *cobra.Command {
 	c.Flags().StringVar(&predDirection, "predicts-direction", "", "predicted direction: increase | decrease (required)")
 	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum fractional effect required to call it supported (required)")
 	c.Flags().StringArrayVar(&killIf, "kill-if", nil, "kill criterion; may be repeated (at least one required)")
+	c.Flags().StringSliceVar(&inspiredBy, "inspired-by", nil, "lesson IDs this hypothesis draws on (L-NNNN; comma-separated or repeated)")
 	addAuthorFlag(c, &author, "")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&rationale, "rationale", "", "one-line rationale: why this hypothesis, what evidence or lesson led you here (persisted in the hypothesis body under `# Rationale`; first 200 chars also land on the hypothesis.add event)")
@@ -216,6 +229,9 @@ func hypothesisShowCmd() *cobra.Command {
 			w.Textln("kill_if:")
 			for _, k := range h.KillIf {
 				w.Textf("  - %s\n", k)
+			}
+			if len(h.InspiredBy) > 0 {
+				w.Textf("inspired_by: %s\n", strings.Join(h.InspiredBy, ", "))
 			}
 			if len(h.Tags) > 0 {
 				w.Textf("tags:        %s\n", strings.Join(h.Tags, ", "))

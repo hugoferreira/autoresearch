@@ -17,18 +17,19 @@ const (
 )
 
 type Hypothesis struct {
-	ID        string    `yaml:"id"                 json:"id"`
-	GoalID    string    `yaml:"goal_id,omitempty"  json:"goal_id,omitempty"`
-	Parent    string    `yaml:"parent,omitempty"   json:"parent,omitempty"`
-	Claim     string    `yaml:"claim"              json:"claim"`
-	Predicts  Predicts  `yaml:"predicts"           json:"predicts"`
-	KillIf    []string  `yaml:"kill_if"            json:"kill_if"`
-	Status    string    `yaml:"status"             json:"status"`
-	Priority  string    `yaml:"priority,omitempty" json:"priority,omitempty"`
-	Author    string    `yaml:"author"             json:"author"`
-	CreatedAt time.Time `yaml:"created_at"         json:"created_at"`
-	Tags      []string  `yaml:"tags,omitempty"     json:"tags,omitempty"`
-	Body      string    `yaml:"-"                  json:"body,omitempty"`
+	ID         string    `yaml:"id"                    json:"id"`
+	GoalID     string    `yaml:"goal_id,omitempty"     json:"goal_id,omitempty"`
+	Parent     string    `yaml:"parent,omitempty"      json:"parent,omitempty"`
+	Claim      string    `yaml:"claim"                 json:"claim"`
+	Predicts   Predicts  `yaml:"predicts"              json:"predicts"`
+	KillIf     []string  `yaml:"kill_if"               json:"kill_if"`
+	InspiredBy []string  `yaml:"inspired_by,omitempty" json:"inspired_by,omitempty"`
+	Status     string    `yaml:"status"                json:"status"`
+	Priority   string    `yaml:"priority,omitempty"    json:"priority,omitempty"`
+	Author     string    `yaml:"author"                json:"author"`
+	CreatedAt  time.Time `yaml:"created_at"            json:"created_at"`
+	Tags       []string  `yaml:"tags,omitempty"        json:"tags,omitempty"`
+	Body       string    `yaml:"-"                     json:"body,omitempty"`
 }
 
 type Predicts struct {

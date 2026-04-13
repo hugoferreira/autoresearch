@@ -377,6 +377,11 @@ func ValidateHypothesis(h *entity.Hypothesis, cfg *store.Config) error {
 	if h.Predicts.MinEffect <= 0 {
 		return errors.New("predicts min_effect must be > 0 (a falsifiable hypothesis needs a quantitative threshold)")
 	}
+	for i, lid := range h.InspiredBy {
+		if !strings.HasPrefix(lid, "L-") {
+			return fmt.Errorf("inspired_by[%d] %q must be an L- id", i, lid)
+		}
+	}
 	if len(h.KillIf) == 0 {
 		return errors.New("hypothesis requires at least one kill_if clause (what would refute this?)")
 	}

@@ -388,13 +388,36 @@ may be exhausted.`,
 			if err != nil {
 				return err
 			}
+			hyps, err := s.ListHypotheses()
+			if err != nil {
+				return err
+			}
+
+			// Index hypotheses by ID for fast lookup.
+			hypByID := make(map[string]*entity.Hypothesis, len(hyps))
+			for _, h := range hyps {
+				hypByID[h.ID] = h
+			}
+
+			// Build reverse index: lesson ID → set of hypothesis IDs inspired by it.
+			inspiredByLesson := map[string]map[string]bool{}
+			for _, h := range hyps {
+				for _, lid := range h.InspiredBy {
+					if inspiredByLesson[lid] == nil {
+						inspiredByLesson[lid] = map[string]bool{}
+					}
+					inspiredByLesson[lid][h.ID] = true
+				}
+			}
 
 			type accuracyRow struct {
-				LessonID     string  `json:"lesson_id"`
-				ConclusionID string  `json:"conclusion_id"`
-				Predicted    string  `json:"predicted"`
-				ActualDelta  float64 `json:"actual_delta_frac"`
-				Classification string `json:"classification"`
+				LessonID       string  `json:"lesson_id"`
+				ConclusionID   string  `json:"conclusion_id"`
+				HypothesisID   string  `json:"hypothesis_id"`
+				Predicted      string  `json:"predicted"`
+				ActualDelta    float64 `json:"actual_delta_frac"`
+				Classification string  `json:"classification"`
+				Linked         bool    `json:"linked"`
 			}
 			type lessonAccuracy struct {
 				LessonID    string        `json:"lesson_id"`
@@ -423,7 +446,9 @@ may be exhausted.`,
 					MaxEffect:  pe.MaxEffect,
 				}
 
-				// Find conclusions written after this lesson on the same instrument.
+				linkedHyps := inspiredByLesson[l.ID]
+				hasLinked := len(linkedHyps) > 0
+
 				for _, c := range concls {
 					if c.CreatedAt.Before(l.CreatedAt) {
 						continue
@@ -435,10 +460,21 @@ may be exhausted.`,
 						continue
 					}
 
-					// Use absolute value of delta_frac for comparison.
+					// When any hypothesis cites this lesson via inspired_by,
+					// only match conclusions from those hypotheses. Otherwise
+					// fall back to coarse instrument matching.
+					linked := false
+					if hasLinked {
+						if !linkedHyps[c.Hypothesis] {
+							continue
+						}
+						linked = true
+					}
+
+					// Normalize delta so positive = improvement.
 					actual := c.Effect.DeltaFrac
 					if pe.Direction == "decrease" {
-						actual = -actual // normalize to positive = improvement
+						actual = -actual
 					}
 
 					predicted := fmt.Sprintf("%.4f", pe.MinEffect)
@@ -448,10 +484,10 @@ may be exhausted.`,
 
 					class := "HIT"
 					if actual < pe.MinEffect {
-						class = "OVERSHOOT" // predicted more than delivered
+						class = "OVERSHOOT"
 						totalOver++
 					} else if pe.MaxEffect > 0 && actual > pe.MaxEffect {
-						class = "UNDERSHOOT" // delivered more than predicted
+						class = "UNDERSHOOT"
 						totalUnder++
 					} else {
 						totalHit++
@@ -460,9 +496,11 @@ may be exhausted.`,
 					la.Comparisons = append(la.Comparisons, accuracyRow{
 						LessonID:       l.ID,
 						ConclusionID:   c.ID,
+						HypothesisID:   c.Hypothesis,
 						Predicted:      predicted,
 						ActualDelta:    c.Effect.DeltaFrac,
 						Classification: class,
+						Linked:         linked,
 					})
 				}
 
@@ -496,7 +534,12 @@ may be exhausted.`,
 				w.Textf("  %s  predicted: %s\n", la.LessonID, pred)
 				w.Textf("         %s\n", truncate(la.Claim, 70))
 				for _, r := range la.Comparisons {
-					w.Textf("    %s: actual delta_frac=%+.4f  %s\n", r.ConclusionID, r.ActualDelta, r.Classification)
+					link := ""
+					if r.Linked {
+						link = " (linked via inspired_by)"
+					}
+					w.Textf("    %s (%s): actual delta_frac=%+.4f  %s%s\n",
+						r.ConclusionID, r.HypothesisID, r.ActualDelta, r.Classification, link)
 				}
 				w.Textln("")
 			}

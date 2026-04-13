@@ -192,7 +192,7 @@ the firewall sees.
     autoresearch hypothesis add \
         --claim "..." \
         --predicts-instrument NAME --predicts-target T --predicts-direction {increase|decrease} --predicts-min-effect F \
-        --kill-if "..." [--kill-if "..."] [--parent H-XXXX] [--author human:alice]
+        --kill-if "..." [--kill-if "..."] [--inspired-by L-XXXX,L-YYYY] [--parent H-XXXX] [--author human:alice]
     autoresearch hypothesis list    [--status ...] [--parent ...]
     autoresearch hypothesis show    <hyp-id>
     autoresearch hypothesis kill    <hyp-id> --reason "..."
@@ -407,8 +407,10 @@ example.
 
 - The **orchestrator** MUST run ` + "`lesson list --status active --json`" + ` at
   the start of every cycle. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
-  either cite a lesson ID or explicitly note "no relevant lesson". This
-  keeps the notebook from rotting.
+  either cite a lesson ID or explicitly note "no relevant lesson". When
+  citing lessons, pass their IDs via ` + "`--inspired-by L-XXXX,L-YYYY`" + ` to
+  create a structured link. ` + "`lesson accuracy`" + ` uses this link to compare
+  predicted vs actual effects. This keeps the notebook from rotting.
 - The **orchestrator** MUST call ` + "`lesson add`" + ` on any decisive conclusion
   (supported, or cleanly refuted with a mechanism). If you cannot
   state a one-sentence reusable claim, the verdict was not decisive —

@@ -86,9 +86,17 @@ autoresearch hypothesis add \
     --predicts-instrument <name> --predicts-target <target> \
     --predicts-direction {increase|decrease} --predicts-min-effect <threshold> \
     --kill-if "<refutation condition>" [--kill-if "..."] \
+    --inspired-by <L-id>[,<L-id>,...] \
     --rationale "<why this hypothesis — cite a lesson ID or note no relevant lesson>" \
     [--parent <H-id>] --author agent:orchestrator --json
 ```
+
+**`--inspired-by` is required when citing lessons.** This creates a
+structured link from the hypothesis back to the lessons that informed
+it. `lesson accuracy` uses this link to compare predicted vs actual
+effects — without it, accuracy tracking falls back to coarse instrument
+matching. Always pass the lesson IDs you consulted, even if the
+hypothesis contradicts them.
 
 **Strategy guidance:**
 
