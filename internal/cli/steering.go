@@ -17,11 +17,6 @@ func steeringCommands() []*cobra.Command {
 	steering.AddCommand(
 		steeringShowCmd(),
 		steeringAppendCmd(),
-		&cobra.Command{
-			Use:   "edit",
-			Short: "Open the steering section in $EDITOR (not yet wired up; use `steering append`)",
-			RunE:  stub("steering edit"),
-		},
 	)
 	return []*cobra.Command{steering}
 }
@@ -76,7 +71,7 @@ goal.md themselves.`,
 				return errors.New("note is empty")
 			}
 			if strings.ContainsAny(note, "\n\r") {
-				return errors.New("note must not contain newlines; make multiple append calls or use `steering edit`")
+				return errors.New("note must not contain newlines; make multiple append calls")
 			}
 			s, err := openStoreLive()
 			if err != nil {

@@ -185,9 +185,9 @@ is paused.
 | --- | --- |
 | **lifecycle** | `init`, `status`, `pause`, `resume` |
 | **goal** | `goal set`, `goal new`, `goal show`, `goal list`, `goal conclude`, `goal abandon` |
-| **steering** | `steering show`, `steering append`, `steering edit` |
+| **steering** | `steering show`, `steering append` |
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
-| **experiment** | `design`, `implement`, `reset`, `worktree`, `list`, `show`, `promote` |
+| **experiment** | `design`, `implement`, `reset`, `worktree`, `list`, `show` |
 | **observe** | `observe <exp> --instrument <name>` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
@@ -196,7 +196,7 @@ is paused.
 | **log** | `log [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
 | **artifact** | `list`, `stat`, `path`, `head`, `tail`, `range`, `grep`, `diff`, `show` |
-| **instrument** | `list`, `register`, `run` |
+| **instrument** | `list`, `register` |
 | **budget** | `show`, `set` |
 | **gc** | `gc` |
 | **install** | `install claude [docs\|agents] [--trust-shell]`, `install codex [docs\|agents]` |

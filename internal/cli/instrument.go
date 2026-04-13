@@ -15,7 +15,7 @@ func instrumentCommands() []*cobra.Command {
 		Use:   "instrument",
 		Short: "Manage measurement instruments",
 	}
-	i.AddCommand(instrumentListCmd(), instrumentRegisterCmd(), instrumentRunCmd())
+	i.AddCommand(instrumentListCmd(), instrumentRegisterCmd())
 	return []*cobra.Command{i}
 }
 
@@ -118,12 +118,4 @@ func instrumentRegisterCmd() *cobra.Command {
 	c.Flags().IntVar(&minSamples, "min-samples", 0, "minimum samples required (strict mode)")
 	addAuthorFlag(c, &author, "")
 	return c
-}
-
-func instrumentRunCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "run <name>",
-		Short: "Run a single instrument against a worktree",
-		RunE:  stub("instrument run"),
-	}
 }
