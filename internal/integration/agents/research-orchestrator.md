@@ -105,15 +105,9 @@ autoresearch experiment design <hyp-id> \
 
 **Instrument ordering:**
 
-- Run cheap, fast instruments (compile checks, test suites) first. Their
-  results gate expensive instruments via `--requires` dependencies declared
-  at registration time.
-- If an instrument declares `--requires test=pass`, `observe` will
-  refuse until `test` has been observed with a passing result on the
-  same experiment. Use `observe --force` only when the human explicitly
-  approves.
-- Order your `observe` calls so that dependency-free instruments run first,
-  then instruments whose dependencies are satisfied.
+- Instruments may declare `--requires` dependencies (e.g.
+  `--requires test=pass`). The CLI resolves these automatically when
+  you use `observe --all`.
 
 **Instrument choice** — include the minimum set that answers:
 
@@ -167,16 +161,22 @@ autoresearch experiment reset <exp-id> --reason "<what went wrong>" --author age
 
 ### 4. Observe
 
-Run each instrument from the main project — the CLI handles the
-worktree internally:
+Run all instruments in one shot — the CLI resolves dependency order
+automatically:
+
+```sh
+autoresearch observe <exp-id> --all --json
+```
+
+This runs every instrument declared on the experiment, respecting
+`--requires` edges (e.g. compile before test before timing). Capture
+the `.observations` array from the response.
+
+To run a single instrument instead (e.g. for re-measurement):
 
 ```sh
 autoresearch observe <exp-id> --instrument <name> --json
 ```
-
-Capture `.id` from each response. For `builtin:timing` and
-`builtin:scalar`, let the instrument's configured `min_samples` drive
-the sample count. Only pass `--samples N` if the main session asked.
 
 If an instrument fails, stop and report — do not retry or fix.
 
