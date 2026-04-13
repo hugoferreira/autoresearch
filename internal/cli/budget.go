@@ -45,9 +45,10 @@ func budgetShowCmd() *cobra.Command {
 
 			payload := map[string]any{
 				"limits": map[string]any{
-					"max_experiments":   cfg.Budgets.MaxExperiments,
-					"max_wall_time_h":   cfg.Budgets.MaxWallTimeH,
-					"frontier_stall_k":  cfg.Budgets.FrontierStallK,
+					"max_experiments":          cfg.Budgets.MaxExperiments,
+					"max_wall_time_h":          cfg.Budgets.MaxWallTimeH,
+					"frontier_stall_k":         cfg.Budgets.FrontierStallK,
+					"stale_experiment_minutes": cfg.Budgets.StaleExperimentMinutes,
 				},
 				"usage": map[string]any{
 					"experiments":         expCount,
@@ -62,6 +63,7 @@ func budgetShowCmd() *cobra.Command {
 			w.Textf("  max_experiments:  %s\n", fmtOptionalInt(cfg.Budgets.MaxExperiments))
 			w.Textf("  max_wall_time_h:  %s\n", fmtOptionalInt(cfg.Budgets.MaxWallTimeH))
 			w.Textf("  frontier_stall_k: %s\n", fmtOptionalInt(cfg.Budgets.FrontierStallK))
+			w.Textf("  stale_exp_min:    %s\n", fmtOptionalInt(cfg.Budgets.StaleExperimentMinutes))
 			w.Textln("usage:")
 			w.Textf("  experiments:      %d\n", expCount)
 			if st.ResearchStartedAt != nil {
@@ -76,10 +78,11 @@ func budgetShowCmd() *cobra.Command {
 
 func budgetSetCmd() *cobra.Command {
 	var (
-		maxExperiments int
-		maxWallTimeH   int
-		frontierStallK int
-		author         string
+		maxExperiments         int
+		maxWallTimeH           int
+		frontierStallK         int
+		staleExperimentMinutes int
+		author                 string
 	)
 	c := &cobra.Command{
 		Use:   "set",
@@ -107,6 +110,7 @@ touched — finish what you started, open no new fronts.`,
 			applyBudgetDelta(&cfg.Budgets.MaxExperiments, maxExperiments)
 			applyBudgetDelta(&cfg.Budgets.MaxWallTimeH, maxWallTimeH)
 			applyBudgetDelta(&cfg.Budgets.FrontierStallK, frontierStallK)
+			applyBudgetDelta(&cfg.Budgets.StaleExperimentMinutes, staleExperimentMinutes)
 
 			if err := dryRun(w, fmt.Sprintf("update budgets: %+v", cfg.Budgets), map[string]any{"budgets": cfg.Budgets}); err != nil {
 				return err
@@ -124,10 +128,11 @@ touched — finish what you started, open no new fronts.`,
 				return err
 			}
 			return w.Emit(
-				fmt.Sprintf("budgets updated: max_experiments=%s max_wall_time_h=%s frontier_stall_k=%s",
+				fmt.Sprintf("budgets updated: max_experiments=%s max_wall_time_h=%s frontier_stall_k=%s stale_experiment_minutes=%s",
 					fmtOptionalInt(cfg.Budgets.MaxExperiments),
 					fmtOptionalInt(cfg.Budgets.MaxWallTimeH),
-					fmtOptionalInt(cfg.Budgets.FrontierStallK)),
+					fmtOptionalInt(cfg.Budgets.FrontierStallK),
+					fmtOptionalInt(cfg.Budgets.StaleExperimentMinutes)),
 				map[string]any{"status": "ok", "budgets": cfg.Budgets},
 			)
 		},
@@ -135,6 +140,7 @@ touched — finish what you started, open no new fronts.`,
 	c.Flags().IntVar(&maxExperiments, "max-experiments", 0, "cap on total experiments (-1 to clear, 0 to leave unchanged)")
 	c.Flags().IntVar(&maxWallTimeH, "max-wall-time-h", 0, "wall-time budget in hours since init (-1 to clear)")
 	c.Flags().IntVar(&frontierStallK, "frontier-stall-k", 0, "stop suggestion after K conclusions without frontier improvement (-1 to clear)")
+	c.Flags().IntVar(&staleExperimentMinutes, "stale-experiment-minutes", 0, "flag experiments idle longer than N minutes in status/dashboard (-1 to clear)")
 	addAuthorFlag(c, &author, "")
 	return c
 }

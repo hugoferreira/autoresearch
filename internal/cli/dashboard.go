@@ -104,8 +104,9 @@ type dashboardSnapshot struct {
 	Tree          []*treeNode         `json:"tree"`
 	Frontier      []frontierRow       `json:"frontier"`
 	StalledFor    int                 `json:"stalled_for"`
-	InFlight      []dashboardInFlight `json:"in_flight"`
-	RecentLessons []*entity.Lesson    `json:"recent_lessons,omitempty"`
+	InFlight         []dashboardInFlight `json:"in_flight"`
+	StaleExperiments []dashboardStaleExp `json:"stale_experiments,omitempty"`
+	RecentLessons    []*entity.Lesson    `json:"recent_lessons,omitempty"`
 	RecentEvents  []store.Event       `json:"recent_events"`
 	CapturedAt    time.Time           `json:"captured_at"`
 }
@@ -129,6 +130,14 @@ type dashboardInFlight struct {
 	Instruments   []string   `json:"instruments"`
 	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
 	ElapsedS      float64    `json:"elapsed_s"`
+}
+
+type dashboardStaleExp struct {
+	ID            string  `json:"id"`
+	Hypothesis    string  `json:"hypothesis"`
+	Status        string  `json:"status"`
+	LastEventKind string  `json:"last_event_kind"`
+	StaleMinutes  float64 `json:"stale_minutes"`
 }
 
 const dashboardRecentEventsSummaryLimit = 10
@@ -257,6 +266,37 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		return a.After(*b)
 	})
 
+	// Stale experiment detection: flag non-terminal, non-baseline experiments
+	// whose last event is older than the configured threshold.
+	if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
+		threshold := time.Duration(staleMinutes) * time.Minute
+		now := time.Now().UTC()
+		for _, e := range exps {
+			switch e.Status {
+			case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
+			default:
+				continue
+			}
+			if e.IsBaseline {
+				continue
+			}
+			ts, kind := findLastEventForExperiment(allEvents, e.ID)
+			if ts == nil {
+				continue
+			}
+			age := now.Sub(*ts)
+			if age >= threshold {
+				snap.StaleExperiments = append(snap.StaleExperiments, dashboardStaleExp{
+					ID:            e.ID,
+					Hypothesis:    e.Hypothesis,
+					Status:        e.Status,
+					LastEventKind: kind,
+					StaleMinutes:  age.Minutes(),
+				})
+			}
+		}
+	}
+
 	var lessonCount int
 	if lessons, err := s.ListLessons(); err == nil {
 		lessonCount = len(lessons)
@@ -311,6 +351,19 @@ func findImplementedAt(events []store.Event, expID string) *time.Time {
 		}
 	}
 	return nil
+}
+
+// findLastEventForExperiment scans a pre-loaded event list backward for the
+// most recent event referencing expID and returns its timestamp and kind.
+func findLastEventForExperiment(events []store.Event, expID string) (ts *time.Time, kind string) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Subject == expID {
+			t := e.Ts
+			return &t, e.Kind
+		}
+	}
+	return nil, ""
 }
 
 // ---- one-shot + refresh loop ----
@@ -398,6 +451,10 @@ func renderDashboard(w io.Writer, snap *dashboardSnapshot, width int, footerMode
 	fmt.Fprintln(w)
 	if len(snap.InFlight) > 0 {
 		renderDashboardInFlight(w, snap, a)
+		fmt.Fprintln(w)
+	}
+	if len(snap.StaleExperiments) > 0 {
+		renderDashboardStale(w, snap, a)
 		fmt.Fprintln(w)
 	}
 	if len(snap.RecentLessons) > 0 {
@@ -573,6 +630,22 @@ func renderDashboardInFlight(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		fmt.Fprintf(w, "   %-8s  %s  %s elapsed  instruments=%s\n",
 			r.ID, statusCell, elapsed, strings.Join(r.Instruments, ","))
 	}
+}
+
+func renderDashboardStale(w io.Writer, snap *dashboardSnapshot, a *ansi) {
+	sectionHeader(w, a.yellow("⚠ Stale experiments"), a)
+	for _, r := range snap.StaleExperiments {
+		age := formatStaleAge(r.StaleMinutes)
+		fmt.Fprintf(w, "   %-8s  %-12s  hyp=%-8s  %s ago  (last: %s)\n",
+			r.ID, r.Status, r.Hypothesis, age, r.LastEventKind)
+	}
+}
+
+func formatStaleAge(minutes float64) string {
+	if minutes >= 60 {
+		return fmt.Sprintf("%.1fh", minutes/60)
+	}
+	return fmt.Sprintf("%.0fm", minutes)
 }
 
 func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {

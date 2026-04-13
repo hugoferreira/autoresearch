@@ -426,6 +426,52 @@ func statusCmd() *cobra.Command {
 				"last_event_at":   st.LastEventAt,
 			}
 
+			// Stale experiment detection.
+			type staleExp struct {
+				ID            string  `json:"id"`
+				Hypothesis    string  `json:"hypothesis"`
+				Status        string  `json:"status"`
+				LastEventKind string  `json:"last_event_kind"`
+				StaleMinutes  float64 `json:"stale_minutes"`
+			}
+			var stale []staleExp
+			if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
+				exps, err := s.ListExperiments()
+				if err != nil {
+					return err
+				}
+				allEvents, _ := s.Events(0)
+				threshold := time.Duration(staleMinutes) * time.Minute
+				now := time.Now().UTC()
+				for _, e := range exps {
+					switch e.Status {
+					case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
+					default:
+						continue
+					}
+					if e.IsBaseline {
+						continue
+					}
+					ts, kind := findLastEventForExperiment(allEvents, e.ID)
+					if ts == nil {
+						continue
+					}
+					age := now.Sub(*ts)
+					if age >= threshold {
+						stale = append(stale, staleExp{
+							ID:            e.ID,
+							Hypothesis:    e.Hypothesis,
+							Status:        e.Status,
+							LastEventKind: kind,
+							StaleMinutes:  age.Minutes(),
+						})
+					}
+				}
+			}
+			if len(stale) > 0 {
+				payload["stale_experiments"] = stale
+			}
+
 			if w.IsJSON() {
 				return w.JSON(payload)
 			}
@@ -455,6 +501,15 @@ func statusCmd() *cobra.Command {
 				w.Textf("last event:     %s\n", st.LastEventAt.Format(time.RFC3339))
 			} else {
 				w.Textln("last event:     (none)")
+			}
+			if len(stale) > 0 {
+				w.Textln("")
+				w.Textf("stale experiments (>%dm since last activity):\n", cfg.Budgets.StaleExperimentMinutes)
+				for _, se := range stale {
+					w.Textf("  %-8s  %-12s  hyp=%-8s  %s ago  (last: %s)\n",
+						se.ID, se.Status, se.Hypothesis,
+						formatStaleAge(se.StaleMinutes), se.LastEventKind)
+				}
 			}
 			return nil
 		},

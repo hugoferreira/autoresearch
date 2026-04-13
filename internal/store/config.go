@@ -48,9 +48,10 @@ type Instrument struct {
 }
 
 type Budgets struct {
-	MaxExperiments int `yaml:"max_experiments,omitempty"`
-	MaxWallTimeH   int `yaml:"max_wall_time_h,omitempty"`
-	FrontierStallK int `yaml:"frontier_stall_k,omitempty"`
+	MaxExperiments         int `yaml:"max_experiments,omitempty"`
+	MaxWallTimeH           int `yaml:"max_wall_time_h,omitempty"`
+	FrontierStallK         int `yaml:"frontier_stall_k,omitempty"`
+	StaleExperimentMinutes int `yaml:"stale_experiment_minutes,omitempty"`
 }
 
 func (s *Store) Config() (*Config, error) {
