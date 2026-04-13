@@ -110,7 +110,7 @@ func (v *lessonListView) view(width, height int) string {
 		}
 		pred := tuiDim.Render("     ")
 		if l.PredictedEffect != nil {
-			pred = padRight(tuiYellow.Render(formatPredictedEffectCompact(l.PredictedEffect)), 5)
+			pred = padRight(formatPredictedEffectCompact(l.PredictedEffect), 5)
 		}
 		rows[i] = fmt.Sprintf("%-8s %-11s %-11s %s from=%-18s %s",
 			l.ID,

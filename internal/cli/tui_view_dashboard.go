@@ -382,7 +382,7 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 		// Predicted effect arrow (compact indicator before claim)
 		indicator := " "
 		if l.PredictedEffect != nil {
-			indicator = tuiYellow.Render(predictedEffectArrow(l.PredictedEffect))
+			indicator = predictedEffectArrow(l.PredictedEffect)
 		}
 		// At-a-glance: ID, arrow indicator, claim. Everything else is in the detail pane.
 		claimW := max(innerW-11, 20)

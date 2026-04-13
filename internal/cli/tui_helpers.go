@@ -426,17 +426,17 @@ func formatPredictedEffect(pe *entity.PredictedEffect) string {
 	return s
 }
 
-// predictedEffectArrow returns "↓" or "↑" based on direction.
+// predictedEffectArrow returns a colored "↓" (red) or "↑" (green) based on direction.
 func predictedEffectArrow(pe *entity.PredictedEffect) string {
 	if pe.Direction == "increase" {
-		return "↑"
+		return tuiGreen.Render("↑")
 	}
-	return "↓"
+	return tuiRed.Render("↓")
 }
 
-// formatPredictedEffectCompact renders a short form like "↓≥5%" for list views.
+// formatPredictedEffectCompact renders a colored short form like "↓≥5%" for list views.
 func formatPredictedEffectCompact(pe *entity.PredictedEffect) string {
-	return fmt.Sprintf("%s≥%.0f%%", predictedEffectArrow(pe), pe.MinEffect*100)
+	return predictedEffectArrow(pe) + tuiYellow.Render(fmt.Sprintf("≥%.0f%%", pe.MinEffect*100))
 }
 
 // Compile-time anchor: all view files can refer to entity.Hypothesis via
