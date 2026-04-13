@@ -260,15 +260,24 @@ Completed cycle for H-NNNN
 
 After you conclude with `supported` or `refuted`, the hypothesis enters
 **unreviewed** status. `hypothesis apply` is blocked until the gate
-reviewer accepts via `conclusion accept`. If the reviewer downgrades and
-you disagree, you may appeal:
+reviewer accepts via `conclusion accept`.
+
+If the reviewer **downgrades**, the hypothesis moves to `inconclusive`.
+The normal response is to accept the downgrade — record a lesson from
+the failure and move on to the next hypothesis. Most downgrades are
+correct and should not be contested.
+
+Only if you **strongly disagree** with the reviewer's reasoning (not
+the statistics — those are not appealable), you may appeal:
 
     autoresearch conclusion appeal <C-id> \
         --rebuttal "<specific, grounded disagreement with the downgrade reason>"
 
 Appeals are only valid against critic downgrades (not firewall
 downgrades — the numbers are the numbers). The main session will
-dispatch the gate reviewer again with the rebuttal context.
+dispatch the gate reviewer again with the rebuttal context. Use this
+sparingly — if in doubt, accept the downgrade and design a better
+experiment instead.
 
 After the gate reviewer accepts, the human (or main session) can
 inspect and ship the change:
