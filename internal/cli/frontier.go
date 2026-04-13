@@ -151,6 +151,12 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 		}
 	}
 
+	// Load all observations once and index by experiment ID. This replaces
+	// per-conclusion ListObservationsForExperiment calls that previously
+	// re-read and re-parsed every observation file K×4 times (twice per
+	// loop × two loops).
+	obsByExp := loadObservationsByExperiment(s)
+
 	for _, c := range concls {
 		if c.Verdict != entity.VerdictSupported {
 			continue
@@ -158,10 +164,10 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 		if c.Effect.Instrument != goal.Objective.Instrument {
 			continue
 		}
-		if !requireSatisfied(s, c, requireByInst) {
+		if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
 			continue
 		}
-		value := candidateObjectiveValue(s, c, goal.Objective.Instrument)
+		value := candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
 		rows = append(rows, frontierRow{
 			Conclusion: c.ID,
 			Hypothesis: c.Hypothesis,
@@ -194,13 +200,13 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 			}
 			continue
 		}
-		if !requireSatisfied(s, c, requireByInst) {
+		if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
 			if hasBest {
 				stalledFor++
 			}
 			continue
 		}
-		val := candidateObjectiveValue(s, c, goal.Objective.Instrument)
+		val := candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
 		if !hasBest {
 			hasBest = true
 			bestValue = val
@@ -224,13 +230,24 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 	return rows, stalledFor
 }
 
-func requireSatisfied(s *store.Store, c *entity.Conclusion, req map[string]string) bool {
+// loadObservationsByExperiment reads all observations once and returns them
+// indexed by experiment ID. A nil map (on read error) is safe — callers get
+// empty slices from the nil map.
+func loadObservationsByExperiment(s *store.Store) map[string][]*entity.Observation {
+	all, err := s.ListObservations()
+	if err != nil {
+		return nil
+	}
+	m := make(map[string][]*entity.Observation, len(all))
+	for _, o := range all {
+		m[o.Experiment] = append(m[o.Experiment], o)
+	}
+	return m
+}
+
+func requireSatisfied(obs []*entity.Observation, req map[string]string) bool {
 	if len(req) == 0 {
 		return true
-	}
-	obs, err := s.ListObservationsForExperiment(c.CandidateExp)
-	if err != nil {
-		return false
 	}
 	for inst, wanted := range req {
 		ok := false
@@ -260,11 +277,7 @@ func requireSatisfied(s *store.Store, c *entity.Conclusion, req map[string]strin
 	return true
 }
 
-func candidateObjectiveValue(s *store.Store, c *entity.Conclusion, instrument string) float64 {
-	obs, err := s.ListObservationsForExperiment(c.CandidateExp)
-	if err != nil {
-		return 0
-	}
+func candidateObjectiveValue(obs []*entity.Observation, instrument string) float64 {
 	for _, o := range obs {
 		if o.Instrument == instrument {
 			return o.Value

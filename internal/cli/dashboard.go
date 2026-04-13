@@ -179,15 +179,13 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	snap.Paused = st.Paused
 	snap.PauseReason = st.PauseReason
 
-	if g, err := s.ActiveGoal(); err == nil {
-		snap.Goal = g
+	// Use the already-loaded state to read the goal directly, avoiding a
+	// second State() read inside ActiveGoal().
+	if st.CurrentGoalID != "" {
+		if g, err := s.ReadGoal(st.CurrentGoalID); err == nil {
+			snap.Goal = g
+		}
 	}
-
-	counts, err := s.Counts()
-	if err != nil {
-		return nil, err
-	}
-	snap.Counts = counts
 
 	snap.Budgets.Limits.MaxExperiments = cfg.Budgets.MaxExperiments
 	snap.Budgets.Limits.MaxWallTimeH = cfg.Budgets.MaxWallTimeH
@@ -204,11 +202,12 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	roots, children := buildHypothesisForest(hyps)
 	snap.Tree = buildTreeJSON(roots, children)
 
+	concls, err := s.ListConclusions()
+	if err != nil {
+		return nil, err
+	}
+
 	if snap.Goal != nil {
-		concls, err := s.ListConclusions()
-		if err != nil {
-			return nil, err
-		}
 		rows, stalled := computeFrontier(s, snap.Goal, concls)
 		snap.Frontier = rows
 		snap.StalledFor = stalled
@@ -258,7 +257,9 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		return a.After(*b)
 	})
 
+	var lessonCount int
 	if lessons, err := s.ListLessons(); err == nil {
+		lessonCount = len(lessons)
 		active := make([]*entity.Lesson, 0, len(lessons))
 		for _, l := range lessons {
 			if l.Status != entity.LessonStatusSuperseded {
@@ -272,6 +273,26 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 			active = active[:5]
 		}
 		snap.RecentLessons = active
+	}
+
+	// Derive counts from already-loaded data instead of calling Counts()
+	// which re-scans every entity directory. Only observations need a
+	// targeted ReadDir because they're loaded inside computeFrontier, not
+	// directly available here.
+	snap.Counts = map[string]int{
+		"hypotheses":  len(hyps),
+		"experiments": len(exps),
+		"conclusions": len(concls),
+		"lessons":     lessonCount,
+	}
+	if entries, err := os.ReadDir(s.ObservationsDir()); err == nil {
+		n := 0
+		for _, e := range entries {
+			if !e.IsDir() {
+				n++
+			}
+		}
+		snap.Counts["observations"] = n
 	}
 
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
