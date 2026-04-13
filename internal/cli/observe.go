@@ -1,15 +1,12 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
-	"github.com/bytter/autoresearch/internal/instrument"
 	"github.com/bytter/autoresearch/internal/output"
-	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
 )
@@ -21,14 +18,18 @@ func observeCommands() []*cobra.Command {
 		author         string
 		force          bool
 		allowUnchanged bool
+		all            bool
 	)
 	c := &cobra.Command{
 		Use:   "observe <exp-id>",
-		Short: "Record an instrument-backed observation",
+		Short: "Record instrument-backed observations",
 		Long: `Record an observation. The configured instrument's command is executed
 inside the experiment's worktree, the combined output is hashed and
 stored as a content-addressed artifact, and a structured observation
 file is written under .research/observations/.
+
+Use --instrument to run a single instrument, or --all to run every
+instrument declared on the experiment in dependency-safe order.
 
 Observations are never hand-authored — the CLI is the sole writer and
 the artifact is guaranteed to exist on disk. This is the speculation/
@@ -37,9 +38,14 @@ observation firewall, made physical.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			expID := args[0]
-			if instName == "" {
-				return errors.New("--instrument is required")
+
+			if !all && instName == "" {
+				return errors.New("--instrument or --all is required")
 			}
+			if all && instName != "" {
+				return errors.New("--instrument and --all are mutually exclusive")
+			}
+
 			s, err := openStoreLive()
 			if err != nil {
 				return err
@@ -52,22 +58,6 @@ observation firewall, made physical.`,
 			if err != nil {
 				return err
 			}
-			strict := cfg.Mode == "" || cfg.Mode == "strict"
-			if err := firewall.CheckObservationRequest(instName, samples, exp, cfg, strict); err != nil {
-				return err
-			}
-
-			if !force {
-				priorObs, err := s.ListObservationsForExperiment(expID)
-				if err != nil {
-					return err
-				}
-				if err := firewall.CheckInstrumentDependencies(instName, cfg, priorObs); err != nil {
-					return err
-				}
-			}
-
-			inst := cfg.Instruments[instName]
 			if exp.Worktree == "" {
 				return fmt.Errorf("experiment %s has no worktree; run `autoresearch experiment implement %s` first", expID, expID)
 			}
@@ -78,12 +68,64 @@ observation firewall, made physical.`,
 			// commit any changes.
 			if !allowUnchanged && !exp.IsBaseline && exp.Branch != "" && exp.Baseline.SHA != "" {
 				if hasCommits, err := worktree.HasCommitsAbove(globalProjectDir, exp.Branch, exp.Baseline.SHA); err == nil && !hasCommits {
+					inst := instName
+					if all {
+						inst = "--all"
+					}
 					return fmt.Errorf(
 						"experiment %s branch %s has no commits above baseline %s — "+
 							"the implementation may not have succeeded\n"+
 							"  reset:   autoresearch experiment reset %s --reason \"...\"\n"+
 							"  proceed: autoresearch observe %s --instrument %s --allow-unchanged",
-						expID, exp.Branch, exp.Baseline.SHA[:12], expID, expID, instName)
+						expID, exp.Branch, exp.Baseline.SHA[:12], expID, expID, inst)
+				}
+			}
+
+			// --all: run every instrument on the experiment in dependency order.
+			if all {
+				if len(exp.Instruments) == 0 {
+					return fmt.Errorf("experiment %s declares no instruments", expID)
+				}
+				if err := dryRun(w, fmt.Sprintf("observe all %d instruments on %s", len(exp.Instruments), expID), map[string]any{"instruments": exp.Instruments, "worktree": exp.Worktree}); err != nil {
+					return err
+				}
+
+				results, err := observeAll(s, cfg, exp, exp.Instruments, samples, or(author, "agent:observer"))
+				if err != nil {
+					return err
+				}
+
+				if w.IsJSON() {
+					ids := make([]string, 0, len(results))
+					for _, r := range results {
+						ids = append(ids, r.ID)
+					}
+					return w.JSON(map[string]any{
+						"status":       "ok",
+						"experiment":   expID,
+						"observations": ids,
+						"results":      results,
+					})
+				}
+				w.Textf("observed %d instruments on %s\n", len(results), expID)
+				for _, r := range results {
+					w.Textf("  %-16s %s = %g %s\n", r.ID, r.Inst, r.Value, r.Unit)
+				}
+				return nil
+			}
+
+			// Single instrument mode.
+			strict := cfg.Mode == "" || cfg.Mode == "strict"
+			if err := firewall.CheckObservationRequest(instName, samples, exp, cfg, strict); err != nil {
+				return err
+			}
+			if !force {
+				priorObs, err := s.ListObservationsForExperiment(expID)
+				if err != nil {
+					return err
+				}
+				if err := firewall.CheckInstrumentDependencies(instName, cfg, priorObs); err != nil {
+					return err
 				}
 			}
 
@@ -91,70 +133,12 @@ observation firewall, made physical.`,
 				return err
 			}
 
-			ctx := context.Background()
-			result, err := instrument.Run(ctx, instrument.Config{
-				ProjectDir:  globalProjectDir,
-				WorktreeDir: exp.Worktree,
-				Name:        instName,
-				Instrument:  inst,
-				Samples:     samples,
-			})
-			if err != nil {
-				return fmt.Errorf("run instrument: %w", err)
-			}
-
-			var obsArts []entity.Artifact
-			for _, ac := range result.Artifacts {
-				sha, rel, err := s.WriteArtifact(ac.Content, ac.Filename)
-				if err != nil {
-					return fmt.Errorf("write artifact %q: %w", ac.Name, err)
-				}
-				obsArts = append(obsArts, entity.Artifact{
-					Name:  ac.Name,
-					SHA:   sha,
-					Path:  rel,
-					Bytes: int64(len(ac.Content)),
-					Mime:  ac.Mime,
-				})
-			}
-
-			id, err := s.AllocID(store.KindObservation)
+			obs, err := runAndRecordObservation(s, cfg, exp, instName, samples, or(author, "agent:observer"))
 			if err != nil {
 				return err
 			}
-			unit := result.Unit
-			if unit == "" {
-				unit = inst.Unit
-			}
-			obs := &entity.Observation{
-				ID:          id,
-				Experiment:  expID,
-				Instrument:  instName,
-				MeasuredAt:  result.FinishedAt.UTC(),
-				Value:       result.Value,
-				Unit:        unit,
-				Samples:     result.SamplesN,
-				PerSample:   result.PerSample,
-				CILow:       result.CILow,
-				CIHigh:      result.CIHigh,
-				CIMethod:    result.CIMethod,
-				Pass:        result.Pass,
-				Artifacts:   obsArts,
-				Command:     result.Command,
-				ExitCode:    result.ExitCode,
-				Worktree:    exp.Worktree,
-				BaselineSHA: exp.Baseline.SHA,
-				Author:      or(author, "agent:observer"),
-				Aux:         result.Aux,
-			}
-			obs.Normalize()
-			if err := s.WriteObservation(obs); err != nil {
-				return fmt.Errorf("write observation: %w", err)
-			}
 
-			// Bump the experiment status to "measured" the first time any
-			// observation is recorded against it. Subsequent observations
-			// do not change status.
+			// Bump experiment status on first observation.
 			if exp.Status == entity.ExpImplemented {
 				exp.Status = entity.ExpMeasured
 				if err := s.WriteExperiment(exp); err != nil {
@@ -162,31 +146,16 @@ observation firewall, made physical.`,
 				}
 			}
 
-			artShas := make([]string, 0, len(obsArts))
-			for _, a := range obsArts {
-				artShas = append(artShas, a.SHA)
-			}
-			if err := emitEvent(s, "observation.record", or(author, "agent:observer"), id, map[string]any{
-				"experiment":    expID,
-				"instrument":    instName,
-				"value":         result.Value,
-				"unit":          unit,
-				"samples":       result.SamplesN,
-				"artifact_shas": artShas,
-			}); err != nil {
-				return err
-			}
-
 			if w.IsJSON() {
 				return w.JSON(map[string]any{
 					"status":      "ok",
-					"id":          id,
+					"id":          obs.ID,
 					"observation": obs,
 				})
 			}
-			w.Textf("recorded %s\n", id)
+			w.Textf("recorded %s\n", obs.ID)
 			w.Textf("  instrument:  %s\n", instName)
-			w.Textf("  value:       %g %s\n", obs.Value, unit)
+			w.Textf("  value:       %g %s\n", obs.Value, obs.Unit)
 			if obs.Samples > 1 && obs.CILow != nil && obs.CIHigh != nil {
 				w.Textf("  samples:     %d (95%% CI [%g, %g], %s)\n", obs.Samples, *obs.CILow, *obs.CIHigh, obs.CIMethod)
 			}
@@ -194,13 +163,14 @@ observation firewall, made physical.`,
 				w.Textf("  pass:        %v (exit=%d)\n", *obs.Pass, obs.ExitCode)
 			}
 			w.Textln("  artifacts:")
-			for _, a := range obsArts {
+			for _, a := range obs.Artifacts {
 				w.Textf("    - %-10s %s  (%d bytes)  sha=%s\n", a.Name, a.Path, a.Bytes, a.SHA[:12])
 			}
 			return nil
 		},
 	}
-	c.Flags().StringVar(&instName, "instrument", "", "registered instrument name (required)")
+	c.Flags().StringVar(&instName, "instrument", "", "registered instrument name")
+	c.Flags().BoolVar(&all, "all", false, "run all instruments declared on the experiment in dependency order")
 	c.Flags().IntVar(&samples, "samples", 0, "number of samples (timing); 0 uses instrument min_samples or default 5")
 	addAuthorFlag(c, &author, "")
 	c.Flags().BoolVar(&force, "force", false, "bypass instrument dependency checks")

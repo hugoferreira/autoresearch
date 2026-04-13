@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
-	"github.com/bytter/autoresearch/internal/instrument"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
@@ -407,120 +405,8 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			}
 
 			// --- Phase 3: Observe all instruments ---
-			// Iterate in dependency-safe order: skip instruments whose
-			// requirements are not yet met, retry until all done or stuck.
-			type obsResult struct {
-				id    string
-				inst  string
-				value float64
-				unit  string
-			}
-			var results []obsResult
-			observed := map[string]bool{}
-			var priorObs []*entity.Observation
-
-			remaining := make([]string, len(instruments))
-			copy(remaining, instruments)
-
-			for len(remaining) > 0 {
-				progress := false
-				var deferred []string
-				for _, instName := range remaining {
-					if err := firewall.CheckInstrumentDependencies(instName, cfg, priorObs); err != nil {
-						deferred = append(deferred, instName)
-						continue
-					}
-
-					inst := cfg.Instruments[instName]
-					ctx := context.Background()
-					result, err := instrument.Run(ctx, instrument.Config{
-						ProjectDir:  globalProjectDir,
-						WorktreeDir: wtPath,
-						Name:        instName,
-						Instrument:  inst,
-					})
-					if err != nil {
-						return fmt.Errorf("instrument %s failed: %w", instName, err)
-					}
-
-					var obsArts []entity.Artifact
-					for _, ac := range result.Artifacts {
-						artSHA, rel, err := s.WriteArtifact(ac.Content, ac.Filename)
-						if err != nil {
-							return fmt.Errorf("write artifact %q: %w", ac.Name, err)
-						}
-						obsArts = append(obsArts, entity.Artifact{
-							Name:  ac.Name,
-							SHA:   artSHA,
-							Path:  rel,
-							Bytes: int64(len(ac.Content)),
-							Mime:  ac.Mime,
-						})
-					}
-
-					oid, err := s.AllocID(store.KindObservation)
-					if err != nil {
-						return err
-					}
-					unit := result.Unit
-					if unit == "" {
-						unit = inst.Unit
-					}
-					obs := &entity.Observation{
-						ID:          oid,
-						Experiment:  id,
-						Instrument:  instName,
-						MeasuredAt:  result.FinishedAt.UTC(),
-						Value:       result.Value,
-						Unit:        unit,
-						Samples:     result.SamplesN,
-						PerSample:   result.PerSample,
-						CILow:       result.CILow,
-						CIHigh:      result.CIHigh,
-						CIMethod:    result.CIMethod,
-						Pass:        result.Pass,
-						Artifacts:   obsArts,
-						Command:     result.Command,
-						ExitCode:    result.ExitCode,
-						Worktree:    wtPath,
-						BaselineSHA: sha,
-						Author:      or(author, "system"),
-						Aux:         result.Aux,
-					}
-					obs.Normalize()
-					if err := s.WriteObservation(obs); err != nil {
-						return fmt.Errorf("write observation: %w", err)
-					}
-					priorObs = append(priorObs, obs)
-
-					artShas := make([]string, 0, len(obsArts))
-					for _, a := range obsArts {
-						artShas = append(artShas, a.SHA)
-					}
-					if err := emitEvent(s, "observation.record", or(author, "system"), oid, map[string]any{
-						"experiment":    id,
-						"instrument":    instName,
-						"value":         result.Value,
-						"unit":          unit,
-						"samples":       result.SamplesN,
-						"artifact_shas": artShas,
-					}); err != nil {
-						return err
-					}
-
-					results = append(results, obsResult{id: oid, inst: instName, value: result.Value, unit: unit})
-					observed[instName] = true
-					progress = true
-				}
-				if !progress {
-					return fmt.Errorf("stuck: instruments %v have unsatisfied dependencies", deferred)
-				}
-				remaining = deferred
-			}
-
-			// Update experiment status.
-			e.Status = entity.ExpMeasured
-			if err := s.WriteExperiment(e); err != nil {
+			results, err := observeAll(s, cfg, e, instruments, 0, or(author, "system"))
+			if err != nil {
 				return err
 			}
 
@@ -528,7 +414,7 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			if w.IsJSON() {
 				obsIDs := make([]string, 0, len(results))
 				for _, r := range results {
-					obsIDs = append(obsIDs, r.id)
+					obsIDs = append(obsIDs, r.ID)
 				}
 				return w.JSON(map[string]any{
 					"status":       "ok",
@@ -541,7 +427,7 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			w.Textf("  worktree: %s\n", wtPath)
 			w.Textln("  observations:")
 			for _, r := range results {
-				w.Textf("    %-16s %s = %g %s\n", r.id, r.inst, r.value, r.unit)
+				w.Textf("    %-16s %s = %g %s\n", r.ID, r.Inst, r.Value, r.Unit)
 			}
 			return nil
 		},

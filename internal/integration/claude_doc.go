@@ -220,7 +220,8 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 ` + "`observe --force`" + ` to bypass the dependency gate when you know what you're doing.
 
 ### Observations and analysis
-    autoresearch observe  <exp-id> --instrument NAME [--samples N]
+    autoresearch observe  <exp-id> --instrument NAME [--samples N]   # single instrument
+    autoresearch observe  <exp-id> --all [--samples N]              # all instruments in dependency order
     autoresearch analyze  <exp-id> [--baseline <baseline-exp-id>] [--instrument NAME] [--iters N]
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
