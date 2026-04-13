@@ -192,7 +192,7 @@ func (v *conclusionDetailView) view(width, height int) string {
 		lines = append(lines, "")
 		lines = append(lines, tuiBold.Render("Interpretation:"))
 		body := strings.TrimSpace(c.Body)
-		lines = append(lines, strings.TrimRight(renderMarkdown(max(width-4, 20), body), "\n"))
+		lines = append(lines, strings.TrimRight(renderMarkdown(width, body), "\n"))
 	}
 	return clampLines(strings.Join(lines, "\n"), height, width)
 }

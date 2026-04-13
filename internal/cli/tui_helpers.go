@@ -96,16 +96,6 @@ func shortUnit(u string) string {
 	}
 }
 
-// stripLeftMargin removes up to `n` leading spaces from each line of s.
-func stripLeftMargin(s string, n int) string {
-	prefix := strings.Repeat(" ", n)
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = strings.TrimPrefix(l, prefix)
-	}
-	return strings.Join(lines, "\n")
-}
-
 // padRight right-pads s with spaces to the given *visible* width. Shorter
 // strings are extended; longer ones are returned unchanged (truncate first
 // if you need a hard cap).

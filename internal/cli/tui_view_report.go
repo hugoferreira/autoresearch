@@ -4,6 +4,8 @@ import (
 	"github.com/bytter/autoresearch/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	gansi "github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 )
 
 // reportView renders the markdown report for a single hypothesis in a
@@ -74,8 +76,9 @@ func renderMarkdown(width int, md string) string {
 	if width <= 0 {
 		width = 80
 	}
+	style := flushDarkStyle()
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStyles(style),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -85,10 +88,17 @@ func renderMarkdown(width int, md string) string {
 	if err != nil {
 		return md
 	}
-	// Glamour's "dark" style adds a 2-char left margin to the document
-	// block. Strip it so markdown renders flush inside TUI panels.
-	out = stripLeftMargin(out, 2)
 	return out
+}
+
+// flushDarkStyle returns glamour's dark style with all block margins
+// set to zero so rendered markdown sits flush inside TUI panels.
+func flushDarkStyle() gansi.StyleConfig {
+	s := styles.DarkStyleConfig
+	zero := uint(0)
+	s.Document.Margin = &zero
+	s.CodeBlock.Margin = &zero
+	return s
 }
 
 // ensureRendered returns the glamour-styled body, rendering (or re-rendering)
