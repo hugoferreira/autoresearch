@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -472,6 +473,32 @@ func statusCmd() *cobra.Command {
 				payload["stale_experiments"] = stale
 			}
 
+			// Unobserved goal instrument detection: instruments referenced
+			// by the active goal (objective + constraints) that have zero
+			// observations anywhere. A nudge for the orchestrator that it
+			// may be skipping a required measurement.
+			var unobservedInstruments []string
+			if st.CurrentGoalID != "" {
+				if goal, err := s.ActiveGoal(); err == nil {
+					needed := map[string]bool{goal.Objective.Instrument: true}
+					for _, c := range goal.Constraints {
+						needed[c.Instrument] = true
+					}
+					if obs, err := s.ListObservations(); err == nil {
+						for _, o := range obs {
+							delete(needed, o.Instrument)
+						}
+					}
+					for inst := range needed {
+						unobservedInstruments = append(unobservedInstruments, inst)
+					}
+					sort.Strings(unobservedInstruments)
+				}
+			}
+			if len(unobservedInstruments) > 0 {
+				payload["unobserved_goal_instruments"] = unobservedInstruments
+			}
+
 			if w.IsJSON() {
 				return w.JSON(payload)
 			}
@@ -509,6 +536,13 @@ func statusCmd() *cobra.Command {
 					w.Textf("  %-8s  %-12s  hyp=%-8s  %s ago  (last: %s)\n",
 						se.ID, se.Status, se.Hypothesis,
 						formatStaleAge(se.StaleMinutes), se.LastEventKind)
+				}
+			}
+			if len(unobservedInstruments) > 0 {
+				w.Textln("")
+				w.Textf("unobserved goal instruments (should have observations but don't yet):\n")
+				for _, inst := range unobservedInstruments {
+					w.Textf("  %s\n", inst)
 				}
 			}
 			return nil
