@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/bytter/autoresearch/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	gansi "github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // reportView renders the markdown report for a single hypothesis in a
@@ -72,14 +75,24 @@ func (v *reportView) hints() []tuiHint {
 	return []tuiHint{{"g/G", "top/bot"}, {"↑↓/PgUp/PgDn", "scroll"}}
 }
 
+// renderMarkdown renders markdown for TUI panels. Uses glamour for
+// styling (headings, bold, italic, code) but with a very wide word-wrap
+// to prevent glamour's aggressive line-breaking (which splits on hyphens
+// and equals). Then re-wraps the output with space-only word wrapping.
 func renderMarkdown(width int, md string) string {
 	if width <= 0 {
 		width = 80
 	}
+	return renderMarkdownRewrap(width, md)
+}
+
+// renderMarkdownRewrap renders with glamour at unlimited width (no
+// wrapping), then re-wraps each line using space-only breaking.
+func renderMarkdownRewrap(width int, md string) string {
 	style := flushDarkStyle()
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(style),
-		glamour.WithWordWrap(width),
+		glamour.WithWordWrap(0), // no wrapping — we do it ourselves
 	)
 	if err != nil {
 		return md
@@ -88,7 +101,50 @@ func renderMarkdown(width int, md string) string {
 	if err != nil {
 		return md
 	}
-	return out
+	// Re-wrap each line with space-only breaking.
+	var rewrapped []string
+	for _, line := range strings.Split(out, "\n") {
+		visible := lipgloss.Width(line)
+		if visible <= width {
+			rewrapped = append(rewrapped, line)
+		} else {
+			rewrapped = append(rewrapped, wrapANSI(line, width))
+		}
+	}
+	return strings.Join(rewrapped, "\n")
+}
+
+// wrapANSI wraps an ANSI-styled line at the given visible width,
+// breaking only on spaces. Preserves escape sequences across breaks.
+func wrapANSI(line string, width int) string {
+	// Split on spaces, preserving ANSI codes attached to words.
+	words := strings.Split(line, " ")
+	var lines []string
+	cur := ""
+	curW := 0
+	for _, w := range words {
+		if w == "" {
+			continue
+		}
+		ww := lipgloss.Width(w)
+		if cur == "" {
+			cur = w
+			curW = ww
+			continue
+		}
+		if curW+1+ww <= width {
+			cur += " " + w
+			curW += 1 + ww
+		} else {
+			lines = append(lines, cur)
+			cur = w
+			curW = ww
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // flushDarkStyle returns glamour's dark style with all block margins
