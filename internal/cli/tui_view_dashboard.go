@@ -34,6 +34,7 @@ type dashFocus int
 
 const (
 	dashFocusTree dashFocus = iota
+	dashFocusLessons
 	dashFocusFrontier
 	dashFocusInFlight
 	dashFocusEvents
@@ -168,6 +169,8 @@ func (v *dashboardView) panelLen(f dashFocus) int {
 	switch f {
 	case dashFocusTree:
 		return countTreeNodes(v.snap.Tree)
+	case dashFocusLessons:
+		return len(v.snap.RecentLessons)
 	case dashFocusFrontier:
 		return len(v.snap.Frontier)
 	case dashFocusInFlight:
@@ -190,6 +193,12 @@ func (v *dashboardView) openSelected(s *store.Store) tea.Cmd {
 			return nil
 		}
 		v.rightOverlay = newHypothesisDetailView(flat[idx].ID)
+		return v.rightOverlay.init(s)
+	case dashFocusLessons:
+		if idx < 0 || idx >= len(v.snap.RecentLessons) {
+			return nil
+		}
+		v.rightOverlay = newLessonDetailView(v.snap.RecentLessons[idx].ID)
 		return v.rightOverlay.init(s)
 	case dashFocusFrontier:
 		if idx < 0 || idx >= len(v.snap.Frontier) {
@@ -361,10 +370,11 @@ func (v *dashboardView) renderTreePanel(width, height int) string {
 }
 
 func (v *dashboardView) renderLessonsPanel(width, height int) string {
+	active := v.focus == dashFocusLessons
 	title := tuiPanelTitle.Render("Lessons")
 	snap := v.snap
 	if len(snap.RecentLessons) == 0 {
-		return boxPanel(title, tuiDim.Render("(no active lessons)"), width, height, false)
+		return boxPanel(title, tuiDim.Render("(no active lessons)"), width, height, active)
 	}
 	innerW := width - 4
 	var lines []string
@@ -396,7 +406,13 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 		lines = append(lines, line)
 	}
 	lines = truncLines(lines, innerW)
-	return boxPanel(title, strings.Join(lines, "\n"), width, height, false)
+	cursor := clampCursor(v.cursors[dashFocusLessons], len(lines))
+	if active {
+		lines = highlightRow(lines, cursor, innerW)
+	}
+	inner := max(height-2, 1)
+	lines = scrollWindow(lines, cursor, inner)
+	return boxPanel(title, strings.Join(lines, "\n"), width, height, active)
 }
 
 func (v *dashboardView) renderFrontierPanel(width, height int) string {
