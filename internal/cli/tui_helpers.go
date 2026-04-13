@@ -426,13 +426,17 @@ func formatPredictedEffect(pe *entity.PredictedEffect) string {
 	return s
 }
 
-// formatPredictedEffectCompact renders a short form like "↓≥5%" for dashboard panels.
-func formatPredictedEffectCompact(pe *entity.PredictedEffect) string {
-	arrow := "↓"
+// predictedEffectArrow returns "↓" or "↑" based on direction.
+func predictedEffectArrow(pe *entity.PredictedEffect) string {
 	if pe.Direction == "increase" {
-		arrow = "↑"
+		return "↑"
 	}
-	return fmt.Sprintf("%s≥%.0f%%", arrow, pe.MinEffect*100)
+	return "↓"
+}
+
+// formatPredictedEffectCompact renders a short form like "↓≥5%" for list views.
+func formatPredictedEffectCompact(pe *entity.PredictedEffect) string {
+	return fmt.Sprintf("%s≥%.0f%%", predictedEffectArrow(pe), pe.MinEffect*100)
 }
 
 // Compile-time anchor: all view files can refer to entity.Hypothesis via

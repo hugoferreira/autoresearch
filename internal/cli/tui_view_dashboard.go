@@ -379,25 +379,15 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 	innerW := width - 4
 	var lines []string
 	for _, l := range snap.RecentLessons {
-		// Scope badge: 3 chars (sys/hyp)
-		scope := tuiCyan.Render("hyp")
-		if l.Scope == entity.LessonScopeSystem {
-			scope = tuiMag.Render("sys")
-		}
-		// Subjects (compact)
-		subj := ""
-		if len(l.Subjects) > 0 {
-			subj = tuiDim.Render(" " + strings.Join(l.Subjects, ","))
-		}
-		// Predicted effect indicator
-		pred := ""
+		// Predicted effect arrow (compact indicator before claim)
+		indicator := " "
 		if l.PredictedEffect != nil {
-			pred = tuiYellow.Render(" " + formatPredictedEffectCompact(l.PredictedEffect))
+			indicator = tuiYellow.Render(predictedEffectArrow(l.PredictedEffect))
 		}
-		// ID(8) + " " + scope(3) + " " + claim + extras
-		claimW := max(innerW-16, 20)
-		line := fmt.Sprintf("%s %s %s%s%s",
-			tuiCyan.Render(l.ID), scope, truncate(l.Claim, claimW), subj, pred)
+		// At-a-glance: ID, arrow indicator, claim. Everything else is in the detail pane.
+		claimW := max(innerW-11, 20)
+		line := fmt.Sprintf("%s %s %s",
+			tuiCyan.Render(l.ID), indicator, truncate(l.Claim, claimW))
 		lines = append(lines, line)
 	}
 	lines = truncLines(lines, innerW)
