@@ -39,6 +39,20 @@ load-bearing.
 7. Enough of the codebase (via Read / Grep / Glob) to understand what's
    being optimized. Focus on `goal.objective.target`.
 
+### 0. Ensure a baseline exists
+
+Before your first hypothesis cycle under this goal, check whether a
+baseline experiment already exists:
+
+    autoresearch experiment list --json | jq '[.[] | select(.is_baseline)]'
+
+If the list is empty, create one:
+
+    autoresearch experiment baseline --json
+
+Capture the experiment ID from the response — you will use it as
+`--baseline-experiment` in every `conclude` call.
+
 ## The cycle
 
 ### 1. Generate (or pick) a hypothesis
@@ -244,8 +258,20 @@ Completed cycle for H-NNNN
   gate review needed: yes
 ```
 
-After the gate reviewer accepts a supported hypothesis, the human (or
-main session) can inspect and ship the change:
+After you conclude with `supported` or `refuted`, the hypothesis enters
+**unreviewed** status. `hypothesis apply` is blocked until the gate
+reviewer accepts via `conclusion accept`. If the reviewer downgrades and
+you disagree, you may appeal:
+
+    autoresearch conclusion appeal <C-id> \
+        --rebuttal "<specific, grounded disagreement with the downgrade reason>"
+
+Appeals are only valid against critic downgrades (not firewall
+downgrades — the numbers are the numbers). The main session will
+dispatch the gate reviewer again with the rebuttal context.
+
+After the gate reviewer accepts, the human (or main session) can
+inspect and ship the change:
 
 ```sh
 autoresearch hypothesis diff  H-NNNN                    # unified diff vs baseline
@@ -254,8 +280,9 @@ autoresearch hypothesis apply H-NNNN [--merge]          # cherry-pick onto curre
 ```
 
 These resolve the hypothesis → best supported conclusion → candidate
-experiment chain automatically. `apply` requires a supported conclusion;
-`diff` and `worktree` fall back to the latest experiment if none exists.
+experiment chain automatically. `apply` requires a reviewed, supported
+conclusion; `diff` and `worktree` fall back to the latest experiment
+if none exists.
 
 ## What you don't do
 

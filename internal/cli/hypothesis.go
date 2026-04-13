@@ -533,6 +533,14 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if concl == nil || concl.Verdict != entity.VerdictSupported {
 				return fmt.Errorf("hypothesis %s has no supported conclusion — nothing to apply", args[0])
 			}
+			// Gate: hypothesis must have been reviewed (not still "unreviewed").
+			hyp, err := s.ReadHypothesis(args[0])
+			if err != nil {
+				return err
+			}
+			if hyp.Status == entity.StatusUnreviewed {
+				return fmt.Errorf("hypothesis %s is unreviewed — dispatch the gate reviewer to review %s first (or self-review with `conclusion accept %s --reviewed-by ...`)", args[0], concl.ID, concl.ID)
+			}
 			if exp.Branch == "" {
 				return fmt.Errorf("%s has no branch (status=%s)", exp.ID, exp.Status)
 			}

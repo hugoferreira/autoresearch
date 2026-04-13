@@ -56,6 +56,8 @@ func tuiStatusGlyph(status string) string {
 		return tuiGreen.Render("✓")
 	case "refuted":
 		return tuiRed.Render("✗")
+	case "unreviewed":
+		return tuiYellow.Render("⧖")
 	case "inconclusive":
 		return tuiYellow.Render("?")
 	case "killed":

@@ -18,6 +18,7 @@ const (
 type Experiment struct {
 	ID                    string    `yaml:"id"                                  json:"id"`
 	Hypothesis            string    `yaml:"hypothesis"                          json:"hypothesis"`
+	IsBaseline            bool      `yaml:"is_baseline,omitempty"               json:"is_baseline,omitempty"`
 	Status                string    `yaml:"status"                              json:"status"`
 	Baseline              Baseline  `yaml:"baseline"                            json:"baseline"`
 	Instruments           []string  `yaml:"instruments"                         json:"instruments"`

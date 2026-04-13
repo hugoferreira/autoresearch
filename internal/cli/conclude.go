@@ -203,7 +203,12 @@ downgraded since there is no comparator).`,
 					}
 				}
 			}
-			hyp.Status = decision.FinalVerdict
+			switch decision.FinalVerdict {
+			case entity.VerdictSupported, entity.VerdictRefuted:
+				hyp.Status = entity.StatusUnreviewed
+			default:
+				hyp.Status = decision.FinalVerdict
+			}
 			if err := s.WriteHypothesis(hyp); err != nil {
 				return fmt.Errorf("update hypothesis status: %w", err)
 			}

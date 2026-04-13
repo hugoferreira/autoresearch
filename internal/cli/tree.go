@@ -182,6 +182,8 @@ func statusGlyph(status string) string {
 		return "✓"
 	case entity.StatusRefuted:
 		return "✗"
+	case entity.StatusUnreviewed:
+		return "⧖"
 	case entity.StatusInconclusive:
 		return "?"
 	case entity.StatusKilled:
@@ -203,6 +205,8 @@ func coloredStatusGlyph(a *ansi, status string) string {
 		return a.green(g)
 	case entity.StatusRefuted:
 		return a.red(g)
+	case entity.StatusUnreviewed:
+		return a.yellow(g)
 	case entity.StatusInconclusive:
 		return a.yellow(g)
 	case entity.StatusKilled:

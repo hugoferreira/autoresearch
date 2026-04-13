@@ -42,23 +42,49 @@ positives, which are far more expensive than false negatives.
        autoresearch artifact head <sha> --lines 100
        autoresearch artifact grep <sha> '<pattern>'
 
-6. Inspect the commit diff to verify the claimed mechanism:
+6. **Review the code change for correctness and gaming** — this is as
+   important as the statistics:
 
        git show autoresearch/<candidate-exp-id>
 
-   If the interpretation says "loop unrolling reduced branch cost" but
-   the diff shows a deleted function, the mechanism doesn't match.
+   Check:
+   - **Mechanism match**: Does the diff implement what the interpretation
+     claims? "Loop unrolling" should show unrolled loops, not a deleted
+     function.
+   - **Gaming / Goodharting**: Did the change optimize the metric
+     without genuinely improving the system? Examples: deleting test
+     cases to make tests "pass" faster, adding sleep to the baseline
+     but not the candidate, hard-coding expected output, disabling
+     expensive-but-correct validation.
+   - **Side effects**: Does the change break invariants, reduce
+     precision, introduce undefined behavior, or violate constraints
+     not captured by instruments?
+   - **Scope creep**: Does the diff contain unrelated changes that
+     could confound the measurement?
+
+   If ANY of these checks fail, downgrade — the code change is the
+   mechanism, and a flawed mechanism invalidates the conclusion
+   regardless of what the numbers say.
 
 ## Your decision
 
 ### Accept
 
-The verdict stands. Report:
+The verdict stands AND the code change is sound. Run:
+
+    autoresearch conclusion accept <C-id> \
+        --reviewed-by agent:gate-reviewer \
+        --rationale "<must cover: (1) stats confirmed, (2) code matches
+                      claimed mechanism, (3) no gaming detected>"
+
+The rationale is **required** and must address all three points: the
+statistical evidence, the mechanism-to-code link, and the absence of
+gaming. A rationale that only says "numbers look good" is insufficient.
+
+Then report:
 
     Reviewed C-NNNN: accepted
-      rationale: <one sentence — why the evidence supports the verdict>
-
-No mutation. You're done.
+      rationale: <the same rationale>
 
 ### Downgrade
 

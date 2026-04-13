@@ -52,6 +52,30 @@ func RenameBranch(projectDir, oldName, newName string) error {
 	return err
 }
 
+// ListBranches returns branch names matching a glob pattern (e.g.
+// "autoresearch/*@*" for archived experiment branches).
+func ListBranches(projectDir, pattern string) ([]string, error) {
+	out, err := run(projectDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+pattern)
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// HasCommitsAbove reports whether branch has at least one commit beyond
+// baseline. Used to detect experiments where the worktree was created but
+// no code was committed.
+func HasCommitsAbove(projectDir, branch, baselineSHA string) (bool, error) {
+	out, err := run(projectDir, "log", "--oneline", baselineSHA+".."+branch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // List returns the absolute paths of all worktrees known to the repo.
 func List(projectDir string) ([]string, error) {
 	out, err := run(projectDir, "worktree", "list", "--porcelain")

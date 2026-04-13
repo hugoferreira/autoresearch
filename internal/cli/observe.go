@@ -10,15 +10,17 @@ import (
 	"github.com/bytter/autoresearch/internal/instrument"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
+	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
 func observeCommands() []*cobra.Command {
 	var (
-		instName string
-		samples  int
-		author   string
-		force    bool
+		instName       string
+		samples        int
+		author         string
+		force          bool
+		allowUnchanged bool
 	)
 	c := &cobra.Command{
 		Use:   "observe <exp-id>",
@@ -68,6 +70,21 @@ observation firewall, made physical.`,
 			inst := cfg.Instruments[instName]
 			if exp.Worktree == "" {
 				return fmt.Errorf("experiment %s has no worktree; run `autoresearch experiment implement %s` first", expID, expID)
+			}
+
+			// Refuse if the experiment branch has no commits above baseline
+			// and is not a baseline experiment. This catches the pattern
+			// where a worktree was created but the coder helper failed to
+			// commit any changes.
+			if !allowUnchanged && !exp.IsBaseline && exp.Branch != "" && exp.Baseline.SHA != "" {
+				if hasCommits, err := worktree.HasCommitsAbove(globalProjectDir, exp.Branch, exp.Baseline.SHA); err == nil && !hasCommits {
+					return fmt.Errorf(
+						"experiment %s branch %s has no commits above baseline %s — "+
+							"the implementation may not have succeeded\n"+
+							"  reset:   autoresearch experiment reset %s --reason \"...\"\n"+
+							"  proceed: autoresearch observe %s --instrument %s --allow-unchanged",
+						expID, exp.Branch, exp.Baseline.SHA[:12], expID, expID, instName)
+				}
 			}
 
 			if err := dryRun(w, fmt.Sprintf("run instrument %q against %s", instName, exp.Worktree), map[string]any{"instrument": instName, "worktree": exp.Worktree}); err != nil {
@@ -187,5 +204,6 @@ observation firewall, made physical.`,
 	c.Flags().IntVar(&samples, "samples", 0, "number of samples (timing); 0 uses instrument min_samples or default 5")
 	addAuthorFlag(c, &author, "")
 	c.Flags().BoolVar(&force, "force", false, "bypass instrument dependency checks")
+	c.Flags().BoolVar(&allowUnchanged, "allow-unchanged", false, "proceed even when the experiment branch has no commits above baseline")
 	return []*cobra.Command{c}
 }

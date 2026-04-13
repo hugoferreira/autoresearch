@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
+	"github.com/bytter/autoresearch/internal/instrument"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
@@ -26,10 +28,10 @@ func experimentCommands() []*cobra.Command {
 		experimentDesignCmd(),
 		experimentImplementCmd(),
 		experimentResetCmd(),
+		experimentBaselineCmd(),
 		experimentWorktreeCmd(),
 		experimentListCmd(),
 		experimentShowCmd(),
-		experimentPromoteCmd(),
 	)
 	return []*cobra.Command{e}
 }
@@ -279,6 +281,277 @@ events.jsonl — the research history tells the truth about retries.`,
 	return c
 }
 
+func experimentBaselineCmd() *cobra.Command {
+	var (
+		baseline    string
+		author      string
+		designNotes string
+	)
+	c := &cobra.Command{
+		Use:   "baseline",
+		Short: "Create a baseline experiment: design, implement, and observe in one shot",
+		Long: `Create a baseline experiment at the given git ref (default HEAD), spawn a
+worktree, and observe all instruments relevant to the active goal. This
+establishes reference measurements that subsequent experiments compare
+against.
+
+A baseline experiment has no hypothesis — it measures the unmodified code.
+The returned experiment ID is used as --baseline-experiment in conclude.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+
+			s, err := openStoreLive()
+			if err != nil {
+				return err
+			}
+			cfg, err := s.Config()
+			if err != nil {
+				return err
+			}
+			state, err := s.State()
+			if err != nil {
+				return err
+			}
+			goal, err := s.ActiveGoal()
+			if err != nil {
+				return err
+			}
+
+			// Collect instruments: objective + all constraints, deduplicated.
+			seen := map[string]bool{}
+			var instruments []string
+			add := func(name string) {
+				if !seen[name] {
+					seen[name] = true
+					instruments = append(instruments, name)
+				}
+			}
+			add(goal.Objective.Instrument)
+			for _, c := range goal.Constraints {
+				add(c.Instrument)
+			}
+
+			if breach := firewall.CheckBudgetForNewExperiment(state, cfg, nowUTC()); !breach.Ok() {
+				return fmt.Errorf("%w (%s): %s", ErrBudgetExhausted, breach.Rule, breach.Message)
+			}
+
+			sha, err := worktree.ResolveRef(globalProjectDir, baseline)
+			if err != nil {
+				return fmt.Errorf("resolve baseline %q: %w", baseline, err)
+			}
+
+			e := &entity.Experiment{
+				IsBaseline:  true,
+				Status:      entity.ExpDesigned,
+				Baseline:    entity.Baseline{Ref: baseline, SHA: sha},
+				Instruments: instruments,
+				Author:      or(author, "system"),
+				CreatedAt:   nowUTC(),
+				Body:        entity.AppendMarkdownSection("", "Design notes", or(designNotes, "Auto-generated baseline experiment for "+goal.ID)),
+			}
+			if err := firewall.ValidateExperiment(e, cfg); err != nil {
+				return err
+			}
+
+			if err := dryRun(w, fmt.Sprintf("create baseline experiment (ref=%s, sha=%s)", baseline, sha[:12]), map[string]any{"experiment": e}); err != nil {
+				return err
+			}
+
+			// --- Phase 1: Design ---
+			id, err := s.AllocID(store.KindExperiment)
+			if err != nil {
+				return err
+			}
+			e.ID = id
+			if err := s.WriteExperiment(e); err != nil {
+				return err
+			}
+			if err := emitEvent(s, "experiment.baseline", or(author, "system"), id, map[string]any{
+				"baseline":    sha,
+				"instruments": instruments,
+				"goal":        goal.ID,
+			}); err != nil {
+				return err
+			}
+
+			// --- Phase 2: Implement (create worktree) ---
+			wtRoot, err := s.WorktreesRoot()
+			if err != nil {
+				return err
+			}
+			wtPath := filepath.Join(wtRoot, id)
+			branch := "autoresearch/" + id
+
+			if err := os.MkdirAll(wtRoot, 0o755); err != nil {
+				return err
+			}
+			if err := worktree.Add(globalProjectDir, wtPath, branch, sha); err != nil {
+				return fmt.Errorf("create worktree: %w", err)
+			}
+
+			e.Worktree = wtPath
+			e.Branch = branch
+			e.Status = entity.ExpImplemented
+			if err := s.WriteExperiment(e); err != nil {
+				return err
+			}
+			if err := writeWorktreeBrief(s, e, wtPath, ""); err != nil {
+				// Non-fatal for baselines: no hypothesis to brief about.
+				_ = err
+			}
+			if err := emitEvent(s, "experiment.implement", "system", id, map[string]any{
+				"worktree": wtPath,
+				"branch":   branch,
+			}); err != nil {
+				return err
+			}
+
+			// --- Phase 3: Observe all instruments ---
+			// Iterate in dependency-safe order: skip instruments whose
+			// requirements are not yet met, retry until all done or stuck.
+			type obsResult struct {
+				id    string
+				inst  string
+				value float64
+				unit  string
+			}
+			var results []obsResult
+			observed := map[string]bool{}
+			var priorObs []*entity.Observation
+
+			remaining := make([]string, len(instruments))
+			copy(remaining, instruments)
+
+			for len(remaining) > 0 {
+				progress := false
+				var deferred []string
+				for _, instName := range remaining {
+					if err := firewall.CheckInstrumentDependencies(instName, cfg, priorObs); err != nil {
+						deferred = append(deferred, instName)
+						continue
+					}
+
+					inst := cfg.Instruments[instName]
+					ctx := context.Background()
+					result, err := instrument.Run(ctx, instrument.Config{
+						ProjectDir:  globalProjectDir,
+						WorktreeDir: wtPath,
+						Name:        instName,
+						Instrument:  inst,
+					})
+					if err != nil {
+						return fmt.Errorf("instrument %s failed: %w", instName, err)
+					}
+
+					var obsArts []entity.Artifact
+					for _, ac := range result.Artifacts {
+						artSHA, rel, err := s.WriteArtifact(ac.Content, ac.Filename)
+						if err != nil {
+							return fmt.Errorf("write artifact %q: %w", ac.Name, err)
+						}
+						obsArts = append(obsArts, entity.Artifact{
+							Name:  ac.Name,
+							SHA:   artSHA,
+							Path:  rel,
+							Bytes: int64(len(ac.Content)),
+							Mime:  ac.Mime,
+						})
+					}
+
+					oid, err := s.AllocID(store.KindObservation)
+					if err != nil {
+						return err
+					}
+					unit := result.Unit
+					if unit == "" {
+						unit = inst.Unit
+					}
+					obs := &entity.Observation{
+						ID:          oid,
+						Experiment:  id,
+						Instrument:  instName,
+						MeasuredAt:  result.FinishedAt.UTC(),
+						Value:       result.Value,
+						Unit:        unit,
+						Samples:     result.SamplesN,
+						PerSample:   result.PerSample,
+						CILow:       result.CILow,
+						CIHigh:      result.CIHigh,
+						CIMethod:    result.CIMethod,
+						Pass:        result.Pass,
+						Artifacts:   obsArts,
+						Command:     result.Command,
+						ExitCode:    result.ExitCode,
+						Worktree:    wtPath,
+						BaselineSHA: sha,
+						Author:      or(author, "system"),
+						Aux:         result.Aux,
+					}
+					obs.Normalize()
+					if err := s.WriteObservation(obs); err != nil {
+						return fmt.Errorf("write observation: %w", err)
+					}
+					priorObs = append(priorObs, obs)
+
+					artShas := make([]string, 0, len(obsArts))
+					for _, a := range obsArts {
+						artShas = append(artShas, a.SHA)
+					}
+					if err := emitEvent(s, "observation.record", or(author, "system"), oid, map[string]any{
+						"experiment":    id,
+						"instrument":    instName,
+						"value":         result.Value,
+						"unit":          unit,
+						"samples":       result.SamplesN,
+						"artifact_shas": artShas,
+					}); err != nil {
+						return err
+					}
+
+					results = append(results, obsResult{id: oid, inst: instName, value: result.Value, unit: unit})
+					observed[instName] = true
+					progress = true
+				}
+				if !progress {
+					return fmt.Errorf("stuck: instruments %v have unsatisfied dependencies", deferred)
+				}
+				remaining = deferred
+			}
+
+			// Update experiment status.
+			e.Status = entity.ExpMeasured
+			if err := s.WriteExperiment(e); err != nil {
+				return err
+			}
+
+			// Output.
+			if w.IsJSON() {
+				obsIDs := make([]string, 0, len(results))
+				for _, r := range results {
+					obsIDs = append(obsIDs, r.id)
+				}
+				return w.JSON(map[string]any{
+					"status":       "ok",
+					"id":           id,
+					"experiment":   e,
+					"observations": obsIDs,
+				})
+			}
+			w.Textf("created baseline %s (ref=%s, sha=%s)\n", id, baseline, sha[:12])
+			w.Textf("  worktree: %s\n", wtPath)
+			w.Textln("  observations:")
+			for _, r := range results {
+				w.Textf("    %-16s %s = %g %s\n", r.id, r.inst, r.value, r.unit)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&baseline, "baseline", "HEAD", "git ref to use as baseline")
+	addAuthorFlag(c, &author, "")
+	c.Flags().StringVar(&designNotes, "design-notes", "", "optional notes for the baseline experiment")
+	return c
+}
+
 func experimentWorktreeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "worktree <exp-id>",
@@ -447,13 +720,4 @@ func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes 
 	}
 	data = append(data, '\n')
 	return os.WriteFile(filepath.Join(wtPath, entity.BriefFileName), data, 0o644)
-}
-
-func experimentPromoteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "promote <exp-id>",
-		Short: "Promote an experiment to a higher tier (M8)",
-		Args:  cobra.ExactArgs(1),
-		RunE:  stub("experiment promote"),
-	}
 }

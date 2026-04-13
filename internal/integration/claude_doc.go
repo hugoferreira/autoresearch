@@ -104,7 +104,11 @@ by hand, you are lying to future-you — don't.
            └─> experiment implement  (status: implemented)  -- git worktree created
                 └─> observe          (status: measured)     -- instruments run, artifacts stored
                      └─> conclude     (status: analyzed)    -- stats firewall applied
-                          └─> hypothesis: supported | refuted | inconclusive
+                          ├─> hypothesis: unreviewed     (supported/refuted pending gate review)
+                          │    ├─ conclusion accept  → hypothesis: supported | refuted
+                          │    └─ conclusion downgrade → hypothesis: inconclusive
+                          │         └─ conclusion appeal → hypothesis: unreviewed (re-review)
+                          └─> hypothesis: inconclusive   (no review needed)
 
 Every hypothesis is bound to the goal that was active when it was
 added (its ` + "`goal_id`" + ` field); experiments, observations, and
@@ -195,12 +199,13 @@ the firewall sees.
     autoresearch hypothesis promote <hyp-id> --reason "..."  # mark priority:human
     autoresearch hypothesis worktree <hyp-id> [--conclusion C-NNNN]  # worktree of winning experiment
     autoresearch hypothesis diff     <hyp-id> [--conclusion C-NNNN]  # unified diff vs baseline
-    autoresearch hypothesis apply    <hyp-id> [--conclusion C-NNNN] [--merge]  # ship it
+    autoresearch hypothesis apply    <hyp-id> [--conclusion C-NNNN] [--merge]  # ship it (requires reviewed conclusion)
     autoresearch tree               [--root H-XXXX]
     autoresearch frontier                                  # best-first, stalled_for
     autoresearch report             <hyp-id>               # markdown writeup
 
 ### Experiments
+    autoresearch experiment baseline   [--baseline HEAD]                       # one-shot: design+implement+observe for a baseline
     autoresearch experiment design     <hyp-id> --instruments a,b,c --baseline HEAD
     autoresearch experiment implement  <exp-id>
     autoresearch experiment reset      <exp-id> --reason "..."
@@ -226,9 +231,16 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 ### Conclusions (review and gate reviewer)
     autoresearch conclusion list       [--hypothesis H-XXXX] [--verdict X]
     autoresearch conclusion show       <C-id>
+    autoresearch conclusion accept     <C-id> --reviewed-by ... --rationale "..."
+        # Gate reviewer's acceptance: sets reviewed_by, promotes hypothesis
+        # from "unreviewed" to "supported"/"refuted". Required before apply.
+        # Rationale is required — must cover stats, mechanism, and no-gaming.
     autoresearch conclusion downgrade  <C-id> --reason "..." [--reviewed-by agent:gate-reviewer]
-        # Gate reviewer's sole mutation: flips supported|refuted → inconclusive,
+        # Gate reviewer's rejection: flips supported|refuted → inconclusive,
         # preserving the original verdict in strict_check.downgraded_from.
+    autoresearch conclusion appeal     <C-id> --rebuttal "..."
+        # Appeal a critic downgrade: restores original verdict, clears
+        # reviewed_by, records rebuttal. Only valid for critic downgrades.
 
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--experiment E-XXXX | --observation O-XXXX]

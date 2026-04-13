@@ -9,6 +9,7 @@ import (
 
 const (
 	StatusOpen         = "open"
+	StatusUnreviewed   = "unreviewed" // concluded but awaiting gate review
 	StatusSupported    = "supported"
 	StatusRefuted      = "refuted"
 	StatusInconclusive = "inconclusive"

@@ -69,7 +69,7 @@ func ValidateGoal(g *entity.Goal, cfg *store.Config) error {
 }
 
 func ValidateExperiment(e *entity.Experiment, cfg *store.Config) error {
-	if strings.TrimSpace(e.Hypothesis) == "" {
+	if !e.IsBaseline && strings.TrimSpace(e.Hypothesis) == "" {
 		return errors.New("experiment must reference a hypothesis")
 	}
 	if len(e.Instruments) == 0 {

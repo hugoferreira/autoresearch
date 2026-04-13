@@ -60,7 +60,7 @@ func (v *hypothesisListView) applyFilter() {
 	v.cursor = clampCursor(v.cursor, len(v.filtered))
 }
 
-var hypStatusFilters = []string{"", "open", "supported", "refuted", "inconclusive", "killed"}
+var hypStatusFilters = []string{"", "open", "unreviewed", "supported", "refuted", "inconclusive", "killed"}
 
 func (v *hypothesisListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 	switch msg := msg.(type) {
