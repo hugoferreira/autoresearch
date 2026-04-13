@@ -92,9 +92,13 @@ func (v *experimentListView) view(width, height int) string {
 		len(v.filtered), filterLabel(v.statusFilter)))
 	rows := make([]string, len(v.filtered))
 	for i, e := range v.filtered {
-		rows[i] = fmt.Sprintf("%-8s  %s  hyp=%-8s  inst=%s",
+		hypLabel := "hyp=" + e.Hypothesis
+		if e.IsBaseline {
+			hypLabel = tuiCyan.Render("[baseline]")
+		}
+		rows[i] = fmt.Sprintf("%-8s  %s  %-14s  inst=%s",
 			e.ID, padRight(tuiExpStatusBadge(e.Status), 12),
-			e.Hypothesis, strings.Join(e.Instruments, ","))
+			hypLabel, strings.Join(e.Instruments, ","))
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
 }
@@ -173,8 +177,12 @@ func (v *experimentDetailView) view(width, height int) string {
 	lines = append(lines, "")
 
 	// Aligned key/value table — keys right-padded to the longest key.
+	hypValue := e.Hypothesis
+	if e.IsBaseline {
+		hypValue = "(baseline — no hypothesis)"
+	}
 	kv := [][2]string{
-		{"hypothesis", e.Hypothesis},
+		{"hypothesis", hypValue},
 		{"author", e.Author},
 	}
 	if e.Worktree != "" {

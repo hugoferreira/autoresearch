@@ -276,7 +276,11 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 	h := v.h
 	lines := []string{}
 	links := []hypDetailLink{}
-	lines = append(lines, tuiBold.Render(h.ID)+"  "+tuiStatusGlyph(h.Status)+"  "+h.Status)
+	statusLine := tuiBold.Render(h.ID) + "  " + tuiStatusGlyph(h.Status) + "  " + h.Status
+	if h.Status == entity.StatusUnreviewed {
+		statusLine += "  " + tuiDim.Render("(awaiting gate review)")
+	}
+	lines = append(lines, statusLine)
 	lines = append(lines, tuiDim.Render("author=")+h.Author+"  "+tuiDim.Render("parent=")+emptyDash(h.Parent))
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render("Claim:"))
