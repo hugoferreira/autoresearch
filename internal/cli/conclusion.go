@@ -102,6 +102,13 @@ func conclusionShowCmd() *cobra.Command {
 			w.Textf("  delta_frac: %+.4f  95%% CI [%+.4f, %+.4f]\n", c.Effect.DeltaFrac, c.Effect.CILowFrac, c.Effect.CIHighFrac)
 			w.Textf("  delta_abs:  %+.6g  95%% CI [%+.6g, %+.6g]\n", c.Effect.DeltaAbs, c.Effect.CILowAbs, c.Effect.CIHighAbs)
 			w.Textf("  p-value:    %.4g  (%s)\n", c.Effect.PValue, c.StatTest)
+			if c.IncrementalExp != "" && c.IncrementalEffect != nil {
+				ie := c.IncrementalEffect
+				w.Textf("incremental:  %s  (vs frontier best)\n", c.IncrementalExp)
+				w.Textf("  delta_frac: %+.4f  95%% CI [%+.4f, %+.4f]\n", ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac)
+				w.Textf("  delta_abs:  %+.6g  95%% CI [%+.6g, %+.6g]\n", ie.DeltaAbs, ie.CILowAbs, ie.CIHighAbs)
+				w.Textf("  p-value:    %.4g\n", ie.PValue)
+			}
 			w.Textf("author:       %s\n", c.Author)
 			if c.ReviewedBy != "" {
 				w.Textf("reviewed_by:  %s\n", c.ReviewedBy)

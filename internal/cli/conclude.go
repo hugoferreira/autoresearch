@@ -86,7 +86,9 @@ downgraded since there is no comparator).`,
 				candObs = append(candObs, o)
 			}
 
-			// Resolve baseline experiment.
+			// Resolve absolute baseline: prefer --baseline-experiment flag,
+			// then the candidate's recorded baseline, then the goal's
+			// IsBaseline experiment.
 			if baselineExp == "" {
 				candExpRec, err := s.ReadExperiment(candExp)
 				if err != nil {
@@ -94,6 +96,19 @@ downgraded since there is no comparator).`,
 				}
 				if candExpRec.Baseline.Experiment != "" {
 					baselineExp = candExpRec.Baseline.Experiment
+				}
+			}
+			if baselineExp == "" {
+				// Fall back to goal's baseline experiment.
+				exps, err := s.ListExperiments()
+				if err != nil {
+					return err
+				}
+				for _, e := range exps {
+					if e.IsBaseline {
+						baselineExp = e.ID
+						break
+					}
 				}
 			}
 
@@ -113,7 +128,36 @@ downgraded since there is no comparator).`,
 				}
 			}
 
-			// Compute comparison when a baseline exists.
+			// Resolve incremental baseline: the frontier best experiment.
+			var incrementalExp string
+			var incrObs []*entity.Observation
+			cfg, err := s.Config()
+			if err != nil {
+				return err
+			}
+			goal, err := s.ActiveGoal()
+			if err == nil {
+				concls, _ := s.ListConclusions()
+				frontierRows, _ := computeFrontier(s, goal, concls)
+				if len(frontierRows) > 0 {
+					best := frontierRows[0].Candidate
+					// Only compute incremental if it differs from the absolute baseline.
+					if best != baselineExp && best != candExp {
+						incrementalExp = best
+						all, err := s.ListObservationsForExperiment(best)
+						if err == nil {
+							for _, o := range all {
+								if o.Instrument == hyp.Predicts.Instrument {
+									incrObs = append(incrObs, o)
+								}
+							}
+						}
+					}
+				}
+			}
+			_ = cfg // used for future extensions
+
+			// Compute comparison against absolute baseline.
 			cSamples := flattenSamples(candObs)
 			bSamples := flattenSamples(baseObs)
 			var cmp *stats.Comparison
@@ -122,25 +166,21 @@ downgraded since there is no comparator).`,
 				cmp = &v
 			}
 
-			// Apply strict firewall.
+			// Compute comparison against incremental baseline (frontier best).
+			var incrCmp *stats.Comparison
+			if len(incrObs) > 0 {
+				incrSamples := flattenSamples(incrObs)
+				if len(incrSamples) > 0 {
+					v := stats.CompareSamples(cSamples, incrSamples, iters, 0)
+					incrCmp = &v
+				}
+			}
+
+			// Apply strict firewall (always against absolute baseline).
 			decision := firewall.CheckStrictVerdict(verdict, hyp, cmp)
 
 			// Build conclusion record.
-			effect := entity.Effect{
-				Instrument: hyp.Predicts.Instrument,
-				NCandidate: len(cSamples),
-				NBaseline:  len(bSamples),
-			}
-			if cmp != nil {
-				effect.DeltaAbs = cmp.DeltaAbs
-				effect.DeltaFrac = cmp.DeltaFrac
-				effect.CILowAbs = cmp.CILowAbs
-				effect.CIHighAbs = cmp.CIHighAbs
-				effect.CILowFrac = cmp.CILowFrac
-				effect.CIHighFrac = cmp.CIHighFrac
-				effect.PValue = cmp.PValue
-				effect.CIMethod = cmp.CIMethod
-			}
+			effect := buildEffect(hyp.Predicts.Instrument, cSamples, bSamples, cmp)
 
 			strictRec := entity.Strict{
 				Passed:  decision.Passed,
@@ -151,18 +191,23 @@ downgraded since there is no comparator).`,
 			}
 
 			concl := &entity.Conclusion{
-				Hypothesis:   hypID,
-				Verdict:      decision.FinalVerdict,
-				Observations: obsList,
-				CandidateExp: candExp,
-				BaselineExp:  baselineExp,
-				Effect:       effect,
-				StatTest:     "mann_whitney_u",
-				Strict:       strictRec,
-				Author:       or(author, "agent:analyst"),
-				ReviewedBy:   reviewedBy,
-				CreatedAt:    nowUTC(),
-				Body:         interpretationBody(interpretation, verdict, decision),
+				Hypothesis:     hypID,
+				Verdict:        decision.FinalVerdict,
+				Observations:   obsList,
+				CandidateExp:   candExp,
+				BaselineExp:    baselineExp,
+				Effect:         effect,
+				IncrementalExp: incrementalExp,
+				StatTest:       "mann_whitney_u",
+				Strict:         strictRec,
+				Author:         or(author, "agent:analyst"),
+				ReviewedBy:     reviewedBy,
+				CreatedAt:      nowUTC(),
+				Body:           interpretationBody(interpretation, verdict, decision),
+			}
+			if incrCmp != nil {
+				incrEffect := buildEffect(hyp.Predicts.Instrument, cSamples, flattenSamples(incrObs), incrCmp)
+				concl.IncrementalEffect = &incrEffect
 			}
 
 			if err := dryRun(w, fmt.Sprintf("%sconclude %s with verdict=%s", downgradeLabel(decision), hypID, decision.FinalVerdict), map[string]any{"conclusion": concl}); err != nil {
@@ -226,6 +271,12 @@ downgraded since there is no comparator).`,
 				"ci_low_frac":  effect.CILowFrac,
 				"ci_high_frac": effect.CIHighFrac,
 			}
+			if incrementalExp != "" {
+				eventData["incremental_experiment"] = incrementalExp
+				if concl.IncrementalEffect != nil {
+					eventData["incremental_delta_frac"] = concl.IncrementalEffect.DeltaFrac
+				}
+			}
 			kind := "conclusion.write"
 			if decision.Downgraded {
 				kind = "conclusion.downgrade"
@@ -257,8 +308,13 @@ downgraded since there is no comparator).`,
 				w.Textf("  baseline:    %s  (n=%d)\n", baselineExp, effect.NBaseline)
 			}
 			if cmp != nil {
-				w.Textf("  delta_frac:  %+.4f  95%% CI [%+.4f, %+.4f]\n", effect.DeltaFrac, effect.CILowFrac, effect.CIHighFrac)
+				w.Textf("  delta_frac:  %+.4f  95%% CI [%+.4f, %+.4f]  (vs absolute baseline)\n", effect.DeltaFrac, effect.CILowFrac, effect.CIHighFrac)
 				w.Textf("  p-value:     %.4g  (%s)\n", effect.PValue, concl.StatTest)
+			}
+			if concl.IncrementalEffect != nil {
+				ie := concl.IncrementalEffect
+				w.Textf("  incremental: %s  delta_frac=%+.4f  CI [%+.4f, %+.4f]  (vs frontier best)\n",
+					incrementalExp, ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac)
 			}
 			if len(decision.Reasons) > 0 && !decision.Downgraded {
 				w.Textln("  notes:")
@@ -305,4 +361,24 @@ func downgradeLabel(d firewall.VerdictDecision) string {
 		return "(downgraded) "
 	}
 	return ""
+}
+
+// buildEffect constructs an Effect from samples and an optional comparison.
+func buildEffect(instrument string, candSamples, baseSamples []float64, cmp *stats.Comparison) entity.Effect {
+	e := entity.Effect{
+		Instrument: instrument,
+		NCandidate: len(candSamples),
+		NBaseline:  len(baseSamples),
+	}
+	if cmp != nil {
+		e.DeltaAbs = cmp.DeltaAbs
+		e.DeltaFrac = cmp.DeltaFrac
+		e.CILowAbs = cmp.CILowAbs
+		e.CIHighAbs = cmp.CIHighAbs
+		e.CILowFrac = cmp.CILowFrac
+		e.CIHighFrac = cmp.CIHighFrac
+		e.PValue = cmp.PValue
+		e.CIMethod = cmp.CIMethod
+	}
+	return e
 }

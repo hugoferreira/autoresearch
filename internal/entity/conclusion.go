@@ -21,12 +21,19 @@ type Conclusion struct {
 	CandidateExp string    `yaml:"candidate_experiment,omitempty" json:"candidate_experiment,omitempty"`
 	BaselineExp  string    `yaml:"baseline_experiment,omitempty"  json:"baseline_experiment,omitempty"`
 	Effect       Effect    `yaml:"effect"                        json:"effect"`
-	StatTest     string    `yaml:"stat_test"                     json:"stat_test"`
-	Strict       Strict    `yaml:"strict_check"                  json:"strict_check"`
-	Author       string    `yaml:"author"                        json:"author"`
-	ReviewedBy   string    `yaml:"reviewed_by,omitempty"         json:"reviewed_by,omitempty"`
-	CreatedAt    time.Time `yaml:"created_at"                    json:"created_at"`
-	Body         string    `yaml:"-"                             json:"body,omitempty"`
+	// IncrementalExp is the frontier-best experiment at the time this
+	// conclusion was written. Together with IncrementalEffect it answers
+	// "how much did this improve over the current best?" as opposed to
+	// the absolute baseline which answers "how much did this improve
+	// over the original unoptimized code?"
+	IncrementalExp    string  `yaml:"incremental_experiment,omitempty" json:"incremental_experiment,omitempty"`
+	IncrementalEffect *Effect `yaml:"incremental_effect,omitempty"     json:"incremental_effect,omitempty"`
+	StatTest          string  `yaml:"stat_test"                     json:"stat_test"`
+	Strict            Strict  `yaml:"strict_check"                  json:"strict_check"`
+	Author            string  `yaml:"author"                        json:"author"`
+	ReviewedBy        string  `yaml:"reviewed_by,omitempty"         json:"reviewed_by,omitempty"`
+	CreatedAt         time.Time `yaml:"created_at"                    json:"created_at"`
+	Body              string    `yaml:"-"                             json:"body,omitempty"`
 }
 
 type Effect struct {
