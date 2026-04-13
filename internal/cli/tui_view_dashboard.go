@@ -379,16 +379,23 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 	innerW := width - 4
 	var lines []string
 	for _, l := range snap.RecentLessons {
+		superseded := l.Status == entity.LessonStatusSuperseded
 		// Predicted effect arrow (compact indicator before claim)
 		indicator := " "
-		if l.PredictedEffect != nil {
+		if l.PredictedEffect != nil && !superseded {
 			indicator = predictedEffectArrow(l.PredictedEffect)
 		}
 		// At-a-glance: ID, arrow indicator, claim. Everything else is in the detail pane.
 		claimW := max(innerW-11, 20)
-		line := fmt.Sprintf("%s %s %s",
-			tuiCyan.Render(l.ID), indicator, truncate(l.Claim, claimW))
-		lines = append(lines, line)
+		if superseded {
+			line := tuiDim.Render(fmt.Sprintf("%s %s %s",
+				l.ID, "×", truncate(l.Claim, claimW)))
+			lines = append(lines, line)
+		} else {
+			line := fmt.Sprintf("%s %s %s",
+				tuiCyan.Render(l.ID), indicator, truncate(l.Claim, claimW))
+			lines = append(lines, line)
+		}
 	}
 	lines = truncLines(lines, innerW)
 	cursor := clampCursor(v.cursors[dashFocusLessons], len(lines))

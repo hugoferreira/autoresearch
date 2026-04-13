@@ -300,19 +300,22 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	var lessonCount int
 	if lessons, err := s.ListLessons(); err == nil {
 		lessonCount = len(lessons)
-		active := make([]*entity.Lesson, 0, len(lessons))
+		// Split into active (shown first) and superseded (appended dimmed).
+		var active, superseded []*entity.Lesson
 		for _, l := range lessons {
-			if l.Status != entity.LessonStatusSuperseded {
+			if l.Status == entity.LessonStatusSuperseded {
+				superseded = append(superseded, l)
+			} else {
 				active = append(active, l)
 			}
 		}
 		sort.SliceStable(active, func(i, j int) bool {
 			return active[i].CreatedAt.After(active[j].CreatedAt)
 		})
-		if len(active) > 5 {
-			active = active[:5]
-		}
-		snap.RecentLessons = active
+		sort.SliceStable(superseded, func(i, j int) bool {
+			return superseded[i].CreatedAt.After(superseded[j].CreatedAt)
+		})
+		snap.RecentLessons = append(active, superseded...)
 	}
 
 	// Derive counts from already-loaded data instead of calling Counts()
