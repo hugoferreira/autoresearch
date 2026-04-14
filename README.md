@@ -234,6 +234,12 @@ autoresearch goal new   --from G-0001 --trigger C-0012 \
                         --constraint-max 'size_flash=131072'
 ```
 
+The active goal defines the optimization target set. New hypotheses may predict
+either the objective instrument or one of the explicit constraint instruments.
+Other registered instruments are still useful as supporting measurements on
+experiments, but they are not standalone optimization targets unless the goal
+names them.
+
 ## Goal format
 
 Goals are markdown with YAML frontmatter, stored as `.research/goals/G-NNNN.md`:

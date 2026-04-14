@@ -535,6 +535,60 @@ func CheckParentReviewed(parent *entity.Hypothesis) error {
 	return nil
 }
 
+func CheckHypothesisInstrumentWithinGoal(goal *entity.Goal, h *entity.Hypothesis) error {
+	if goal == nil {
+		return errors.New("cannot validate hypothesis instrument without an active goal")
+	}
+	if h == nil {
+		return errors.New("cannot validate a nil hypothesis")
+	}
+
+	predicted := strings.TrimSpace(h.Predicts.Instrument)
+	if predicted == "" {
+		return nil
+	}
+
+	allowed := allowedHypothesisInstruments(goal)
+	for _, inst := range allowed {
+		if inst == predicted {
+			return nil
+		}
+	}
+
+	allowedText := strings.Join(allowed, ", ")
+	if allowedText == "" {
+		allowedText = "(none)"
+	}
+	return fmt.Errorf("hypothesis predicts instrument %q, but the active goal only authorizes hypothesis instruments on %s; supporting instruments may still be observed on experiments, but new hypotheses must target the goal objective or an explicit constraint instrument. Start a new goal if you want to optimize %q instead",
+		predicted, allowedText, predicted)
+}
+
+func allowedHypothesisInstruments(goal *entity.Goal) []string {
+	if goal == nil {
+		return nil
+	}
+
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(inst string) {
+		inst = strings.TrimSpace(inst)
+		if inst == "" {
+			return
+		}
+		if _, ok := seen[inst]; ok {
+			return
+		}
+		seen[inst] = struct{}{}
+		out = append(out, inst)
+	}
+
+	add(goal.Objective.Instrument)
+	for _, c := range goal.Constraints {
+		add(c.Instrument)
+	}
+	return out
+}
+
 func ValidateHypothesis(h *entity.Hypothesis, cfg *store.Config) error {
 	if strings.TrimSpace(h.Claim) == "" {
 		return errors.New("hypothesis claim is required")
