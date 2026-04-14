@@ -27,6 +27,10 @@ by at least one matching observation in its candidate experiment. For v1
 we only filter on require-constraints; max/min are reported but not yet
 used to disqualify.
 
+` + "`goal_assessment`" + ` is stricter than the row filter: it only reports
+threshold satisfaction when a reviewed, supported conclusion reaches the
+goal threshold and its candidate satisfies every goal constraint.
+
 Orchestrators read ` + "`frontier --json`" + `'s ` + "`stalled_for`" + ` field against the
 configured ` + "`budgets.frontier_stall_k`" + ` to decide when to stop the loop.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -248,7 +252,7 @@ func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obsByExp ma
 	if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
 		return 0, false
 	}
-	return candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument), true
+	return candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
 }
 
 func betterFrontierValue(direction string, candidate, incumbent float64) bool {
@@ -275,14 +279,20 @@ func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 		RecommendedAction: "continue",
 	}
 
-	requireByInst := frontierRequireConstraints(goal)
 	var bestReviewed frontierCandidate
 	hasReviewed := false
 	for _, c := range concls {
 		if c == nil || c.ReviewedBy == "" {
 			continue
 		}
-		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
+			continue
+		}
+		obs := obsByExp[c.CandidateExp]
+		if !goalConstraintsSatisfied(obs, goal.Constraints) {
+			continue
+		}
+		val, ok := candidateObjectiveValue(obs, goal.Objective.Instrument)
 		if !ok {
 			continue
 		}
@@ -366,11 +376,48 @@ func requireSatisfied(obs []*entity.Observation, req map[string]string) bool {
 	return true
 }
 
-func candidateObjectiveValue(obs []*entity.Observation, instrument string) float64 {
-	for _, o := range obs {
-		if o.Instrument == instrument {
-			return o.Value
+func goalConstraintsSatisfied(obs []*entity.Observation, constraints []entity.Constraint) bool {
+	for _, c := range constraints {
+		if !goalConstraintSatisfied(obs, c) {
+			return false
 		}
 	}
-	return 0
+	return true
+}
+
+func goalConstraintSatisfied(obs []*entity.Observation, c entity.Constraint) bool {
+	for _, o := range obs {
+		if o.Instrument != c.Instrument {
+			continue
+		}
+		switch {
+		case c.Max != nil:
+			if o.Value <= *c.Max {
+				return true
+			}
+		case c.Min != nil:
+			if o.Value >= *c.Min {
+				return true
+			}
+		case c.Require != "":
+			switch c.Require {
+			case "pass":
+				if o.Pass != nil && *o.Pass {
+					return true
+				}
+			default:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func candidateObjectiveValue(obs []*entity.Observation, instrument string) (float64, bool) {
+	for _, o := range obs {
+		if o.Instrument == instrument {
+			return o.Value, true
+		}
+	}
+	return 0, false
 }

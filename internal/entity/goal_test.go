@@ -55,7 +55,7 @@ func TestGoalRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGoalRejectsDeprecatedTargetEffect(t *testing.T) {
+func TestGoalAcceptsLegacyTargetEffect(t *testing.T) {
 	data := []byte(`---
 objective:
   instrument: qemu_cycles
@@ -71,8 +71,36 @@ constraints:
 
 focus on the hot inner loop
 `)
-	if _, err := entity.ParseGoal(data); err == nil || err.Error() == "" {
-		t.Fatal("expected deprecated target_effect to be rejected")
+	back, err := entity.ParseGoal(data)
+	if err != nil {
+		t.Fatalf("ParseGoal failed: %v", err)
+	}
+	if back.Completion == nil || back.Completion.Threshold != 0.15 || back.Completion.OnThreshold != entity.GoalOnThresholdAskHuman {
+		t.Fatalf("legacy target_effect should map to ask_human completion, got %+v", back.Completion)
+	}
+}
+
+func TestGoalRejectsLegacyTargetEffectAlongsideCompletion(t *testing.T) {
+	data := []byte(`---
+objective:
+  instrument: qemu_cycles
+  target: dsp_fir_bench
+  direction: decrease
+  target_effect: 0.15
+completion:
+  threshold: 0.2
+  on_threshold: stop
+constraints:
+  - instrument: size_flash
+    max: 65536
+---
+
+# Steering
+
+focus on the hot inner loop
+`)
+	if _, err := entity.ParseGoal(data); err == nil {
+		t.Fatal("expected mixed legacy and new completion fields to be rejected")
 	}
 }
 

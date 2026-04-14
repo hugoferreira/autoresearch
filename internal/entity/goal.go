@@ -85,7 +85,13 @@ func ParseGoal(data []byte) (*Goal, error) {
 		return nil, fmt.Errorf("parse goal yaml: %w", err)
 	}
 	if raw.Objective.DeprecatedTargetEffect != nil {
-		return nil, fmt.Errorf("goal objective.target_effect has been removed; use completion.threshold and completion.on_threshold instead")
+		if raw.Completion != nil {
+			return nil, fmt.Errorf("goal mixes deprecated objective.target_effect with completion; use completion.threshold and completion.on_threshold only")
+		}
+		raw.Completion = &Completion{
+			Threshold:   *raw.Objective.DeprecatedTargetEffect,
+			OnThreshold: GoalOnThresholdAskHuman,
+		}
 	}
 	if raw.Completion != nil && raw.Completion.Threshold > 0 && raw.Completion.OnThreshold == "" {
 		raw.Completion.OnThreshold = GoalOnThresholdAskHuman

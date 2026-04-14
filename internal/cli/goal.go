@@ -81,7 +81,7 @@ func addGoalBodyFlags(c *cobra.Command, f *goalFlags) {
 func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
 	fileMode := f.file != ""
 	flagMode := f.objInstrument != "" || f.objDirection != "" ||
-		f.successThreshold > 0 || f.onSuccess != "" ||
+		f.successThreshold != 0 || f.onSuccess != "" ||
 		len(f.constraintMax) > 0 || len(f.constraintMin) > 0 || len(f.constraintReq) > 0
 	if fileMode && flagMode {
 		return nil, errors.New("--file and goal-construction flags are mutually exclusive")
@@ -414,14 +414,17 @@ func buildGoalFromFlags(
 	maxSpecs, minSpecs, reqSpecs []string,
 	steering string,
 ) (*entity.Goal, error) {
+	if successThreshold < 0 {
+		return nil, errors.New("--success-threshold must be >= 0")
+	}
+	if successThreshold == 0 && strings.TrimSpace(onSuccess) != "" {
+		return nil, errors.New("--on-success requires --success-threshold")
+	}
 	if strings.TrimSpace(instrument) == "" {
 		return nil, errors.New("--objective-instrument is required in flag mode")
 	}
 	if direction != "increase" && direction != "decrease" {
 		return nil, fmt.Errorf("--objective-direction must be 'increase' or 'decrease', got %q", direction)
-	}
-	if successThreshold <= 0 && strings.TrimSpace(onSuccess) != "" {
-		return nil, errors.New("--on-success requires --success-threshold")
 	}
 	g := &entity.Goal{
 		SchemaVersion: entity.GoalSchemaVersion,

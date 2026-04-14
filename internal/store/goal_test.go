@@ -137,21 +137,22 @@ func TestOpenMigratesLegacyGoal(t *testing.T) {
 	// Fake v1 shape: drop a legacy goal.md, downgrade schema_version to 1,
 	// write a hypothesis without goal_id, and remove the goals/ dir so the
 	// migration has room to reconstruct it.
-	flash := 65536.0
-	legacy := &entity.Goal{
-		SchemaVersion: 1,
-		Objective: entity.Objective{
-			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
-		},
-		Constraints: []entity.Constraint{
-			{Instrument: "size_flash", Max: &flash},
-		},
-		Body: "# Steering\n\nstart with unrolling\n",
-	}
-	legacyData, err := legacy.Marshal()
-	if err != nil {
-		t.Fatal(err)
-	}
+	legacyData := []byte(`---
+schema_version: 1
+objective:
+  instrument: qemu_cycles
+  target: dsp_fir
+  direction: decrease
+  target_effect: 0.15
+constraints:
+  - instrument: size_flash
+    max: 65536
+---
+
+# Steering
+
+start with unrolling
+`)
 	if err := os.WriteFile(filepath.Join(dir, ".research", "goal.md"), legacyData, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +220,9 @@ func TestOpenMigratesLegacyGoal(t *testing.T) {
 	}
 	if g.Objective.Instrument != "qemu_cycles" {
 		t.Errorf("migrated goal objective lost: %+v", g.Objective)
+	}
+	if g.Completion == nil || g.Completion.Threshold != 0.15 || g.Completion.OnThreshold != entity.GoalOnThresholdAskHuman {
+		t.Errorf("migrated goal should preserve legacy target_effect as completion, got %+v", g.Completion)
 	}
 
 	hBack, err := s2.ReadHypothesis(hID)
