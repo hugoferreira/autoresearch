@@ -228,6 +228,63 @@ func TestValidateHypothesis_Happy(t *testing.T) {
 	}
 }
 
+func TestCheckHypothesisInstrumentWithinGoal(t *testing.T) {
+	max := 65536.0
+	goal := &entity.Goal{
+		ID: "G-0001",
+		Objective: entity.Objective{
+			Instrument: "timing",
+			Direction:  "decrease",
+		},
+		Constraints: []entity.Constraint{
+			{Instrument: "binary_size", Max: &max},
+			{Instrument: "test", Require: "pass"},
+			{Instrument: "compile", Require: "pass"},
+		},
+	}
+
+	newHypothesis := func(inst string) *entity.Hypothesis {
+		return &entity.Hypothesis{
+			Claim: "x",
+			Predicts: entity.Predicts{
+				Instrument: inst,
+				Target:     "firmware",
+				Direction:  "decrease",
+				MinEffect:  0.1,
+			},
+			KillIf: []string{"fails"},
+		}
+	}
+
+	t.Run("objective instrument allowed", func(t *testing.T) {
+		if err := firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("timing")); err != nil {
+			t.Fatalf("objective instrument should pass, got %v", err)
+		}
+	})
+
+	t.Run("constraint instrument allowed", func(t *testing.T) {
+		if err := firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("binary_size")); err != nil {
+			t.Fatalf("constraint instrument should pass, got %v", err)
+		}
+	})
+
+	t.Run("non-goal instrument rejected", func(t *testing.T) {
+		err := firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("qemu_cycles"))
+		if err == nil {
+			t.Fatal("expected non-goal instrument to be rejected")
+		}
+		for _, want := range []string{
+			"qemu_cycles",
+			"timing, binary_size, test, compile",
+			"supporting instruments may still be observed on experiments",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q missing %q", err, want)
+			}
+		}
+	})
+}
+
 func TestValidateLesson(t *testing.T) {
 	t.Run("happy hypothesis-scope", func(t *testing.T) {
 		l := &entity.Lesson{

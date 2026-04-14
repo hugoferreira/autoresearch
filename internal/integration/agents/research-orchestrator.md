@@ -92,7 +92,11 @@ Choose whether to:
 When proposing, each hypothesis MUST be:
 
 - **Falsifiable** — a specific numerical threshold, not "I think X helps."
-- **Instrument-backed** — `predicts.instrument` must exist in the registry.
+- **Instrument-backed** — `predicts.instrument` must exist in the registry and
+  must be the active goal's objective instrument or one of its explicit
+  constraint instruments. Supporting instruments may still be measured on the
+  experiment; they are not standalone optimization targets unless the goal
+  names them.
 - **Well-scoped** — one mechanism per hypothesis. "Unroll the loop AND use
   SIMD" is two hypotheses, not one.
 - **Non-duplicative** — check the tree for similar open or previously

@@ -234,6 +234,12 @@ the firewall sees.
     autoresearch frontier                                  # best-first, stalled_for, goal_assessment
     autoresearch report             <hyp-id>               # markdown writeup
 
+The active goal defines the optimization problem. ` + "`predicts.instrument`" + ` must
+be either the goal objective instrument or one of the explicit goal-constraint
+instruments. Extra instruments are still fine on ` + "`experiment design`" + ` /
+` + "`observe`" + ` for supporting evidence, but they are not new optimization targets
+unless the goal names them.
+
 ### Experiments
     autoresearch experiment baseline   [--baseline HEAD]                       # one-shot: design+implement+observe for a baseline
     autoresearch experiment design     <hyp-id> --instruments a,b,c --baseline HEAD
@@ -344,8 +350,9 @@ The CLI refuses structurally sloppy entries. You cannot work around these —
 fix the input instead.
 
 - ` + "`hypothesis add`" + `: requires claim, predicts.{instrument,target,direction,
-  min_effect}, and at least one ` + "`--kill-if`" + ` clause. Missing any is exit 1.
-  ` + "`--inspired-by`" + ` lessons whose subject chain still depends on an
+  min_effect}, and at least one ` + "`--kill-if`" + ` clause. ` + "`predicts.instrument`" + `
+  must stay within the active goal's objective/constraint instruments. Missing
+  any is exit 1. ` + "`--inspired-by`" + ` lessons whose subject chain still depends on an
   ` + "`unreviewed`" + ` decisive conclusion are rejected — review first.
 - ` + "`goal set`" + `: rejects goals whose ` + "`objective.instrument`" + ` is not in the
   registered instruments, including goals with no instrument at all (feature

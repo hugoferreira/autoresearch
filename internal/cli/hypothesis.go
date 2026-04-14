@@ -70,6 +70,10 @@ func hypothesisAddCmd() *cobra.Command {
 			if err := firewall.RequireActiveGoal(st); err != nil {
 				return err
 			}
+			goal, err := s.ActiveGoal()
+			if err != nil {
+				return err
+			}
 
 			if parent != "" {
 				ph, err := s.ReadHypothesis(parent)
@@ -116,6 +120,9 @@ func hypothesisAddCmd() *cobra.Command {
 			if err := firewall.ValidateHypothesis(h, cfg); err != nil {
 				return err
 			}
+			if err := firewall.CheckHypothesisInstrumentWithinGoal(goal, h); err != nil {
+				return err
+			}
 
 			if err := dryRun(w, fmt.Sprintf("add hypothesis (claim=%q)", claim), map[string]any{"hypothesis": h}); err != nil {
 				return err
@@ -147,7 +154,7 @@ func hypothesisAddCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&claim, "claim", "", "falsifiable claim (required)")
 	c.Flags().StringVar(&parent, "parent", "", "parent hypothesis id (optional)")
-	c.Flags().StringVar(&predInstrument, "predicts-instrument", "", "instrument that will measure the predicted effect (required)")
+	c.Flags().StringVar(&predInstrument, "predicts-instrument", "", "instrument that will measure the predicted effect (required; must be the active goal objective or a goal-constraint instrument)")
 	c.Flags().StringVar(&predTarget, "predicts-target", "", "target measured by the instrument (required)")
 	c.Flags().StringVar(&predDirection, "predicts-direction", "", "predicted direction: increase | decrease (required)")
 	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum fractional effect required to call it supported (required)")
