@@ -31,22 +31,27 @@ Read in this order, every time. Do not skip steps — the notebook layer is
 load-bearing.
 
 1. `@.claude/autoresearch.md` — the full CLI and firewall reference.
-2. `autoresearch goal show` — the objective, constraints, steering.
-3. `autoresearch lesson list --status active --json` — the cumulative
+2. `autoresearch status --json` — if `main_checkout_dirty` is true, stop.
+   Research assumes the target project's main checkout stays read-only
+   except for autoresearch-managed setup files. Do not patch
+   bootstrap/harness/instrument-definition files there mid-run; surface
+   them as explicit maintenance instead.
+3. `autoresearch goal show` — the objective, constraints, steering.
+4. `autoresearch lesson list --status active --json` — the cumulative
    notebook. If a lesson rules out a class of intervention, do not
    propose that class without new evidence. If a lesson recommends a
    direction, lean into it.
-4. `autoresearch lesson accuracy --json` — if lessons have predicted
+5. `autoresearch lesson accuracy --json` — if lessons have predicted
    effects, check whether predictions are consistently overshooting.
    If so, the current direction may be hitting diminishing returns.
-5. `autoresearch tree --json` — every existing hypothesis. Do not
+6. `autoresearch tree --json` — every existing hypothesis. Do not
    duplicate open work.
-6. `autoresearch frontier --json` — the current best (if any), the
+7. `autoresearch frontier --json` — the current best (if any), the
    `stalled_for` counter, and `goal_assessment`. If the threshold is met
    and the recommended action is `ask_human` or `stop`, do not start
    another cycle. If `stalled_for` is climbing, diversify.
-7. `autoresearch instrument list --json` — what you can measure.
-8. Enough of the codebase (via Read / Grep / Glob) to understand what's
+8. `autoresearch instrument list --json` — what you can measure.
+9. Enough of the codebase (via Read / Grep / Glob) to understand what's
    being optimized. Focus on `goal.objective.target`.
 
 Do not spend early turns rediscovering routine syntax with a burst of
@@ -201,7 +206,11 @@ Spawn Agent:
 
     Make the MINIMAL change that tests the hypothesis. One mechanism,
     one focused change. Do not refactor, clean up, or add unrelated
-    improvements.
+    improvements. Edit only inside that worktree. Do not patch the
+    target project's main checkout, bootstrap scripts, or instrument
+    definitions there. If the hypothesis depends on fixing harness
+    setup outside the worktree, stop and report that explicit
+    maintenance is required.
 
     After editing:
     1. Build: <build command from config>
@@ -407,6 +416,11 @@ if none exists.
 - **Spend budget for its own sake.** `max-experiments` is a ceiling, not
   a target. Leaving budget unused is correct when no high-value next
   experiment remains or review is pending.
+- **Patch the target project's main checkout during research.** Outside
+  autoresearch-managed setup files, experiment and harness changes
+  belong in experiment worktrees. If `status --json` reports
+  `main_checkout_dirty_paths`, stop and yield so the main session can
+  decide whether to do explicit maintenance.
 - **Propose feature-delivery hypotheses.** If the goal reads like
   "implement X" rather than "make X faster / smaller / more accurate",
   stop and tell the main session.

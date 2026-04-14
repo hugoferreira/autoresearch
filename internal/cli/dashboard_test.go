@@ -84,14 +84,15 @@ func TestCaptureDashboard_InFlightExcludesReferencedBaselines(t *testing.T) {
 func baseSnapshot() *dashboardSnapshot {
 	now := time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC)
 	return &dashboardSnapshot{
-		Project:      "/tmp/fir",
-		Mode:         "strict",
-		Counts:       map[string]int{"hypotheses": 0, "experiments": 0, "observations": 0, "conclusions": 0},
-		Tree:         []*treeNode{},
-		Frontier:     []frontierRow{},
-		InFlight:     []dashboardInFlight{},
-		RecentEvents: []store.Event{},
-		CapturedAt:   now,
+		Project:                "/tmp/fir",
+		Mode:                   "strict",
+		MainCheckoutDirtyPaths: []string{},
+		Counts:                 map[string]int{"hypotheses": 0, "experiments": 0, "observations": 0, "conclusions": 0},
+		Tree:                   []*treeNode{},
+		Frontier:               []frontierRow{},
+		InFlight:               []dashboardInFlight{},
+		RecentEvents:           []store.Event{},
+		CapturedAt:             now,
 	}
 }
 
@@ -211,6 +212,28 @@ func TestRenderDashboard_Paused(t *testing.T) {
 
 	if !strings.Contains(out, "[PAUSED: human review of E-0005]") {
 		t.Errorf("paused header missing:\n%s", out)
+	}
+}
+
+func TestRenderDashboard_MainCheckoutDirty(t *testing.T) {
+	snap := baseSnapshot()
+	snap.MainCheckoutDirty = true
+	snap.MainCheckoutDirtyPaths = []string{"bootstrap.sh", "scripts/measure.sh"}
+
+	var buf bytes.Buffer
+	renderDashboard(&buf, snap, 120, "snapshot", nil)
+	out := buf.String()
+
+	for _, want := range []string{
+		"Main checkout",
+		"WARNING: dirty outside autoresearch-managed files",
+		"research should keep experiment edits in worktrees",
+		"bootstrap.sh",
+		"scripts/measure.sh",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dirty-checkout dashboard missing %q:\n%s", want, out)
+		}
 	}
 }
 

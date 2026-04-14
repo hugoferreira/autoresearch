@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/bytter/autoresearch/internal/worktree"
@@ -74,5 +75,26 @@ func TestAddAndRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		t.Errorf("worktree should be gone: %v", err)
+	}
+}
+
+func TestDirtyPaths(t *testing.T) {
+	dir := gitInit(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\nupdated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("draft\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := worktree.DirtyPaths(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"README.md", "notes.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DirtyPaths() = %v, want %v", got, want)
 	}
 }

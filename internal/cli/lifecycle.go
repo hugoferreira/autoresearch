@@ -415,16 +415,22 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			mainCheckout, err := captureMainCheckoutState(s.Root())
+			if err != nil {
+				return err
+			}
 
 			payload := map[string]any{
-				"root":            s.Root(),
-				"dir":             s.DirPath(),
-				"mode":            cfg.Mode,
-				"paused":          st.Paused,
-				"pause_reason":    st.PauseReason,
-				"current_goal_id": st.CurrentGoalID,
-				"counts":          counts,
-				"last_event_at":   st.LastEventAt,
+				"root":                      s.Root(),
+				"dir":                       s.DirPath(),
+				"mode":                      cfg.Mode,
+				"paused":                    st.Paused,
+				"pause_reason":              st.PauseReason,
+				"current_goal_id":           st.CurrentGoalID,
+				"counts":                    counts,
+				"last_event_at":             st.LastEventAt,
+				"main_checkout_dirty":       mainCheckout.Dirty,
+				"main_checkout_dirty_paths": mainCheckout.Paths,
 			}
 
 			// Stale experiment detection.
@@ -506,6 +512,11 @@ func statusCmd() *cobra.Command {
 			w.Textf("root:           %s\n", s.Root())
 			w.Textf("dir:            %s\n", s.DirPath())
 			w.Textf("mode:           %s\n", cfg.Mode)
+			if mainCheckout.Dirty {
+				w.Textf("main checkout:  DIRTY (%d path(s) outside autoresearch-managed files)\n", len(mainCheckout.Paths))
+			} else {
+				w.Textln("main checkout:  clean")
+			}
 			if st.CurrentGoalID != "" {
 				w.Textf("active goal:    %s\n", st.CurrentGoalID)
 			} else {
@@ -543,6 +554,13 @@ func statusCmd() *cobra.Command {
 				w.Textf("unobserved goal instruments (should have observations but don't yet):\n")
 				for _, inst := range unobservedInstruments {
 					w.Textf("  %s\n", inst)
+				}
+			}
+			if mainCheckout.Dirty {
+				w.Textln("")
+				w.Textln("main checkout dirty paths (research should keep experiment edits in worktrees):")
+				for _, path := range mainCheckout.Paths {
+					w.Textf("  %s\n", path)
 				}
 			}
 			return nil

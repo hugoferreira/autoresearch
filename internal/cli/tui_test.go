@@ -22,8 +22,9 @@ func tuiRichSnapshot() *dashboardSnapshot {
 	flash := 65536.0
 	impAt := now.Add(-2 * time.Minute)
 	snap := &dashboardSnapshot{
-		Project: "/tmp/fir",
-		Mode:    "strict",
+		Project:                "/tmp/fir",
+		Mode:                   "strict",
+		MainCheckoutDirtyPaths: []string{},
 		Goal: &entity.Goal{
 			Objective: entity.Objective{
 				Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
@@ -425,9 +426,33 @@ func TestTUI_StatusView(t *testing.T) {
 	v := newStatusView()
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
 	out := stripANSI(nv.view(100, 30))
-	for _, want := range []string{"State:", "active", "Mode:", "strict", "Budget:", "5/20 experiments", "Counts:"} {
+	for _, want := range []string{"State:", "active", "Mode:", "strict", "Main checkout:", "clean", "Budget:", "5/20 experiments", "Counts:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_DashboardAndStatusShowDirtyMainCheckout(t *testing.T) {
+	snap := tuiRichSnapshot()
+	snap.MainCheckoutDirty = true
+	snap.MainCheckoutDirtyPaths = []string{"bootstrap.sh"}
+
+	dash := newDashboardView()
+	nv, _ := dash.update(dashLoadedMsg{snap: snap}, nil)
+	out := stripANSI(nv.view(140, 40))
+	for _, want := range []string{"Main checkout dirty:", "bootstrap.sh"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dashboard dirty warning missing %q:\n%s", want, out)
+		}
+	}
+
+	status := newStatusView()
+	nv, _ = status.update(dashLoadedMsg{snap: snap}, nil)
+	out = stripANSI(nv.view(100, 30))
+	for _, want := range []string{"Main checkout:", "dirty outside autoresearch-managed files", "bootstrap.sh"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status dirty warning missing %q:\n%s", want, out)
 		}
 	}
 }
