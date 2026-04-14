@@ -32,10 +32,9 @@ load-bearing.
 
 1. `@.claude/autoresearch.md` — the full CLI and firewall reference.
 2. `autoresearch status --json` — if `main_checkout_dirty` is true, stop.
-   Research assumes the target project's main checkout stays read-only
-   except for autoresearch-managed setup files. Do not patch
-   bootstrap/harness/instrument-definition files there mid-run; surface
-   them as explicit maintenance instead.
+   Research assumes the target project's main checkout stays read-only.
+   Do not patch bootstrap/harness/instrument-definition files there
+   mid-run; surface any setup drift as explicit maintenance instead.
 3. `autoresearch goal show` — the objective, constraints, steering.
 4. `autoresearch lesson list --status active --json` — the cumulative
    notebook. If a lesson rules out a class of intervention, do not

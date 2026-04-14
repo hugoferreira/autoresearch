@@ -36,7 +36,7 @@ func TestSharedDocs_MainCheckoutIsolationContract(t *testing.T) {
 			"main checkout",
 			"main_checkout_dirty",
 			"main_checkout_dirty_paths",
-			"experiment and harness changes belong in experiment worktrees",
+			"harness changes belong in experiment",
 		} {
 			if !strings.Contains(doc, needle) {
 				t.Fatalf("%s doc missing main-checkout isolation guidance %q", name, needle)
