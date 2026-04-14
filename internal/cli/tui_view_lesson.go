@@ -33,12 +33,23 @@ func (v *lessonListView) title() string { return "Lessons" }
 func (v *lessonListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		list, err := s.ListLessons()
+		if err == nil {
+			views := make([]*entity.Lesson, 0, len(list))
+			for _, l := range list {
+				view, viewErr := annotateLessonForRead(s, l)
+				if viewErr != nil {
+					return lessonListLoadedMsg{err: viewErr}
+				}
+				views = append(views, view)
+			}
+			list = views
+		}
 		return lessonListLoadedMsg{list: list, err: err}
 	}
 }
 
 var lessonScopeFilters = []string{"", entity.LessonScopeHypothesis, entity.LessonScopeSystem}
-var lessonStatusFilters = []string{"", entity.LessonStatusActive, entity.LessonStatusSuperseded}
+var lessonStatusFilters = []string{"", entity.LessonStatusActive, entity.LessonStatusProvisional, entity.LessonStatusInvalidated, entity.LessonStatusSuperseded}
 
 func (v *lessonListView) applyFilter() {
 	v.filtered = v.filtered[:0]
@@ -112,13 +123,18 @@ func (v *lessonListView) view(width, height int) string {
 		if l.PredictedEffect != nil {
 			pred = padRight(formatPredictedEffectCompact(l.PredictedEffect), 5)
 		}
-		rows[i] = fmt.Sprintf("%-8s %-11s %-11s %s from=%-18s %s",
+		source := "-"
+		if l.Provenance != nil && l.Provenance.SourceChain != "" {
+			source = l.Provenance.SourceChain
+		}
+		rows[i] = fmt.Sprintf("%-8s %-11s %-12s %-20s %s from=%-18s %s",
 			l.ID,
 			padRight(tuiLessonScopeBadge(l.Scope), 11),
-			padRight(tuiLessonStatusBadge(l.Status), 11),
+			padRight(tuiLessonStatusBadge(l.Status), 12),
+			padRight(source, 20),
 			pred,
 			truncate(subj, 18),
-			truncate(l.Claim, width-66),
+			truncate(l.Claim, max(width-87, 10)),
 		)
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
@@ -150,6 +166,9 @@ func (v *lessonDetailView) init(s *store.Store) tea.Cmd {
 	id := v.id
 	return func() tea.Msg {
 		l, err := s.ReadLesson(id)
+		if err == nil {
+			l, err = annotateLessonForRead(s, l)
+		}
 		return lessonDetailLoadedMsg{l: l, err: err}
 	}
 }
@@ -190,6 +209,9 @@ func (v *lessonDetailView) ensureRendered(width int) string {
 	lines := []string{}
 	lines = append(lines, tuiBold.Render(l.ID)+"  "+tuiLessonScopeBadge(l.Scope)+"  "+tuiLessonStatusBadge(l.Status))
 	lines = append(lines, tuiDim.Render("author=")+l.Author)
+	if l.Provenance != nil && l.Provenance.SourceChain != "" {
+		lines = append(lines, tuiDim.Render("source_chain=")+l.Provenance.SourceChain)
+	}
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render("Claim:"))
 	lines = append(lines, wrap(l.Claim, max(width-2, 1)))
@@ -255,6 +277,10 @@ func tuiLessonStatusBadge(status string) string {
 	switch status {
 	case entity.LessonStatusActive:
 		return tuiGreen.Render("active")
+	case entity.LessonStatusProvisional:
+		return tuiYellow.Render("provisional")
+	case entity.LessonStatusInvalidated:
+		return tuiRed.Render("invalidated")
 	case entity.LessonStatusSuperseded:
 		return tuiDim.Render("superseded")
 	default:

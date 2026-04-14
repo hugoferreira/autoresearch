@@ -68,7 +68,8 @@ use. If you cannot state it in one sentence, it probably isn't a lesson yet.
 Scope is inferred from --from when not set explicitly: if --from has any
 subjects, the lesson defaults to scope=hypothesis; otherwise it defaults
 to scope=system (an incidental finding about the target codebase or the
-research apparatus itself).`,
+research apparatus itself). Explicit --scope system cannot be combined
+with --from.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			if strings.TrimSpace(claim) == "" {
@@ -93,7 +94,6 @@ research apparatus itself).`,
 				Scope:     scope,
 				Subjects:  subjects,
 				Tags:      tags,
-				Status:    entity.LessonStatusActive,
 				Author:    or(author, "agent:analyst"),
 				CreatedAt: nowUTC(),
 			}
@@ -123,6 +123,9 @@ research apparatus itself).`,
 					return fmt.Errorf("subject %s does not exist", sub)
 				}
 			}
+			if err := initializeLessonState(s, l); err != nil {
+				return err
+			}
 
 			if err := dryRun(w, fmt.Sprintf("add lesson (claim=%q, scope=%s)", claim, scope), map[string]any{"lesson": l}); err != nil {
 				return err
@@ -138,10 +141,12 @@ research apparatus itself).`,
 			}
 			resolvedAuthor := or(author, "agent:analyst")
 			eventData := map[string]any{
-				"claim":    truncate(claim, 200),
-				"scope":    scope,
-				"subjects": subjects,
-				"author":   resolvedAuthor,
+				"claim":        truncate(claim, 200),
+				"scope":        scope,
+				"status":       l.Status,
+				"source_chain": l.EffectiveSourceChain(),
+				"subjects":     subjects,
+				"author":       resolvedAuthor,
 			}
 			if len(tags) > 0 {
 				eventData["tags"] = tags
@@ -156,7 +161,7 @@ research apparatus itself).`,
 		},
 	}
 	c.Flags().StringVar(&claim, "claim", "", "one-sentence lesson claim (required)")
-	c.Flags().StringVar(&scope, "scope", "", "hypothesis | system (default: inferred from --from)")
+	c.Flags().StringVar(&scope, "scope", "", "hypothesis | system (default: inferred from --from; system requires no --from)")
 	c.Flags().StringSliceVar(&subjects, "from", nil, "H-/E-/C- ids this lesson was extracted from; may be repeated or comma-separated")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&body, "body", "", "prose expansion of the claim — required for agents. Expected structure: `## Evidence`, `## Mechanism`, `## Scope and counterexamples`, `## For the next generator`. See the research-orchestrator subagent brief for a worked example. A lesson without a body is a one-liner the next generator cannot act on.")
@@ -190,19 +195,23 @@ func lessonListCmd() *cobra.Command {
 			}
 			var filtered []*entity.Lesson
 			for _, l := range all {
-				if scope != "" && l.Scope != scope {
+				view, err := annotateLessonForRead(s, l)
+				if err != nil {
+					return err
+				}
+				if scope != "" && view.Scope != scope {
 					continue
 				}
-				if status != "" && l.Status != status {
+				if status != "" && view.Status != status {
 					continue
 				}
-				if subject != "" && !slices.Contains(l.Subjects, subject) {
+				if subject != "" && !slices.Contains(view.Subjects, subject) {
 					continue
 				}
-				if tag != "" && !slices.Contains(l.Tags, tag) {
+				if tag != "" && !slices.Contains(view.Tags, tag) {
 					continue
 				}
-				filtered = append(filtered, l)
+				filtered = append(filtered, view)
 			}
 			if w.IsJSON() {
 				return w.JSON(filtered)
@@ -216,14 +225,18 @@ func lessonListCmd() *cobra.Command {
 				if len(l.Subjects) > 0 {
 					subj = strings.Join(l.Subjects, ",")
 				}
-				w.Textf("  %-8s  %-11s  %-10s  from=%-20s  %s\n",
-					l.ID, l.Scope, l.Status, subj, truncate(l.Claim, 60))
+				source := "-"
+				if l.Provenance != nil && l.Provenance.SourceChain != "" {
+					source = l.Provenance.SourceChain
+				}
+				w.Textf("  %-8s  %-11s  %-11s  %-20s  from=%-20s  %s\n",
+					l.ID, l.Scope, l.Status, source, subj, truncate(l.Claim, 60))
 			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&scope, "scope", "", "filter by scope (hypothesis | system)")
-	c.Flags().StringVar(&status, "status", "", "filter by status (active | superseded)")
+	c.Flags().StringVar(&status, "status", "", "filter by status (active | provisional | invalidated | superseded)")
 	c.Flags().StringVar(&subject, "subject", "", "filter by subject id (returns lessons citing this id)")
 	c.Flags().StringVar(&tag, "tag", "", "filter by tag")
 	return c
@@ -244,12 +257,19 @@ func lessonShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			l, err = annotateLessonForRead(s, l)
+			if err != nil {
+				return err
+			}
 			if w.IsJSON() {
 				return w.JSON(l)
 			}
 			w.Textf("id:          %s\n", l.ID)
 			w.Textf("scope:       %s\n", l.Scope)
 			w.Textf("status:      %s\n", l.Status)
+			if l.Provenance != nil && l.Provenance.SourceChain != "" {
+				w.Textf("source_chain:%s\n", " "+l.Provenance.SourceChain)
+			}
 			w.Textf("claim:       %s\n", l.Claim)
 			if len(l.Subjects) > 0 {
 				w.Textf("from:        %s\n", strings.Join(l.Subjects, ", "))
@@ -316,8 +336,12 @@ first-class record that can itself be superseded later.`,
 			if err != nil {
 				return err
 			}
-			if oldLesson.Status != entity.LessonStatusActive {
-				return fmt.Errorf("%s is %q; only active lessons can be superseded", oldID, oldLesson.Status)
+			oldView, err := annotateLessonForRead(s, oldLesson)
+			if err != nil {
+				return err
+			}
+			if oldView.Status != entity.LessonStatusActive && oldView.Status != entity.LessonStatusProvisional {
+				return fmt.Errorf("%s is %q; only active or provisional lessons can be superseded", oldID, oldView.Status)
 			}
 			newLesson, err := s.ReadLesson(by)
 			if err != nil {
@@ -428,7 +452,7 @@ may be exhausted.`,
 			var totalHit, totalOver, totalUnder int
 
 			for _, l := range lessons {
-				if l.Status != entity.LessonStatusActive || l.PredictedEffect == nil {
+				if !lessonIsSteering(s, l) || l.PredictedEffect == nil {
 					continue
 				}
 				pe := l.PredictedEffect

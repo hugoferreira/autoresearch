@@ -448,11 +448,12 @@ example.
   (supported, or cleanly refuted with a mechanism). If you cannot
   state a one-sentence reusable claim, the verdict was not decisive —
   mark it inconclusive instead.
-- Lessons whose subjects resolve to an ` + "`unreviewed`" + ` decisive chain are
-  **provisional**. They may exist in the notebook, but they MUST NOT be
-  cited via ` + "`--inspired-by`" + ` or treated as a reviewed-parent surrogate
-  until the gate reviewer accepts or downgrades the underlying
-  conclusion.
+- Lessons whose subjects do not resolve to a currently ` + "`reviewed_decisive`" + `
+  chain are not citable. Unreviewed decisive chains are
+  **provisional**; if gate review later downgrades the chain, the lesson
+  becomes **invalidated** and drops out of ` + "`lesson list --status active`" + `.
+  They MUST NOT be cited via ` + "`--inspired-by`" + ` or treated as a
+  reviewed-parent surrogate until the chain is reviewed-decisive again.
 - The **gate reviewer** MAY call ` + "`lesson add`" + ` on downgrade, but only for
   cross-cutting patterns. One-off reasons stay in
   ` + "`conclusion.strict_check.reasons`" + `.

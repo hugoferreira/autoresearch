@@ -368,12 +368,14 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 	title := tuiPanelTitle.Render("Lessons")
 	snap := v.snap
 	if len(snap.RecentLessons) == 0 {
-		return boxPanel(title, tuiDim.Render("(no active lessons)"), width, height, active)
+		return boxPanel(title, tuiDim.Render("(no lessons)"), width, height, active)
 	}
 	innerW := width - 4
 	var lines []string
 	for _, l := range snap.RecentLessons {
 		superseded := l.Status == entity.LessonStatusSuperseded
+		invalidated := l.Status == entity.LessonStatusInvalidated
+		provisional := l.Status == entity.LessonStatusProvisional
 		// Predicted effect arrow (compact indicator before claim)
 		indicator := " "
 		if l.PredictedEffect != nil && !superseded {
@@ -381,11 +383,20 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 		}
 		// At-a-glance: ID, arrow indicator, claim. Everything else is in the detail pane.
 		claimW := max(innerW-11, 20)
-		if superseded {
+		switch {
+		case superseded:
 			line := tuiDim.Render(fmt.Sprintf("%s %s %s",
 				l.ID, "×", truncate(l.Claim, claimW)))
 			lines = append(lines, line)
-		} else {
+		case invalidated:
+			line := tuiRed.Render(fmt.Sprintf("%s ! %s",
+				l.ID, truncate(l.Claim, claimW)))
+			lines = append(lines, line)
+		case provisional:
+			line := tuiYellow.Render(fmt.Sprintf("%s ? %s",
+				l.ID, truncate(l.Claim, claimW)))
+			lines = append(lines, line)
+		default:
 			line := fmt.Sprintf("%s %s %s",
 				tuiCyan.Render(l.ID), indicator, truncate(l.Claim, claimW))
 			lines = append(lines, line)

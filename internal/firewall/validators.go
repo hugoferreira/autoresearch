@@ -335,6 +335,9 @@ func ValidateLesson(l *entity.Lesson) error {
 	if l.Scope == entity.LessonScopeHypothesis && len(l.Subjects) == 0 {
 		return errors.New("lesson with scope=hypothesis requires at least one subject (--from H-NNNN,C-NNNN,...)")
 	}
+	if l.Scope == entity.LessonScopeSystem && len(l.Subjects) > 0 {
+		return errors.New("lesson with scope=system cannot cite --from subjects; omit --scope to infer hypothesis, or drop --from for a free-floating system note")
+	}
 	for i, sub := range l.Subjects {
 		if !isValidSubjectID(sub) {
 			return fmt.Errorf("subject[%d] %q must be an H-/E-/C- id", i, sub)
@@ -344,10 +347,33 @@ func ValidateLesson(l *entity.Lesson) error {
 		return fmt.Errorf("supersedes target %q must be an L- id", l.SupersedesID)
 	}
 	switch l.Status {
-	case "", entity.LessonStatusActive, entity.LessonStatusSuperseded:
+	case "",
+		entity.LessonStatusActive,
+		entity.LessonStatusProvisional,
+		entity.LessonStatusInvalidated,
+		entity.LessonStatusSuperseded:
 	default:
-		return fmt.Errorf("lesson status must be %q or %q, got %q",
-			entity.LessonStatusActive, entity.LessonStatusSuperseded, l.Status)
+		return fmt.Errorf("lesson status must be %q, %q, %q, or %q, got %q",
+			entity.LessonStatusActive,
+			entity.LessonStatusProvisional,
+			entity.LessonStatusInvalidated,
+			entity.LessonStatusSuperseded,
+			l.Status)
+	}
+	if l.Provenance != nil && l.Provenance.SourceChain != "" {
+		switch l.Provenance.SourceChain {
+		case entity.LessonSourceSystem,
+			entity.LessonSourceReviewedDecisive,
+			entity.LessonSourceUnreviewedDecisive,
+			entity.LessonSourceInconclusive:
+		default:
+			return fmt.Errorf("lesson provenance.source_chain must be %q, %q, %q, or %q, got %q",
+				entity.LessonSourceSystem,
+				entity.LessonSourceReviewedDecisive,
+				entity.LessonSourceUnreviewedDecisive,
+				entity.LessonSourceInconclusive,
+				l.Provenance.SourceChain)
+		}
 	}
 	if l.PredictedEffect != nil {
 		if err := ValidatePredictedEffect(l.PredictedEffect, l.Scope); err != nil {
@@ -369,6 +395,101 @@ type inspiredByReviewReader interface {
 	ReadConclusion(id string) (*entity.Conclusion, error)
 }
 
+func AssessLessonSourceChain(r inspiredByReviewReader, lesson *entity.Lesson) (string, error) {
+	if lesson == nil {
+		return "", errors.New("cannot assess source chain for a nil lesson")
+	}
+	if len(lesson.Subjects) == 0 {
+		if lesson.Scope == entity.LessonScopeSystem {
+			return entity.LessonSourceSystem, nil
+		}
+		return entity.LessonSourceInconclusive, nil
+	}
+	if r == nil {
+		return "", errors.New("cannot assess lesson source chain without a store reader")
+	}
+
+	source := entity.LessonSourceReviewedDecisive
+	for _, subject := range lesson.Subjects {
+		subjectSource, err := assessLessonSubjectSourceChain(r, lesson, subject)
+		if err != nil {
+			return "", err
+		}
+		if lessonSourceChainRank(subjectSource) > lessonSourceChainRank(source) {
+			source = subjectSource
+		}
+	}
+	return source, nil
+}
+
+func lessonSourceChainRank(source string) int {
+	switch source {
+	case entity.LessonSourceInconclusive:
+		return 3
+	case entity.LessonSourceUnreviewedDecisive:
+		return 2
+	case entity.LessonSourceReviewedDecisive:
+		return 1
+	case entity.LessonSourceSystem:
+		return 0
+	default:
+		return 0
+	}
+}
+
+func assessLessonSubjectSourceChain(r inspiredByReviewReader, lesson *entity.Lesson, subject string) (string, error) {
+	switch {
+	case strings.HasPrefix(subject, "H-"):
+		h, err := r.ReadHypothesis(subject)
+		if err != nil {
+			return "", fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+		}
+		return sourceChainForHypothesisStatus(h.Status), nil
+	case strings.HasPrefix(subject, "E-"):
+		e, err := r.ReadExperiment(subject)
+		if err != nil {
+			return "", fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+		}
+		if strings.TrimSpace(e.Hypothesis) == "" {
+			return entity.LessonSourceInconclusive, nil
+		}
+		h, err := r.ReadHypothesis(e.Hypothesis)
+		if err != nil {
+			return "", fmt.Errorf("lesson %s subject %s hypothesis %s: %w", lesson.ID, subject, e.Hypothesis, err)
+		}
+		return sourceChainForHypothesisStatus(h.Status), nil
+	case strings.HasPrefix(subject, "C-"):
+		c, err := r.ReadConclusion(subject)
+		if err != nil {
+			return "", fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+		}
+		if c.Verdict != entity.VerdictSupported && c.Verdict != entity.VerdictRefuted {
+			return entity.LessonSourceInconclusive, nil
+		}
+		if strings.TrimSpace(c.ReviewedBy) != "" {
+			return entity.LessonSourceReviewedDecisive, nil
+		}
+		h, err := r.ReadHypothesis(c.Hypothesis)
+		if err != nil {
+			return "", fmt.Errorf("lesson %s subject %s hypothesis %s: %w", lesson.ID, subject, c.Hypothesis, err)
+		}
+		return sourceChainForHypothesisStatus(h.Status), nil
+	default:
+		return entity.LessonSourceInconclusive, nil
+	}
+}
+
+func sourceChainForHypothesisStatus(status string) string {
+	switch status {
+	case entity.StatusSupported, entity.StatusRefuted:
+		return entity.LessonSourceReviewedDecisive
+	case entity.StatusUnreviewed:
+		return entity.LessonSourceUnreviewedDecisive
+	default:
+		return entity.LessonSourceInconclusive
+	}
+}
+
 // CheckInspiredByLessonsReviewed blocks lessons whose supporting chain still
 // depends on an unreviewed decisive conclusion. This closes the loophole where
 // an orchestrator cites a lesson from an unreviewed chain via --inspired-by
@@ -384,54 +505,20 @@ func CheckInspiredByLessonsReviewed(r inspiredByReviewReader, lessons []*entity.
 		if lesson == nil {
 			continue
 		}
-		for _, subject := range lesson.Subjects {
-			if err := checkInspiredBySubjectReviewed(r, lesson, subject); err != nil {
-				return err
-			}
+		if lesson.EffectiveStatus() != entity.LessonStatusActive {
+			return fmt.Errorf("lesson %s is %s — only active lessons may be used in --inspired-by", lesson.ID, lesson.EffectiveStatus())
 		}
-	}
-	return nil
-}
-
-func checkInspiredBySubjectReviewed(r inspiredByReviewReader, lesson *entity.Lesson, subject string) error {
-	switch {
-	case strings.HasPrefix(subject, "H-"):
-		h, err := r.ReadHypothesis(subject)
+		source, err := AssessLessonSourceChain(r, lesson)
 		if err != nil {
-			return fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+			return err
 		}
-		if h.Status == entity.StatusUnreviewed {
-			return fmt.Errorf("lesson %s cites hypothesis %s, which is still unreviewed — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID, h.ID)
-		}
-	case strings.HasPrefix(subject, "E-"):
-		e, err := r.ReadExperiment(subject)
-		if err != nil {
-			return fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
-		}
-		if strings.TrimSpace(e.Hypothesis) == "" {
-			return nil
-		}
-		h, err := r.ReadHypothesis(e.Hypothesis)
-		if err != nil {
-			return fmt.Errorf("lesson %s subject %s hypothesis %s: %w", lesson.ID, subject, e.Hypothesis, err)
-		}
-		if h.Status == entity.StatusUnreviewed {
-			return fmt.Errorf("lesson %s cites experiment %s under unreviewed hypothesis %s — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID, e.ID, h.ID)
-		}
-	case strings.HasPrefix(subject, "C-"):
-		c, err := r.ReadConclusion(subject)
-		if err != nil {
-			return fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
-		}
-		if c.Verdict != entity.VerdictSupported && c.Verdict != entity.VerdictRefuted {
-			return nil
-		}
-		h, err := r.ReadHypothesis(c.Hypothesis)
-		if err != nil {
-			return fmt.Errorf("lesson %s subject %s hypothesis %s: %w", lesson.ID, subject, c.Hypothesis, err)
-		}
-		if h.Status == entity.StatusUnreviewed {
-			return fmt.Errorf("lesson %s cites decisive conclusion %s for unreviewed hypothesis %s — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID, c.ID, h.ID)
+		switch source {
+		case entity.LessonSourceSystem, entity.LessonSourceReviewedDecisive:
+			continue
+		case entity.LessonSourceUnreviewedDecisive:
+			return fmt.Errorf("lesson %s resolves to an unreviewed decisive chain — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID)
+		default:
+			return fmt.Errorf("lesson %s resolves to a non-decisive chain (%s) — only reviewed decisive lessons may be used in --inspired-by", lesson.ID, source)
 		}
 	}
 	return nil

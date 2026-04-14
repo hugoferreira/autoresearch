@@ -20,6 +20,7 @@ import (
 //   - "system" — free-floating incidental findings about the target codebase
 //     or the research apparatus itself. Example: "the test harness caches
 //     stale fixtures across runs; always make clean before observing."
+//
 // PredictedEffect records what effect the lesson author expects from
 // future work in the same direction. When a subsequent hypothesis
 // concludes, the predicted vs actual delta can be compared to detect
@@ -31,26 +32,38 @@ type PredictedEffect struct {
 	MaxEffect  float64 `yaml:"max_effect,omitempty"    json:"max_effect,omitempty"`
 }
 
+type LessonProvenance struct {
+	SourceChain string `yaml:"source_chain,omitempty" json:"source_chain,omitempty"`
+}
+
 type Lesson struct {
-	ID              string           `yaml:"id"                          json:"id"`
-	Claim           string           `yaml:"claim"                       json:"claim"`
-	Scope           string           `yaml:"scope"                       json:"scope"`
-	Subjects        []string         `yaml:"subjects,omitempty"          json:"subjects,omitempty"`
-	Tags            []string         `yaml:"tags,omitempty"              json:"tags,omitempty"`
-	PredictedEffect *PredictedEffect `yaml:"predicted_effect,omitempty"  json:"predicted_effect,omitempty"`
-	Status          string           `yaml:"status"                      json:"status"`
-	SupersedesID    string           `yaml:"supersedes,omitempty"        json:"supersedes,omitempty"`
-	SupersededByID  string           `yaml:"superseded_by,omitempty"     json:"superseded_by,omitempty"`
-	Author          string           `yaml:"author"                      json:"author"`
-	CreatedAt       time.Time        `yaml:"created_at"                  json:"created_at"`
-	Body            string           `yaml:"-"                           json:"body,omitempty"`
+	ID              string            `yaml:"id"                          json:"id"`
+	Claim           string            `yaml:"claim"                       json:"claim"`
+	Scope           string            `yaml:"scope"                       json:"scope"`
+	Subjects        []string          `yaml:"subjects,omitempty"          json:"subjects,omitempty"`
+	Tags            []string          `yaml:"tags,omitempty"              json:"tags,omitempty"`
+	PredictedEffect *PredictedEffect  `yaml:"predicted_effect,omitempty"  json:"predicted_effect,omitempty"`
+	Status          string            `yaml:"status"                      json:"status"`
+	Provenance      *LessonProvenance `yaml:"provenance,omitempty"        json:"provenance,omitempty"`
+	SupersedesID    string            `yaml:"supersedes,omitempty"        json:"supersedes,omitempty"`
+	SupersededByID  string            `yaml:"superseded_by,omitempty"     json:"superseded_by,omitempty"`
+	Author          string            `yaml:"author"                      json:"author"`
+	CreatedAt       time.Time         `yaml:"created_at"                  json:"created_at"`
+	Body            string            `yaml:"-"                           json:"body,omitempty"`
 }
 
 const (
-	LessonScopeHypothesis  = "hypothesis"
-	LessonScopeSystem      = "system"
-	LessonStatusActive     = "active"
-	LessonStatusSuperseded = "superseded"
+	LessonScopeHypothesis   = "hypothesis"
+	LessonScopeSystem       = "system"
+	LessonStatusActive      = "active"
+	LessonStatusProvisional = "provisional"
+	LessonStatusInvalidated = "invalidated"
+	LessonStatusSuperseded  = "superseded"
+
+	LessonSourceSystem             = "system"
+	LessonSourceReviewedDecisive   = "reviewed_decisive"
+	LessonSourceUnreviewedDecisive = "unreviewed_decisive"
+	LessonSourceInconclusive       = "inconclusive"
 )
 
 func ParseLesson(data []byte) (*Lesson, error) {
@@ -78,4 +91,24 @@ func (l *Lesson) Marshal() ([]byte, error) {
 			"`.claude/agents/research-orchestrator.md`._\n"
 	}
 	return WriteFrontmatter(l, body)
+}
+
+func (l *Lesson) EffectiveStatus() string {
+	if l == nil || l.Status == "" {
+		return LessonStatusActive
+	}
+	return l.Status
+}
+
+func (l *Lesson) EffectiveSourceChain() string {
+	if l == nil {
+		return ""
+	}
+	if l.Provenance != nil && l.Provenance.SourceChain != "" {
+		return l.Provenance.SourceChain
+	}
+	if l.Scope == LessonScopeSystem {
+		return LessonSourceSystem
+	}
+	return ""
 }

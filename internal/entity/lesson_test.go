@@ -11,15 +11,16 @@ import (
 
 func TestLessonRoundTrip(t *testing.T) {
 	l := &entity.Lesson{
-		ID:        "L-0002",
-		Claim:     "Loop unrolling past 8× shows no win on FIR_NTAPS=32 — cache line pressure dominates.",
-		Scope:     entity.LessonScopeHypothesis,
-		Subjects:  []string{"H-0003", "C-0003", "C-0005"},
-		Tags:      []string{"cache", "unroll"},
-		Status:    entity.LessonStatusActive,
-		Author:    "agent:analyst",
-		CreatedAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
-		Body:      "# Lesson\n\nObserved across three experiments; DeltaFrac plateaus at ~-0.07.\n",
+		ID:         "L-0002",
+		Claim:      "Loop unrolling past 8× shows no win on FIR_NTAPS=32 — cache line pressure dominates.",
+		Scope:      entity.LessonScopeHypothesis,
+		Subjects:   []string{"H-0003", "C-0003", "C-0005"},
+		Tags:       []string{"cache", "unroll"},
+		Status:     entity.LessonStatusProvisional,
+		Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceUnreviewedDecisive},
+		Author:     "agent:analyst",
+		CreatedAt:  time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		Body:       "# Lesson\n\nObserved across three experiments; DeltaFrac plateaus at ~-0.07.\n",
 	}
 	data, err := l.Marshal()
 	if err != nil {
@@ -37,6 +38,9 @@ func TestLessonRoundTrip(t *testing.T) {
 	}
 	if len(back.Subjects) != 3 {
 		t.Errorf("subjects: %+v", back.Subjects)
+	}
+	if back.Provenance == nil || back.Provenance.SourceChain != entity.LessonSourceUnreviewedDecisive {
+		t.Errorf("provenance round-trip mismatch: %+v", back.Provenance)
 	}
 	if back.Body != l.Body {
 		t.Errorf("body round-trip:\n want: %q\n  got: %q", l.Body, back.Body)
