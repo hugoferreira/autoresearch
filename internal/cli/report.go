@@ -58,7 +58,7 @@ type reportData struct {
 }
 
 type experimentBlock struct {
-	Experiment   *entity.Experiment   `json:"experiment"`
+	Experiment   *entity.Experiment    `json:"experiment"`
 	Observations []*entity.Observation `json:"observations"`
 }
 
@@ -107,8 +107,12 @@ func buildReport(s *store.Store, hyp *entity.Hypothesis) (*reportData, error) {
 			if seenLessons[l.ID] {
 				continue
 			}
+			view, err := annotateLessonForRead(s, l)
+			if err != nil {
+				return err
+			}
 			seenLessons[l.ID] = true
-			r.Lessons = append(r.Lessons, l)
+			r.Lessons = append(r.Lessons, view)
 		}
 		return nil
 	}
@@ -281,11 +285,11 @@ func renderReportMarkdown(r *reportData) string {
 	if len(r.Lessons) > 0 {
 		sb.WriteString("## Lessons tied to this hypothesis\n\n")
 		for _, l := range r.Lessons {
-			status := l.Status
-			if status == "" {
-				status = entity.LessonStatusActive
+			source := ""
+			if l.Provenance != nil && l.Provenance.SourceChain != "" {
+				source = ", " + l.Provenance.SourceChain
 			}
-			fmt.Fprintf(&sb, "- **%s** (%s, %s) — %s\n", l.ID, l.Scope, status, oneLine(l.Claim))
+			fmt.Fprintf(&sb, "- **%s** (%s, %s%s) — %s\n", l.ID, l.Scope, l.EffectiveStatus(), source, oneLine(l.Claim))
 			if l.SupersededByID != "" {
 				fmt.Fprintf(&sb, "  _superseded by %s_\n", l.SupersededByID)
 			}

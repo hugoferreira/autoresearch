@@ -124,9 +124,10 @@ effects — without it, accuracy tracking falls back to coarse instrument
 matching. Always pass the lesson IDs you consulted, even if the
 hypothesis contradicts them.
 
-If a lesson came from a decisive conclusion that is still
-`unreviewed`, it is provisional. Do not cite it in a new hypothesis
-until the gate reviewer has accepted or downgraded that chain.
+If a lesson came from a decisive conclusion whose source chain is not
+currently `reviewed_decisive`, it is not citable. Unreviewed lessons are
+`provisional`; downgraded lessons become `invalidated` and drop out of
+`lesson list --status active`. Do not cite them in a new hypothesis.
 
 **Strategy guidance:**
 

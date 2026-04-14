@@ -589,7 +589,7 @@ func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes 
 
 	if lessons, err := s.ListLessons(); err == nil {
 		for _, l := range lessons {
-			if l.Status == entity.LessonStatusSuperseded {
+			if !lessonIsSteering(s, l) {
 				continue
 			}
 			brief.Lessons = append(brief.Lessons, entity.BriefLesson{

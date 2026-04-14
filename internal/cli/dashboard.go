@@ -300,22 +300,31 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	var lessonCount int
 	if lessons, err := s.ListLessons(); err == nil {
 		lessonCount = len(lessons)
-		// Split into active (shown first) and superseded (appended dimmed).
-		var active, superseded []*entity.Lesson
-		for _, l := range lessons {
-			if l.Status == entity.LessonStatusSuperseded {
-				superseded = append(superseded, l)
-			} else {
-				active = append(active, l)
-			}
+		// Split by effective lifecycle so steering lessons surface first.
+		buckets := map[string][]*entity.Lesson{
+			entity.LessonStatusActive:      {},
+			entity.LessonStatusProvisional: {},
+			entity.LessonStatusInvalidated: {},
+			entity.LessonStatusSuperseded:  {},
 		}
-		sort.SliceStable(active, func(i, j int) bool {
-			return active[i].CreatedAt.After(active[j].CreatedAt)
-		})
-		sort.SliceStable(superseded, func(i, j int) bool {
-			return superseded[i].CreatedAt.After(superseded[j].CreatedAt)
-		})
-		snap.RecentLessons = append(active, superseded...)
+		for _, l := range lessons {
+			view, err := annotateLessonForRead(s, l)
+			if err != nil {
+				return nil, err
+			}
+			buckets[view.Status] = append(buckets[view.Status], view)
+		}
+		for _, key := range []string{
+			entity.LessonStatusActive,
+			entity.LessonStatusProvisional,
+			entity.LessonStatusInvalidated,
+			entity.LessonStatusSuperseded,
+		} {
+			sort.SliceStable(buckets[key], func(i, j int) bool {
+				return buckets[key][i].CreatedAt.After(buckets[key][j].CreatedAt)
+			})
+			snap.RecentLessons = append(snap.RecentLessons, buckets[key]...)
+		}
 	}
 
 	// Derive counts from already-loaded data instead of calling Counts()
@@ -645,12 +654,25 @@ func renderDashboardLessons(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		if len(l.Subjects) > 0 {
 			subj = " from=" + strings.Join(l.Subjects, ",")
 		}
+		status := ""
+		switch l.Status {
+		case entity.LessonStatusProvisional:
+			status = " [" + l.Status + "]"
+		case entity.LessonStatusInvalidated:
+			status = " [" + l.Status + "]"
+		case entity.LessonStatusSuperseded:
+			status = " [" + l.Status + "]"
+		}
+		source := ""
+		if l.Provenance != nil && l.Provenance.SourceChain != "" && l.Provenance.SourceChain != entity.LessonSourceSystem {
+			source = " {" + l.Provenance.SourceChain + "}"
+		}
 		pred := ""
 		if l.PredictedEffect != nil {
 			pred = " → predicts " + formatPredictedEffect(l.PredictedEffect)
 		}
-		fmt.Fprintf(w, "   %-8s  %s  %s%s%s\n",
-			a.cyan(l.ID), scopeCell, truncate(l.Claim, 60), a.dim(subj), a.yellow(pred))
+		fmt.Fprintf(w, "   %-8s  %s  %s%s%s%s%s\n",
+			a.cyan(l.ID), scopeCell, truncate(l.Claim, 60), a.dim(status), a.dim(source), a.dim(subj), a.yellow(pred))
 	}
 }
 

@@ -183,6 +183,22 @@ marked inconclusive.`,
 				hyp.Status = entity.VerdictInconclusive
 				_ = s.WriteHypothesis(hyp)
 			}
+			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnDowngrade)
+			if err != nil {
+				return err
+			}
+			for _, change := range lessonChanges {
+				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), or(reviewedBy, "agent:critic"), change.LessonID, map[string]any{
+					"from_status": change.FromStatus,
+					"to_status":   change.ToStatus,
+					"from_source": change.FromSource,
+					"to_source":   change.ToSource,
+					"hypothesis":  c.Hypothesis,
+					"conclusion":  c.ID,
+				}); err != nil {
+					return err
+				}
+			}
 			if err := emitEvent(s, "conclusion.critic_downgrade", "agent:critic", c.ID, map[string]any{
 				"from":        prev,
 				"reason":      reason,
@@ -270,6 +286,22 @@ conclusion cannot be shipped until it has been reviewed.`,
 			if err == nil && hyp.Status == entity.StatusUnreviewed {
 				hyp.Status = c.Verdict
 				_ = s.WriteHypothesis(hyp)
+			}
+			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnAccept)
+			if err != nil {
+				return err
+			}
+			for _, change := range lessonChanges {
+				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), reviewedBy, change.LessonID, map[string]any{
+					"from_status": change.FromStatus,
+					"to_status":   change.ToStatus,
+					"from_source": change.FromSource,
+					"to_source":   change.ToSource,
+					"hypothesis":  c.Hypothesis,
+					"conclusion":  c.ID,
+				}); err != nil {
+					return err
+				}
 			}
 
 			if err := emitEvent(s, "conclusion.accept", reviewedBy, c.ID, map[string]any{
@@ -364,6 +396,22 @@ verdict should stand.`,
 				hyp.Status = entity.StatusUnreviewed
 				_ = s.WriteHypothesis(hyp)
 			}
+			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnAppeal)
+			if err != nil {
+				return err
+			}
+			for _, change := range lessonChanges {
+				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), or(author, "agent:orchestrator"), change.LessonID, map[string]any{
+					"from_status": change.FromStatus,
+					"to_status":   change.ToStatus,
+					"from_source": change.FromSource,
+					"to_source":   change.ToSource,
+					"hypothesis":  c.Hypothesis,
+					"conclusion":  c.ID,
+				}); err != nil {
+					return err
+				}
+			}
 
 			if err := emitEvent(s, "conclusion.appeal", or(author, "agent:orchestrator"), c.ID, map[string]any{
 				"original_verdict": originalVerdict,
@@ -375,11 +423,11 @@ verdict should stand.`,
 			return w.Emit(
 				fmt.Sprintf("appealed %s: verdict restored to %s — dispatch the gate reviewer for re-review", c.ID, originalVerdict),
 				map[string]any{
-					"status":           "ok",
-					"id":               c.ID,
-					"verdict":          originalVerdict,
-					"hypothesis":       c.Hypothesis,
-					"awaiting_review":  true,
+					"status":          "ok",
+					"id":              c.ID,
+					"verdict":         originalVerdict,
+					"hypothesis":      c.Hypothesis,
+					"awaiting_review": true,
 				},
 			)
 		},

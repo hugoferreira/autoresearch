@@ -93,7 +93,6 @@ research apparatus itself).`,
 				Scope:     scope,
 				Subjects:  subjects,
 				Tags:      tags,
-				Status:    entity.LessonStatusActive,
 				Author:    or(author, "agent:analyst"),
 				CreatedAt: nowUTC(),
 			}
@@ -123,6 +122,9 @@ research apparatus itself).`,
 					return fmt.Errorf("subject %s does not exist", sub)
 				}
 			}
+			if err := initializeLessonState(s, l); err != nil {
+				return err
+			}
 
 			if err := dryRun(w, fmt.Sprintf("add lesson (claim=%q, scope=%s)", claim, scope), map[string]any{"lesson": l}); err != nil {
 				return err
@@ -138,10 +140,12 @@ research apparatus itself).`,
 			}
 			resolvedAuthor := or(author, "agent:analyst")
 			eventData := map[string]any{
-				"claim":    truncate(claim, 200),
-				"scope":    scope,
-				"subjects": subjects,
-				"author":   resolvedAuthor,
+				"claim":        truncate(claim, 200),
+				"scope":        scope,
+				"status":       l.Status,
+				"source_chain": l.EffectiveSourceChain(),
+				"subjects":     subjects,
+				"author":       resolvedAuthor,
 			}
 			if len(tags) > 0 {
 				eventData["tags"] = tags
@@ -190,19 +194,23 @@ func lessonListCmd() *cobra.Command {
 			}
 			var filtered []*entity.Lesson
 			for _, l := range all {
-				if scope != "" && l.Scope != scope {
+				view, err := annotateLessonForRead(s, l)
+				if err != nil {
+					return err
+				}
+				if scope != "" && view.Scope != scope {
 					continue
 				}
-				if status != "" && l.Status != status {
+				if status != "" && view.Status != status {
 					continue
 				}
-				if subject != "" && !slices.Contains(l.Subjects, subject) {
+				if subject != "" && !slices.Contains(view.Subjects, subject) {
 					continue
 				}
-				if tag != "" && !slices.Contains(l.Tags, tag) {
+				if tag != "" && !slices.Contains(view.Tags, tag) {
 					continue
 				}
-				filtered = append(filtered, l)
+				filtered = append(filtered, view)
 			}
 			if w.IsJSON() {
 				return w.JSON(filtered)
@@ -216,14 +224,18 @@ func lessonListCmd() *cobra.Command {
 				if len(l.Subjects) > 0 {
 					subj = strings.Join(l.Subjects, ",")
 				}
-				w.Textf("  %-8s  %-11s  %-10s  from=%-20s  %s\n",
-					l.ID, l.Scope, l.Status, subj, truncate(l.Claim, 60))
+				source := "-"
+				if l.Provenance != nil && l.Provenance.SourceChain != "" {
+					source = l.Provenance.SourceChain
+				}
+				w.Textf("  %-8s  %-11s  %-11s  %-20s  from=%-20s  %s\n",
+					l.ID, l.Scope, l.Status, source, subj, truncate(l.Claim, 60))
 			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&scope, "scope", "", "filter by scope (hypothesis | system)")
-	c.Flags().StringVar(&status, "status", "", "filter by status (active | superseded)")
+	c.Flags().StringVar(&status, "status", "", "filter by status (active | provisional | invalidated | superseded)")
 	c.Flags().StringVar(&subject, "subject", "", "filter by subject id (returns lessons citing this id)")
 	c.Flags().StringVar(&tag, "tag", "", "filter by tag")
 	return c
@@ -244,12 +256,19 @@ func lessonShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			l, err = annotateLessonForRead(s, l)
+			if err != nil {
+				return err
+			}
 			if w.IsJSON() {
 				return w.JSON(l)
 			}
 			w.Textf("id:          %s\n", l.ID)
 			w.Textf("scope:       %s\n", l.Scope)
 			w.Textf("status:      %s\n", l.Status)
+			if l.Provenance != nil && l.Provenance.SourceChain != "" {
+				w.Textf("source_chain:%s\n", " "+l.Provenance.SourceChain)
+			}
 			w.Textf("claim:       %s\n", l.Claim)
 			if len(l.Subjects) > 0 {
 				w.Textf("from:        %s\n", strings.Join(l.Subjects, ", "))
@@ -316,8 +335,12 @@ first-class record that can itself be superseded later.`,
 			if err != nil {
 				return err
 			}
-			if oldLesson.Status != entity.LessonStatusActive {
-				return fmt.Errorf("%s is %q; only active lessons can be superseded", oldID, oldLesson.Status)
+			oldView, err := annotateLessonForRead(s, oldLesson)
+			if err != nil {
+				return err
+			}
+			if oldView.Status != entity.LessonStatusActive && oldView.Status != entity.LessonStatusProvisional {
+				return fmt.Errorf("%s is %q; only active or provisional lessons can be superseded", oldID, oldView.Status)
 			}
 			newLesson, err := s.ReadLesson(by)
 			if err != nil {
@@ -428,7 +451,7 @@ may be exhausted.`,
 			var totalHit, totalOver, totalUnder int
 
 			for _, l := range lessons {
-				if l.Status != entity.LessonStatusActive || l.PredictedEffect == nil {
+				if !lessonIsSteering(s, l) || l.PredictedEffect == nil {
 					continue
 				}
 				pe := l.PredictedEffect
