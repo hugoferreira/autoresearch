@@ -23,6 +23,9 @@ type tuiPushMsg struct{ v tuiView }
 // resetMsg clears the stack back to just the dashboard.
 type tuiResetMsg struct{}
 
+// setScopeMsg updates the TUI's read-only session scope.
+type tuiSetScopeMsg struct{ scope goalScope }
+
 // chromeLoadedMsg carries the cheap state+config+counts read that the header
 // needs on every tick. It's read independently of the active view so the
 // header stays fresh no matter which view is on top.
@@ -161,6 +164,21 @@ func (m *tuiModel) jumpTo(v tuiView, s *store.Store) tea.Cmd {
 	return v.init(s)
 }
 
+func (m *tuiModel) applyScope(scope goalScope) tea.Cmd {
+	m.scope = scope
+	dashboard := newDashboardView(scope)
+	goals := newGoalListView(scope)
+	m.stack = []tuiView{dashboard, goals}
+	if m.store == nil {
+		return nil
+	}
+	return tea.Batch(
+		dashboard.init(m.store),
+		goals.init(m.store),
+		fetchChrome(m.store, m.scope),
+	)
+}
+
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -190,6 +208,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiResetMsg:
 		m.stack = []tuiView{newDashboardView(m.scope)}
 		return m, m.top().init(m.store)
+
+	case tuiSetScopeMsg:
+		return m, m.applyScope(msg.scope)
 
 	case tea.KeyMsg:
 		if m.showHelp {
@@ -223,7 +244,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "F":
 			return m, m.jumpTo(newFrontierView(m.scope), m.store)
 		case "O":
-			return m, m.jumpTo(newGoalListView(), m.store)
+			return m, m.jumpTo(newGoalListView(m.scope), m.store)
 		case "S":
 			return m, m.jumpTo(newStatusView(m.scope), m.store)
 		case "A":
@@ -273,6 +294,10 @@ func (m tuiModel) View() string {
 // tuiPush returns a tea.Cmd that emits a tuiPushMsg.
 func tuiPush(v tuiView) tea.Cmd {
 	return func() tea.Msg { return tuiPushMsg{v: v} }
+}
+
+func tuiSetScope(scope goalScope) tea.Cmd {
+	return func() tea.Msg { return tuiSetScopeMsg{scope: scope} }
 }
 
 // clampLines truncates s to at most n lines and pads shorter content so the
@@ -458,6 +483,10 @@ func (m tuiModel) renderHelp() string {
 		"  ↑/↓ or j/k    move cursor",
 		"  Enter         open detail",
 		"  f             cycle filter",
+		"",
+		"Within goal views:",
+		"  s             scope the TUI to the selected goal",
+		"  a             broaden scope to all goals",
 		"",
 		"Within hypothesis detail / list:",
 		"  r             open markdown report",

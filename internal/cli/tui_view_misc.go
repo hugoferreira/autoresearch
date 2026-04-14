@@ -315,10 +315,12 @@ func (v *frontierView) view(width, height int) string {
 // ---- goal views ----
 
 type goalListView struct {
-	all     []*entity.Goal
-	current string
-	cursor  int
-	err     error
+	scope     goalScope
+	all       []*entity.Goal
+	current   string
+	focusGoal string
+	cursor    int
+	err       error
 }
 
 type goalListLoadedMsg struct {
@@ -327,7 +329,13 @@ type goalListLoadedMsg struct {
 	err     error
 }
 
-func newGoalListView() *goalListView { return &goalListView{} }
+func newGoalListView(scopes ...goalScope) *goalListView {
+	scope := goalScope{}
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	return &goalListView{scope: scope, focusGoal: scope.GoalID}
+}
 
 func (v *goalListView) title() string { return "Goals" }
 
@@ -351,6 +359,15 @@ func (v *goalListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.all = msg.all
 		v.current = msg.current
 		v.err = msg.err
+		if v.focusGoal != "" {
+			for i, g := range v.all {
+				if g != nil && g.ID == v.focusGoal {
+					v.cursor = i
+					break
+				}
+			}
+			v.focusGoal = ""
+		}
 		v.cursor = clampCursor(v.cursor, len(v.all))
 		return v, nil
 	case tuiTickMsg:
@@ -359,15 +376,24 @@ func (v *goalListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		if handleListNav(msg, &v.cursor, len(v.all)) {
 			return v, nil
 		}
-		if msg.String() == "enter" && v.cursor >= 0 && v.cursor < len(v.all) {
-			return v, tuiPush(newGoalDetailView(v.all[v.cursor].ID))
+		switch msg.String() {
+		case "enter":
+			if v.cursor >= 0 && v.cursor < len(v.all) {
+				return v, tuiPush(newGoalDetailView(v.all[v.cursor].ID, v.scope))
+			}
+		case "s":
+			if v.cursor >= 0 && v.cursor < len(v.all) {
+				return v, tuiSetScope(goalScope{GoalID: v.all[v.cursor].ID})
+			}
+		case "a":
+			return v, tuiSetScope(goalScope{All: true})
 		}
 	}
 	return v, nil
 }
 
 func (v *goalListView) hints() []tuiHint {
-	return []tuiHint{{"↑↓", "move"}, {"Enter", "open"}}
+	return []tuiHint{{"↑↓", "move"}, {"Enter", "open"}, {"s", "scope"}, {"a", "all"}}
 }
 
 func (v *goalListView) view(width, height int) string {
@@ -377,22 +403,27 @@ func (v *goalListView) view(width, height int) string {
 	if len(v.all) == 0 {
 		return tuiDim.Render("(no goals)")
 	}
-	header := tuiBold.Render(fmt.Sprintf("%d goals", len(v.all)))
+	header := tuiBold.Render(fmt.Sprintf("%d goals  ·  scope=%s  ·  > scoped  * active", len(v.all), v.scope.label()))
 	rows := make([]string, len(v.all))
 	for i, g := range v.all {
-		marker := " "
-		if g.ID == v.current {
-			marker = "*"
+		scopeMarker := " "
+		activeMarker := " "
+		if !v.scope.All && g.ID == v.scope.GoalID {
+			scopeMarker = ">"
 		}
-		rows[i] = fmt.Sprintf("%s %-8s %-10s %s", marker, g.ID, g.Status, formatGoalObjective(g))
+		if g.ID == v.current {
+			activeMarker = "*"
+		}
+		rows[i] = fmt.Sprintf("%s%s %-8s %-10s %s", scopeMarker, activeMarker, g.ID, g.Status, formatGoalObjective(g))
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
 }
 
 type goalDetailView struct {
-	id  string
-	g   *entity.Goal
-	err error
+	id    string
+	scope goalScope
+	g     *entity.Goal
+	err   error
 }
 
 type goalDetailLoadedMsg struct {
@@ -400,7 +431,13 @@ type goalDetailLoadedMsg struct {
 	err error
 }
 
-func newGoalDetailView(id string) *goalDetailView { return &goalDetailView{id: id} }
+func newGoalDetailView(id string, scopes ...goalScope) *goalDetailView {
+	scope := goalScope{}
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	return &goalDetailView{id: id, scope: scope}
+}
 
 func (v *goalDetailView) title() string { return "Goal " + v.id }
 
@@ -420,25 +457,35 @@ func (v *goalDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) 
 		return v, nil
 	case tuiTickMsg:
 		return v, v.init(s)
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "s":
+			return v, tuiSetScope(goalScope{GoalID: v.id})
+		case "a":
+			return v, tuiSetScope(goalScope{All: true})
+		}
 	}
 	return v, nil
 }
 
-func (v *goalDetailView) hints() []tuiHint { return nil }
+func (v *goalDetailView) hints() []tuiHint {
+	return []tuiHint{{"s", "scope"}, {"a", "all"}}
+}
 
 func (v *goalDetailView) view(width, height int) string {
 	if v.err != nil {
 		return tuiRed.Render("error: " + v.err.Error())
 	}
-	return renderGoalDetail(v.g, width, height)
+	return renderGoalDetail(v.g, v.scope, width, height)
 }
 
-func renderGoalDetail(g *entity.Goal, width, height int) string {
+func renderGoalDetail(g *entity.Goal, scope goalScope, width, height int) string {
 	if g == nil {
 		return tuiDim.Render("(no goal set)")
 	}
 	lines := []string{}
 	lines = append(lines, tuiBold.Render(g.ID)+"  "+tuiCyan.Render(g.Status))
+	lines = append(lines, tuiDim.Render("scope=")+scope.label())
 	if g.DerivedFrom != "" {
 		lines = append(lines, tuiDim.Render("derived_from=")+g.DerivedFrom)
 	}
