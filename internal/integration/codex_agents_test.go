@@ -77,12 +77,16 @@ func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
 			"review pending",
 			"ceiling, not",
 			"sandbox_mode = \"workspace-write\"",
+			"Do not spawn another `research-orchestrator`",
+			"dispatch research-gate-reviewer on C-NNNN",
+			"nested child sessions expose `spawn_agent`, `send_input`, `wait_agent`",
 		}},
 		{"research-gate-reviewer", []string{
 			"autoresearch lesson add",
 			"conclusion downgrade",
 			"repetitive `--help` lookups",
 			"sandbox_mode = \"read-only\"",
+			"leaf autoresearch role",
 		}},
 	}
 	for _, c := range cases {
@@ -95,6 +99,33 @@ func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
 			if !bytes.Contains(content, []byte(n)) {
 				t.Errorf("codex %s brief missing %q", c.role, n)
 			}
+		}
+	}
+}
+
+func TestCodexDelegationHandoffContract(t *testing.T) {
+	agents, err := integration.EmbeddedCodexAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var orchestrator string
+	for _, a := range agents {
+		if a.Name == "research-orchestrator" {
+			orchestrator = string(a.Content)
+			break
+		}
+	}
+	if orchestrator == "" {
+		t.Fatal("research-orchestrator missing from embedded codex agents")
+	}
+	for _, needle := range []string{
+		"one full hypothesis cycle",
+		"Do not spawn another `research-orchestrator`",
+		"Do **not** dispatch `research-gate-reviewer` yourself from this role.",
+		"return to the parent/main session with an explicit handoff",
+	} {
+		if !strings.Contains(orchestrator, needle) {
+			t.Fatalf("orchestrator contract missing %q", needle)
 		}
 	}
 }

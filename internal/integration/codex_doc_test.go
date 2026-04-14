@@ -65,6 +65,8 @@ func TestCodexDoc_RewrittenForCodex(t *testing.T) {
 		"Limits are ceilings, not quotas",
 		"provisional until gate review",
 		"do not start another cycle while the chain is",
+		"parent/main session owns the next handoff",
+		"do not nest another orchestrator",
 	}
 	for _, s := range notebookInvariants {
 		if !strings.Contains(doc, s) {

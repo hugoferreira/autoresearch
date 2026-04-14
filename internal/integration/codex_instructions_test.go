@@ -37,6 +37,9 @@ func TestEnsureCodexInstructions_Created(t *testing.T) {
 		"Do not spend early turns probing `--help`",
 		"exact `agent_type` name",
 		"Do not emulate those roles by spawning `explorer`",
+		"one-cycle leaf role",
+		"parent/main session owns the next handoff",
+		"nested `spawn_agent` / `send_input` / `wait_agent`",
 	} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("managed block missing %q: %s", needle, text)

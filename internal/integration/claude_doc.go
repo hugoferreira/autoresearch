@@ -281,7 +281,7 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
         # Appeal a critic downgrade: restores original verdict, clears
         # reviewed_by, records rebuttal. Only valid for critic downgrades.
 
-Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session — do not start another cycle while the chain is still ` + "`unreviewed`" + `.
+Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
 
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--experiment E-XXXX | --observation O-XXXX]

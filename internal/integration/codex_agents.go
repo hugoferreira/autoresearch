@@ -47,7 +47,13 @@ func codexAgentContent(src []byte) ([]byte, error) {
 	body = strings.ReplaceAll(body, "@.claude/autoresearch.md", ".codex/autoresearch.md")
 	body = strings.ReplaceAll(body, ".claude/autoresearch.md", ".codex/autoresearch.md")
 	body = strings.TrimLeft(body, "\n")
-	body = "Read `.codex/autoresearch.md` first, then follow the role contract below.\n\n" + body
+	body = "Read `.codex/autoresearch.md` first, then follow the role contract below.\n\n" +
+		"Codex custom-agent execution model:\n" +
+		"- Treat this as a leaf autoresearch role. Do not spawn another `research-orchestrator` or any other autoresearch custom agent from inside it.\n" +
+		"- Do not assume nested child sessions expose `spawn_agent`, `send_input`, `wait_agent`, or the same custom `agent_type` names.\n" +
+		"- If the workflow needs another autoresearch custom agent, return to the parent/main session with an explicit handoff instead of attempting nested delegation.\n" +
+		"- Generic helper delegation explicitly called for below (for example a coder helper in an experiment worktree) is still allowed.\n\n" +
+		body
 	if strings.Contains(body, "'''") {
 		return nil, fmt.Errorf("developer instructions for %s contain TOML literal delimiter", fm.Name)
 	}
