@@ -440,13 +440,31 @@ func TestTUI_GoalListView(t *testing.T) {
 }
 
 func TestTUI_StatusView(t *testing.T) {
+	snap := tuiRichSnapshot()
+	snap.ScopeAll = true
+
 	v := newStatusView(goalScope{All: true})
-	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+	nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
 	out := stripANSI(nv.view(100, 30))
 	for _, want := range []string{"Scope:", "all", "State:", "active", "Mode:", "strict", "Main checkout:", "clean", "Budget:", "5/20 experiments", "Counts:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status view missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "stalled") {
+		t.Fatalf("all-goal status view should not show stalled meter:\n%s", out)
+	}
+}
+
+func TestTUI_StatusViewShowsStalledMeterForGoalScope(t *testing.T) {
+	snap := tuiRichSnapshot()
+	snap.ScopeGoalID = "G-0002"
+
+	v := newStatusView(goalScope{GoalID: "G-0002"})
+	nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
+	out := stripANSI(nv.view(100, 30))
+	if !strings.Contains(out, "stalled 2/5") {
+		t.Fatalf("goal-scoped status view should show stalled meter:\n%s", out)
 	}
 }
 

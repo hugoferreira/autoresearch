@@ -142,13 +142,7 @@ event is appended with the standard formatter; in --json mode emits JSONL
 			}
 
 			if follow {
-				return followEvents(s, func(e store.Event) bool {
-					ok, err := resolver.eventMatches(e)
-					if err != nil || !ok {
-						return false
-					}
-					return keep(e)
-				}, w.IsJSON())
+				return followEvents(s, newFollowEventFilter(s, scope, keep), w.IsJSON())
 			}
 			return nil
 		},
@@ -175,6 +169,23 @@ func writeEventLine(w io.Writer, e store.Event) {
 		subject,
 		e.Actor,
 	)
+}
+
+// newFollowEventFilter recreates the scope resolver per streamed event so
+// baseline ownership picks up experiment.baseline events appended after
+// `log --follow` starts.
+func newFollowEventFilter(s *store.Store, scope goalScope, keep func(store.Event) bool) func(store.Event) bool {
+	if scope.All {
+		return keep
+	}
+	return func(e store.Event) bool {
+		resolver := newGoalScopeResolver(s, scope)
+		ok, err := resolver.eventMatches(e)
+		if err != nil || !ok {
+			return false
+		}
+		return keep(e)
+	}
 }
 
 // followEvents is the tail loop. It polls events.jsonl by byte offset every

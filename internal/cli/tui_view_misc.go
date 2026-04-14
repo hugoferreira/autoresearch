@@ -547,7 +547,7 @@ func (v *statusView) view(width, height int) string {
 			fmt.Sprintf("%.1fh/%dh elapsed", snap.Budgets.Usage.ElapsedH, snap.Budgets.Limits.MaxWallTimeH),
 		)))
 	}
-	if snap.Budgets.Limits.FrontierStallK > 0 {
+	if snap.Budgets.Limits.FrontierStallK > 0 && !snap.ScopeAll {
 		lines = append(lines, fmt.Sprintf("  %s", tuiMeterColor(
 			float64(snap.StalledFor),
 			float64(snap.Budgets.Limits.FrontierStallK),
