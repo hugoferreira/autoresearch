@@ -336,6 +336,9 @@ func (v *dashboardView) renderTopStrip(width int) string {
 	} else {
 		lines = append(lines, tuiBold.Render("Budget:")+" "+budget)
 	}
+	if snap.MainCheckoutDirty {
+		lines = append(lines, tuiBoldYellow.Render("Main checkout dirty:")+" "+strings.Join(snap.MainCheckoutDirtyPaths, ", "))
+	}
 
 	// Truncate each line to width so nothing wraps.
 	for i, l := range lines {

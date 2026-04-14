@@ -84,6 +84,15 @@ automatically downgraded to "inconclusive."
 The CLI is the only writer of state. Subagents only ever invoke `autoresearch`
 verbs; they never edit `.research/` directly.
 
+Research also assumes the target project's main checkout stays stable while the
+loop is running. Experiment and harness changes belong in experiment
+worktrees. Setup refreshes under `AGENTS.md`, `.claude/`, `.codex/`,
+`.gitignore`, or `.research/` are separate maintenance, not experiment output.
+`autoresearch status` and `dashboard` warn via `main_checkout_dirty` /
+`main_checkout_dirty_paths` when the main checkout drifts, so agents can stop
+and surface explicit maintenance instead of quietly patching bootstrap files in
+place.
+
 ## Install
 
 ```sh

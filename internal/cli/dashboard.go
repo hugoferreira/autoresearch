@@ -94,21 +94,23 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 // ---- snapshot capture ----
 
 type dashboardSnapshot struct {
-	Project          string              `json:"project"`
-	Paused           bool                `json:"paused"`
-	PauseReason      string              `json:"pause_reason,omitempty"`
-	Mode             string              `json:"mode"`
-	Goal             *entity.Goal        `json:"goal,omitempty"`
-	Budgets          dashboardBudgets    `json:"budgets"`
-	Counts           map[string]int      `json:"counts"`
-	Tree             []*treeNode         `json:"tree"`
-	Frontier         []frontierRow       `json:"frontier"`
-	StalledFor       int                 `json:"stalled_for"`
-	InFlight         []dashboardInFlight `json:"in_flight"`
-	StaleExperiments []dashboardStaleExp `json:"stale_experiments,omitempty"`
-	RecentLessons    []*entity.Lesson    `json:"recent_lessons,omitempty"`
-	RecentEvents     []store.Event       `json:"recent_events"`
-	CapturedAt       time.Time           `json:"captured_at"`
+	Project                string              `json:"project"`
+	Paused                 bool                `json:"paused"`
+	PauseReason            string              `json:"pause_reason,omitempty"`
+	Mode                   string              `json:"mode"`
+	MainCheckoutDirty      bool                `json:"main_checkout_dirty"`
+	MainCheckoutDirtyPaths []string            `json:"main_checkout_dirty_paths"`
+	Goal                   *entity.Goal        `json:"goal,omitempty"`
+	Budgets                dashboardBudgets    `json:"budgets"`
+	Counts                 map[string]int      `json:"counts"`
+	Tree                   []*treeNode         `json:"tree"`
+	Frontier               []frontierRow       `json:"frontier"`
+	StalledFor             int                 `json:"stalled_for"`
+	InFlight               []dashboardInFlight `json:"in_flight"`
+	StaleExperiments       []dashboardStaleExp `json:"stale_experiments,omitempty"`
+	RecentLessons          []*entity.Lesson    `json:"recent_lessons,omitempty"`
+	RecentEvents           []store.Event       `json:"recent_events"`
+	CapturedAt             time.Time           `json:"captured_at"`
 }
 
 type dashboardBudgets struct {
@@ -168,11 +170,12 @@ func readDashboardRecentEvents(all []store.Event, offsetNewest, limit int) ([]st
 // through existing store methods — no new store APIs, no mutation.
 func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	snap := &dashboardSnapshot{
-		Project:    s.Root(),
-		CapturedAt: time.Now().UTC(),
-		Tree:       []*treeNode{},
-		Frontier:   []frontierRow{},
-		InFlight:   []dashboardInFlight{},
+		Project:                s.Root(),
+		CapturedAt:             time.Now().UTC(),
+		MainCheckoutDirtyPaths: []string{},
+		Tree:                   []*treeNode{},
+		Frontier:               []frontierRow{},
+		InFlight:               []dashboardInFlight{},
 	}
 
 	cfg, err := s.Config()
@@ -187,6 +190,13 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	}
 	snap.Paused = st.Paused
 	snap.PauseReason = st.PauseReason
+
+	mainCheckout, err := captureMainCheckoutState(s.Root())
+	if err != nil {
+		return nil, err
+	}
+	snap.MainCheckoutDirty = mainCheckout.Dirty
+	snap.MainCheckoutDirtyPaths = mainCheckout.Paths
 
 	// Use the already-loaded state to read the goal directly, avoiding a
 	// second State() read inside ActiveGoal().
@@ -444,6 +454,10 @@ func renderDashboard(w io.Writer, snap *dashboardSnapshot, width int, footerMode
 	fmt.Fprintln(w)
 	renderDashboardBudget(w, snap, a)
 	fmt.Fprintln(w)
+	if snap.MainCheckoutDirty {
+		renderDashboardMainCheckout(w, snap, a)
+		fmt.Fprintln(w)
+	}
 	renderDashboardTree(w, snap, a)
 	fmt.Fprintln(w)
 	renderDashboardFrontier(w, snap, a)
@@ -536,6 +550,15 @@ func renderDashboardBudget(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 	fmt.Fprintf(w, " %s %d hypotheses · %d experiments · %d observations · %d conclusions\n",
 		a.bold("Counts:"),
 		snap.Counts["hypotheses"], snap.Counts["experiments"], snap.Counts["observations"], snap.Counts["conclusions"])
+}
+
+func renderDashboardMainCheckout(w io.Writer, snap *dashboardSnapshot, a *ansi) {
+	sectionHeader(w, "Main checkout", a)
+	fmt.Fprintln(w, " "+a.boldYellow("WARNING: dirty outside autoresearch-managed files"))
+	fmt.Fprintln(w, " research should keep experiment edits in worktrees; treat these as explicit maintenance:")
+	for _, path := range snap.MainCheckoutDirtyPaths {
+		fmt.Fprintf(w, "   %s\n", path)
+	}
 }
 
 func renderDashboardTree(w io.Writer, snap *dashboardSnapshot, a *ansi) {

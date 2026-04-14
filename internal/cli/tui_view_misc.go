@@ -420,6 +420,14 @@ func (v *statusView) view(width, height int) string {
 	}
 	lines = append(lines, tuiBold.Render("State:")+" "+state)
 	lines = append(lines, tuiBold.Render("Mode:")+"  "+snap.Mode)
+	if snap.MainCheckoutDirty {
+		lines = append(lines, tuiBold.Render("Main checkout:")+" "+tuiBoldYellow.Render("dirty outside autoresearch-managed files"))
+		for _, path := range snap.MainCheckoutDirtyPaths {
+			lines = append(lines, "  "+path)
+		}
+	} else {
+		lines = append(lines, tuiBold.Render("Main checkout:")+" clean")
+	}
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render("Budget:"))
 	if snap.Budgets.Limits.MaxExperiments > 0 {

@@ -6,6 +6,7 @@ package worktree
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -88,5 +89,44 @@ func List(projectDir string) ([]string, error) {
 			paths = append(paths, strings.TrimPrefix(line, "worktree "))
 		}
 	}
+	return paths, nil
+}
+
+// DirtyPaths returns relative paths in the main checkout that differ from
+// HEAD, including untracked files. The list is sorted and deduplicated. If the
+// directory is not a git repo, it returns an empty list.
+func DirtyPaths(projectDir string) ([]string, error) {
+	if !IsRepo(projectDir) {
+		return []string{}, nil
+	}
+
+	seen := map[string]bool{}
+	addLines := func(out string) {
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			seen[line] = true
+		}
+	}
+
+	out, err := run(projectDir, "diff", "--name-only", "HEAD", "--")
+	if err != nil {
+		return nil, err
+	}
+	addLines(out)
+
+	out, err = run(projectDir, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	addLines(out)
+
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
 	return paths, nil
 }

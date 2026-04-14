@@ -40,6 +40,9 @@ func TestEnsureCodexInstructions_Created(t *testing.T) {
 		"one-cycle leaf role",
 		"parent/main session owns the next handoff",
 		"nested `spawn_agent` / `send_input` / `wait_agent`",
+		"main checkout as read-only during research",
+		"main_checkout_dirty_paths",
+		"bootstrap/harness files",
 	} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("managed block missing %q: %s", needle, text)

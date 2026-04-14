@@ -546,6 +546,16 @@ active lessons at implement time. The orchestrator's coder helper reads
 this file instead of reaching back to ` + "`.research/`" + `, which is unreachable
 from inside the worktree. The brief is gitignored automatically.
 
+Research assumes the target project's **main checkout** stays stable while
+experiments run. Experiment and harness changes belong in experiment
+worktrees. Setup refreshes under ` + "`AGENTS.md`" + `, ` + "`.claude/`" + `,
+` + "`.codex/`" + `, ` + "`.gitignore`" + `, or ` + "`.research/`" + ` are separate
+maintenance, not experiment output. ` + "`autoresearch status`" + ` and ` + "`dashboard`" + `
+surface ` + "`main_checkout_dirty`" + ` / ` + "`main_checkout_dirty_paths`" + ` when the
+main checkout drifts. If those light up during research, stop and ask the
+human whether this is an explicit maintenance task or accidental checkout
+drift.
+
 ## Working from a subdirectory
 
 ` + "`autoresearch`" + ` commands find the store by walking up from the current

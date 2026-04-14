@@ -80,6 +80,9 @@ func TestEmbeddedCodexAgents_NotebookPropagation(t *testing.T) {
 			"Do not spawn another `research-orchestrator`",
 			"dispatch research-gate-reviewer on C-NNNN",
 			"nested child sessions expose `spawn_agent`, `send_input`, `wait_agent`",
+			"main checkout stays read-only",
+			"main_checkout_dirty_paths",
+			"bootstrap scripts",
 		}},
 		{"research-gate-reviewer", []string{
 			"autoresearch lesson add",
