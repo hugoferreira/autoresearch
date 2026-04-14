@@ -51,23 +51,25 @@ the circumstances (code, tooling, lessons) are different.`,
 }
 
 type goalFlags struct {
-	file            string
-	objInstrument   string
-	objTarget       string
-	objDirection    string
-	objTargetEffect float64
-	constraintMax   []string
-	constraintMin   []string
-	constraintReq   []string
-	steeringText    string
+	file             string
+	objInstrument    string
+	objTarget        string
+	objDirection     string
+	successThreshold float64
+	onSuccess        string
+	constraintMax    []string
+	constraintMin    []string
+	constraintReq    []string
+	steeringText     string
 }
 
 func addGoalBodyFlags(c *cobra.Command, f *goalFlags) {
-	c.Flags().StringVar(&f.file, "file", "", "path to goal.md (mutually exclusive with --objective-*)")
+	c.Flags().StringVar(&f.file, "file", "", "path to goal.md (mutually exclusive with goal-construction flags)")
 	c.Flags().StringVar(&f.objInstrument, "objective-instrument", "", "name of the registered instrument the objective targets")
 	c.Flags().StringVar(&f.objTarget, "objective-target", "", "what inside the target is being measured (optional, e.g. 'dsp_fir')")
 	c.Flags().StringVar(&f.objDirection, "objective-direction", "", "increase | decrease")
-	c.Flags().Float64Var(&f.objTargetEffect, "objective-target-effect", 0, "fractional effect the user aspires to (optional)")
+	c.Flags().Float64Var(&f.successThreshold, "success-threshold", 0, "fractional effect that counts as goal satisfaction (optional)")
+	c.Flags().StringVar(&f.onSuccess, "on-success", "", "what to do after the success threshold is met: ask_human | stop | continue_until_stall | continue_until_budget_cap")
 	c.Flags().StringArrayVar(&f.constraintMax, "constraint-max", nil, "max constraint as 'instrument=value' (repeatable)")
 	c.Flags().StringArrayVar(&f.constraintMin, "constraint-min", nil, "min constraint as 'instrument=value' (repeatable)")
 	c.Flags().StringArrayVar(&f.constraintReq, "constraint-require", nil, "require constraint as 'instrument=value' (repeatable, e.g. 'host_test=pass')")
@@ -79,9 +81,10 @@ func addGoalBodyFlags(c *cobra.Command, f *goalFlags) {
 func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
 	fileMode := f.file != ""
 	flagMode := f.objInstrument != "" || f.objDirection != "" ||
+		f.successThreshold > 0 || f.onSuccess != "" ||
 		len(f.constraintMax) > 0 || len(f.constraintMin) > 0 || len(f.constraintReq) > 0
 	if fileMode && flagMode {
-		return nil, errors.New("--file and --objective-* flags are mutually exclusive")
+		return nil, errors.New("--file and goal-construction flags are mutually exclusive")
 	}
 	if !fileMode && !flagMode {
 		return nil, errors.New("provide either --file or --objective-instrument + --objective-direction + at least one --constraint-*")
@@ -93,7 +96,7 @@ func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
 		}
 		return entity.ParseGoal(data)
 	}
-	return buildGoalFromFlags(f.objInstrument, f.objTarget, f.objDirection, f.objTargetEffect,
+	return buildGoalFromFlags(f.objInstrument, f.objTarget, f.objDirection, f.successThreshold, f.onSuccess,
 		f.constraintMax, f.constraintMin, f.constraintReq, f.steeringText)
 }
 
@@ -109,7 +112,8 @@ already exists on disk — use 'goal new' for subsequent goals.
 Two input modes, mutually exclusive:
 
   --file goal.md            Read a YAML-frontmatter goal document.
-  --objective-* + --constraint-*   Build the goal from flags directly.
+  --objective-* + --constraint-*   Build the goal from flags directly
+                                   (optional: --success-threshold, --on-success).
 
 The flag form is the one the main agent session uses when translating a
 human's natural-language request — the session never asks the human to
@@ -166,8 +170,8 @@ goal.md and point --file at it.`,
 				return err
 			}
 			return w.Emit(
-				fmt.Sprintf("bootstrapped %s: %s on %s (target_effect=%g, %d constraints)",
-					id, g.Objective.Direction, g.Objective.Instrument, g.Objective.TargetEffect, len(g.Constraints)),
+				fmt.Sprintf("bootstrapped %s: %s (%d constraints)",
+					id, formatGoalObjective(g), len(g.Constraints)),
 				map[string]any{"status": "ok", "id": id, "goal": g},
 			)
 		},
@@ -405,7 +409,8 @@ func runGoalClosure(args []string, text, author, status, eventKind, label string
 
 func buildGoalFromFlags(
 	instrument, target, direction string,
-	targetEffect float64,
+	successThreshold float64,
+	onSuccess string,
 	maxSpecs, minSpecs, reqSpecs []string,
 	steering string,
 ) (*entity.Goal, error) {
@@ -415,14 +420,25 @@ func buildGoalFromFlags(
 	if direction != "increase" && direction != "decrease" {
 		return nil, fmt.Errorf("--objective-direction must be 'increase' or 'decrease', got %q", direction)
 	}
+	if successThreshold <= 0 && strings.TrimSpace(onSuccess) != "" {
+		return nil, errors.New("--on-success requires --success-threshold")
+	}
 	g := &entity.Goal{
-		SchemaVersion: 2,
+		SchemaVersion: entity.GoalSchemaVersion,
 		Objective: entity.Objective{
-			Instrument:   instrument,
-			Target:       target,
-			Direction:    direction,
-			TargetEffect: targetEffect,
+			Instrument: instrument,
+			Target:     target,
+			Direction:  direction,
 		},
+	}
+	if successThreshold > 0 {
+		g.Completion = &entity.Completion{
+			Threshold:   successThreshold,
+			OnThreshold: strings.TrimSpace(onSuccess),
+		}
+		if g.Completion.OnThreshold == "" {
+			g.Completion.OnThreshold = entity.GoalOnThresholdAskHuman
+		}
 	}
 	for _, spec := range maxSpecs {
 		c, err := parseConstraintKV(spec, "max")
@@ -527,14 +543,8 @@ func goalShowCmd() *cobra.Command {
 			if g.ClosedAt != nil {
 				w.Textf("closed_at:    %s\n", g.ClosedAt.Format("2006-01-02T15:04:05Z07:00"))
 			}
-			w.Textf("objective:    %s %s", g.Objective.Direction, g.Objective.Instrument)
-			if g.Objective.Target != "" {
-				w.Textf(" on %s", g.Objective.Target)
-			}
-			if g.Objective.TargetEffect > 0 {
-				w.Textf(" (target_effect=%g)", g.Objective.TargetEffect)
-			}
-			w.Textln("")
+			w.Textf("objective:    %s\n", formatGoalObjective(g))
+			w.Textf("completion:   %s\n", formatGoalCompletion(g))
 			w.Textln("constraints:")
 			for _, cst := range g.Constraints {
 				w.Textf("  %s\n", entity.FormatConstraint(cst))
@@ -577,8 +587,8 @@ func goalListCmd() *cobra.Command {
 			}
 			if w.IsJSON() {
 				return w.JSON(map[string]any{
-					"current":  st.CurrentGoalID,
-					"goals":    filtered,
+					"current": st.CurrentGoalID,
+					"goals":   filtered,
 				})
 			}
 			if len(filtered) == 0 {

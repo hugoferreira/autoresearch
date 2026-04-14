@@ -185,18 +185,20 @@ func (v *treeView) view(width, height int) string {
 // ---- frontier view ----
 
 type frontierView struct {
-	goal    *entity.Goal
-	rows    []frontierRow
-	stalled int
-	cursor  int
-	err     error
+	goal       *entity.Goal
+	rows       []frontierRow
+	assessment frontierGoalAssessment
+	stalled    int
+	cursor     int
+	err        error
 }
 
 type frontierLoadedMsg struct {
-	goal    *entity.Goal
-	rows    []frontierRow
-	stalled int
-	err     error
+	goal       *entity.Goal
+	rows       []frontierRow
+	assessment frontierGoalAssessment
+	stalled    int
+	err        error
 }
 
 func newFrontierView() *frontierView { return &frontierView{} }
@@ -213,8 +215,14 @@ func (v *frontierView) init(s *store.Store) tea.Cmd {
 		if err != nil {
 			return frontierLoadedMsg{err: err}
 		}
-		rows, stalled := computeFrontier(s, goal, concls)
-		return frontierLoadedMsg{goal: goal, rows: rows, stalled: stalled}
+		obsByExp := loadObservationsByExperiment(s)
+		rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp)
+		return frontierLoadedMsg{
+			goal:       goal,
+			rows:       rows,
+			assessment: assessGoalCompletion(goal, concls, obsByExp),
+			stalled:    stalled,
+		}
 	}
 }
 
@@ -223,6 +231,7 @@ func (v *frontierView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 	case frontierLoadedMsg:
 		v.goal = msg.goal
 		v.rows = msg.rows
+		v.assessment = msg.assessment
 		v.stalled = msg.stalled
 		v.err = msg.err
 		return v, nil
@@ -260,6 +269,17 @@ func (v *frontierView) view(width, height int) string {
 	}
 	header := tuiBold.Render(fmt.Sprintf("%s %s  ·  %d rows  ·  stalled_for=%d",
 		v.goal.Objective.Direction, v.goal.Objective.Instrument, len(v.rows), v.stalled))
+	assessment := ""
+	switch v.assessment.Mode {
+	case "threshold":
+		assessment = fmt.Sprintf("threshold=%g -> %s", v.assessment.Threshold, v.assessment.OnThreshold)
+		if v.assessment.Met {
+			assessment += " (met)"
+		}
+	default:
+		assessment = "open-ended -> continue_until_stall"
+	}
+	header += "  ·  " + assessment
 	if len(v.rows) == 0 {
 		return header + "\n\n" + tuiDim.Render("(no feasible supported conclusions yet)")
 	}
@@ -327,14 +347,10 @@ func (v *goalView) view(width, height int) string {
 	g := v.g
 	lines := []string{}
 	lines = append(lines, tuiBold.Render("Objective:"))
-	line := "  " + tuiCyan.Render(g.Objective.Direction+" "+g.Objective.Instrument)
-	if g.Objective.Target != "" {
-		line += " on " + g.Objective.Target
-	}
-	if g.Objective.TargetEffect > 0 {
-		line += fmt.Sprintf(" (target_effect=%g)", g.Objective.TargetEffect)
-	}
-	lines = append(lines, line)
+	lines = append(lines, "  "+tuiCyan.Render(formatGoalObjective(g)))
+	lines = append(lines, "")
+	lines = append(lines, tuiBold.Render("Completion:"))
+	lines = append(lines, "  "+formatGoalCompletion(g))
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render(fmt.Sprintf("Constraints (%d):", len(g.Constraints))))
 	if len(g.Constraints) == 0 {

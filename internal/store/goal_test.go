@@ -30,8 +30,9 @@ func TestGoalSequenceWriteReadList(t *testing.T) {
 		Status:    entity.GoalStatusActive,
 		CreatedAt: &now,
 		Objective: entity.Objective{
-			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.15,
+			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
 		},
+		Completion: &entity.Completion{Threshold: 0.15, OnThreshold: entity.GoalOnThresholdAskHuman},
 		Constraints: []entity.Constraint{
 			{Instrument: "size_flash", Max: &flash},
 		},
@@ -140,7 +141,7 @@ func TestOpenMigratesLegacyGoal(t *testing.T) {
 	legacy := &entity.Goal{
 		SchemaVersion: 1,
 		Objective: entity.Objective{
-			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.15,
+			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
 		},
 		Constraints: []entity.Constraint{
 			{Instrument: "size_flash", Max: &flash},

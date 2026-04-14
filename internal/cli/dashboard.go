@@ -94,21 +94,21 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 // ---- snapshot capture ----
 
 type dashboardSnapshot struct {
-	Project       string              `json:"project"`
-	Paused        bool                `json:"paused"`
-	PauseReason   string              `json:"pause_reason,omitempty"`
-	Mode          string              `json:"mode"`
-	Goal          *entity.Goal        `json:"goal,omitempty"`
-	Budgets       dashboardBudgets    `json:"budgets"`
-	Counts        map[string]int      `json:"counts"`
-	Tree          []*treeNode         `json:"tree"`
-	Frontier      []frontierRow       `json:"frontier"`
-	StalledFor    int                 `json:"stalled_for"`
+	Project          string              `json:"project"`
+	Paused           bool                `json:"paused"`
+	PauseReason      string              `json:"pause_reason,omitempty"`
+	Mode             string              `json:"mode"`
+	Goal             *entity.Goal        `json:"goal,omitempty"`
+	Budgets          dashboardBudgets    `json:"budgets"`
+	Counts           map[string]int      `json:"counts"`
+	Tree             []*treeNode         `json:"tree"`
+	Frontier         []frontierRow       `json:"frontier"`
+	StalledFor       int                 `json:"stalled_for"`
 	InFlight         []dashboardInFlight `json:"in_flight"`
 	StaleExperiments []dashboardStaleExp `json:"stale_experiments,omitempty"`
 	RecentLessons    []*entity.Lesson    `json:"recent_lessons,omitempty"`
-	RecentEvents  []store.Event       `json:"recent_events"`
-	CapturedAt    time.Time           `json:"captured_at"`
+	RecentEvents     []store.Event       `json:"recent_events"`
+	CapturedAt       time.Time           `json:"captured_at"`
 }
 
 type dashboardBudgets struct {
@@ -480,15 +480,8 @@ func renderDashboardGoal(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		fmt.Fprintln(w, " "+a.bold("Goal:")+" "+a.dim("(no goal set — run `autoresearch goal set`)"))
 		return
 	}
-	obj := snap.Goal.Objective
-	line := " " + a.bold("Goal:") + " " + a.cyan(obj.Direction) + " " + a.cyan(obj.Instrument)
-	if obj.Target != "" {
-		line += " on " + obj.Target
-	}
-	if obj.TargetEffect > 0 {
-		line += fmt.Sprintf(" (target_effect=%g)", obj.TargetEffect)
-	}
-	fmt.Fprintln(w, line)
+	fmt.Fprintln(w, " "+a.bold("Goal:")+" "+a.cyan(formatGoalObjective(snap.Goal)))
+	fmt.Fprintln(w, " "+a.bold("Completion:")+" "+formatGoalCompletion(snap.Goal))
 	if len(snap.Goal.Constraints) > 0 {
 		fmt.Fprintln(w, " "+a.bold("Constraints:"))
 		for _, c := range snap.Goal.Constraints {

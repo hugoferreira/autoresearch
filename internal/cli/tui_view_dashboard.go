@@ -297,14 +297,8 @@ func (v *dashboardView) renderTopStrip(width int) string {
 	if snap.Goal == nil {
 		lines = append(lines, tuiBold.Render("Goal:")+" "+tuiDim.Render("(no goal set — run `autoresearch goal set`)"))
 	} else {
-		obj := snap.Goal.Objective
-		line := tuiBold.Render("Goal:") + " " + tuiCyan.Render(obj.Direction+" "+obj.Instrument)
-		if obj.Target != "" {
-			line += " on " + obj.Target
-		}
-		if obj.TargetEffect > 0 {
-			line += fmt.Sprintf(" (target_effect=%g)", obj.TargetEffect)
-		}
+		line := tuiBold.Render("Goal:") + " " + tuiCyan.Render(formatGoalObjective(snap.Goal))
+		line += " [" + formatGoalCompletion(snap.Goal) + "]"
 		if len(snap.Goal.Constraints) > 0 {
 			var cs []string
 			for _, c := range snap.Goal.Constraints {

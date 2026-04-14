@@ -3,7 +3,9 @@ objective:
   instrument: timing
   target: dsp_fir
   direction: decrease
-  target_effect: 0.20
+completion:
+  threshold: 0.20
+  on_threshold: ask_human
 constraints:
   - instrument: binary_size
     max: 131072
