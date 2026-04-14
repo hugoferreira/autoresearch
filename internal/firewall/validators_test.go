@@ -98,6 +98,10 @@ func TestValidateGoal_Happy(t *testing.T) {
 	max := 65536.0
 	g := &entity.Goal{
 		Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"},
+		Completion: &entity.Completion{
+			Threshold:   0.2,
+			OnThreshold: entity.GoalOnThresholdAskHuman,
+		},
 		Constraints: []entity.Constraint{
 			{Instrument: "size_flash", Max: &max},
 		},
@@ -105,6 +109,34 @@ func TestValidateGoal_Happy(t *testing.T) {
 	if err := firewall.ValidateGoal(g, cfgWith("qemu_cycles", "size_flash")); err != nil {
 		t.Errorf("valid goal rejected: %v", err)
 	}
+}
+
+func TestValidateGoal_InvalidCompletion(t *testing.T) {
+	max := 65536.0
+	base := &entity.Goal{
+		Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"},
+		Constraints: []entity.Constraint{
+			{Instrument: "size_flash", Max: &max},
+		},
+	}
+
+	t.Run("threshold must be positive", func(t *testing.T) {
+		g := *base
+		g.Completion = &entity.Completion{Threshold: 0}
+		err := firewall.ValidateGoal(&g, cfgWith("qemu_cycles", "size_flash"))
+		if err == nil || !strings.Contains(err.Error(), "threshold must be > 0") {
+			t.Fatalf("expected bad threshold to fail, got %v", err)
+		}
+	})
+
+	t.Run("on_threshold must be known", func(t *testing.T) {
+		g := *base
+		g.Completion = &entity.Completion{Threshold: 0.2, OnThreshold: "invent_it"}
+		err := firewall.ValidateGoal(&g, cfgWith("qemu_cycles", "size_flash"))
+		if err == nil || !strings.Contains(err.Error(), "completion.on_threshold") {
+			t.Fatalf("expected bad on_threshold to fail, got %v", err)
+		}
+	})
 }
 
 func TestValidateHypothesis_MissingFields(t *testing.T) {

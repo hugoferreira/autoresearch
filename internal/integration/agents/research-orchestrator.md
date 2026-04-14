@@ -36,8 +36,10 @@ load-bearing.
    If so, the current direction may be hitting diminishing returns.
 5. `autoresearch tree --json` — every existing hypothesis. Do not
    duplicate open work.
-6. `autoresearch frontier --json` — the current best (if any) and the
-   `stalled_for` counter. If it's climbing, diversify.
+6. `autoresearch frontier --json` — the current best (if any), the
+   `stalled_for` counter, and `goal_assessment`. If the threshold is met
+   and the recommended action is `ask_human` or `stop`, do not start
+   another cycle. If `stalled_for` is climbing, diversify.
 7. `autoresearch instrument list --json` — what you can measure.
 8. Enough of the codebase (via Read / Grep / Glob) to understand what's
    being optimized. Focus on `goal.objective.target`.
@@ -132,6 +134,12 @@ until the gate reviewer has accepted or downgraded that chain.
   mechanisms. Don't cluster them in one subtree.
 - **Healthy frontier**: refine the best (`--parent`) or attack from a
   different angle.
+- **`goal_assessment.met=true` + `recommended_action=ask_human|stop`**:
+  stop here and yield to the main session. Goal completion is separate
+  from hypothesis support.
+- **`goal_assessment.met=true` + `recommended_action=continue`**:
+  continue only if the goal explicitly says to keep exploring after
+  threshold satisfaction.
 - **`stalled_for` climbing**: diversify — propose something the tree
   hasn't tried.
 - **`priority: human`**: address these first.

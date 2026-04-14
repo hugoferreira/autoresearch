@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -11,6 +12,12 @@ const (
 	GoalStatusActive    = "active"
 	GoalStatusConcluded = "concluded"
 	GoalStatusAbandoned = "abandoned"
+	GoalSchemaVersion   = 3
+
+	GoalOnThresholdAskHuman               = "ask_human"
+	GoalOnThresholdStop                   = "stop"
+	GoalOnThresholdContinueUntilStall     = "continue_until_stall"
+	GoalOnThresholdContinueUntilBudgetCap = "continue_until_budget_cap"
 )
 
 type Goal struct {
@@ -23,15 +30,20 @@ type Goal struct {
 	ClosedAt      *time.Time   `yaml:"closed_at,omitempty"      json:"closed_at,omitempty"`
 	ClosureReason string       `yaml:"closure_reason,omitempty" json:"closure_reason,omitempty"`
 	Objective     Objective    `yaml:"objective"                json:"objective"`
+	Completion    *Completion  `yaml:"completion,omitempty"     json:"completion,omitempty"`
 	Constraints   []Constraint `yaml:"constraints"              json:"constraints"`
 	Body          string       `yaml:"-"                        json:"body,omitempty"`
 }
 
 type Objective struct {
-	Instrument   string  `yaml:"instrument"              json:"instrument"`
-	Target       string  `yaml:"target,omitempty"        json:"target,omitempty"`
-	Direction    string  `yaml:"direction"               json:"direction"`
-	TargetEffect float64 `yaml:"target_effect,omitempty" json:"target_effect,omitempty"`
+	Instrument string `yaml:"instrument"       json:"instrument"`
+	Target     string `yaml:"target,omitempty" json:"target,omitempty"`
+	Direction  string `yaml:"direction"        json:"direction"`
+}
+
+type Completion struct {
+	Threshold   float64 `yaml:"threshold,omitempty"    json:"threshold,omitempty"`
+	OnThreshold string  `yaml:"on_threshold,omitempty" json:"on_threshold,omitempty"`
 }
 
 type Constraint struct {
@@ -46,20 +58,71 @@ func ParseGoal(data []byte) (*Goal, error) {
 	if err != nil {
 		return nil, err
 	}
-	var g Goal
-	if err := yaml.Unmarshal(yb, &g); err != nil {
+
+	type rawObjective struct {
+		Instrument             string   `yaml:"instrument"`
+		Target                 string   `yaml:"target,omitempty"`
+		Direction              string   `yaml:"direction"`
+		DeprecatedTargetEffect *float64 `yaml:"target_effect,omitempty"`
+	}
+	type rawGoal struct {
+		SchemaVersion int          `yaml:"schema_version,omitempty"`
+		ID            string       `yaml:"id,omitempty"`
+		Status        string       `yaml:"status,omitempty"`
+		DerivedFrom   string       `yaml:"derived_from,omitempty"`
+		Trigger       string       `yaml:"trigger,omitempty"`
+		CreatedAt     *time.Time   `yaml:"created_at,omitempty"`
+		ClosedAt      *time.Time   `yaml:"closed_at,omitempty"`
+		ClosureReason string       `yaml:"closure_reason,omitempty"`
+		Objective     rawObjective `yaml:"objective"`
+		Completion    *Completion  `yaml:"completion,omitempty"`
+		Constraints   []Constraint `yaml:"constraints"`
+	}
+
+	var raw rawGoal
+	dec := yaml.NewDecoder(bytes.NewReader(yb))
+	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parse goal yaml: %w", err)
+	}
+	if raw.Objective.DeprecatedTargetEffect != nil {
+		if raw.Completion != nil {
+			return nil, fmt.Errorf("goal mixes deprecated objective.target_effect with completion; use completion.threshold and completion.on_threshold only")
+		}
+		raw.Completion = &Completion{
+			Threshold:   *raw.Objective.DeprecatedTargetEffect,
+			OnThreshold: GoalOnThresholdAskHuman,
+		}
+	}
+	if raw.Completion != nil && raw.Completion.Threshold > 0 && raw.Completion.OnThreshold == "" {
+		raw.Completion.OnThreshold = GoalOnThresholdAskHuman
+	}
+	g := Goal{
+		SchemaVersion: raw.SchemaVersion,
+		ID:            raw.ID,
+		Status:        raw.Status,
+		DerivedFrom:   raw.DerivedFrom,
+		Trigger:       raw.Trigger,
+		CreatedAt:     raw.CreatedAt,
+		ClosedAt:      raw.ClosedAt,
+		ClosureReason: raw.ClosureReason,
+		Objective: Objective{
+			Instrument: raw.Objective.Instrument,
+			Target:     raw.Objective.Target,
+			Direction:  raw.Objective.Direction,
+		},
+		Completion:  raw.Completion,
+		Constraints: raw.Constraints,
 	}
 	g.Body = string(body)
 	if g.SchemaVersion == 0 {
-		g.SchemaVersion = 2
+		g.SchemaVersion = GoalSchemaVersion
 	}
 	return &g, nil
 }
 
 func (g *Goal) Marshal() ([]byte, error) {
 	if g.SchemaVersion == 0 {
-		g.SchemaVersion = 2
+		g.SchemaVersion = GoalSchemaVersion
 	}
 	body := g.Body
 	if body == "" {
@@ -85,4 +148,25 @@ func FormatConstraint(c Constraint) string {
 
 func (g *Goal) Steering() string {
 	return ExtractSection(g.Body, "Steering")
+}
+
+func (g *Goal) HasCompletionThreshold() bool {
+	return g != nil && g.Completion != nil && g.Completion.Threshold > 0
+}
+
+func (g *Goal) IsOpenEnded() bool {
+	return !g.HasCompletionThreshold()
+}
+
+func (g *Goal) EffectiveOnThreshold() string {
+	if g == nil {
+		return GoalOnThresholdContinueUntilStall
+	}
+	if g.HasCompletionThreshold() {
+		if g.Completion.OnThreshold != "" {
+			return g.Completion.OnThreshold
+		}
+		return GoalOnThresholdAskHuman
+	}
+	return GoalOnThresholdContinueUntilStall
 }

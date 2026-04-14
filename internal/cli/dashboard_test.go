@@ -122,10 +122,13 @@ func TestRenderDashboard_FullState(t *testing.T) {
 	flash := 65536.0
 	snap.Goal = &entity.Goal{
 		Objective: entity.Objective{
-			Instrument:   "qemu_cycles",
-			Target:       "dsp_fir",
-			Direction:    "decrease",
-			TargetEffect: 0.20,
+			Instrument: "qemu_cycles",
+			Target:     "dsp_fir",
+			Direction:  "decrease",
+		},
+		Completion: &entity.Completion{
+			Threshold:   0.20,
+			OnThreshold: entity.GoalOnThresholdAskHuman,
 		},
 		Constraints: []entity.Constraint{
 			{Instrument: "size_flash", Max: &flash},
@@ -172,7 +175,8 @@ func TestRenderDashboard_FullState(t *testing.T) {
 	out := buf.String()
 
 	expectations := []string{
-		"Goal: decrease qemu_cycles on dsp_fir (target_effect=0.2)",
+		"Goal: decrease qemu_cycles on dsp_fir",
+		"Completion: threshold=0.2 -> ask_human",
 		"size_flash ≤ 65536",
 		"host_test require=pass",
 		"5/20 experiments",
@@ -238,8 +242,9 @@ func TestRenderDashboard_Colored(t *testing.T) {
 	flash := 65536.0
 	snap.Goal = &entity.Goal{
 		Objective: entity.Objective{
-			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.2,
+			Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
 		},
+		Completion:  &entity.Completion{Threshold: 0.2, OnThreshold: entity.GoalOnThresholdAskHuman},
 		Constraints: []entity.Constraint{{Instrument: "size_flash", Max: &flash}},
 	}
 	snap.Counts = map[string]int{"hypotheses": 1, "experiments": 1, "observations": 0, "conclusions": 0}

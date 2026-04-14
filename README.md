@@ -19,10 +19,9 @@ files or typing into a dashboard.
 
 ## What it does
 
-You define a goal: an objective metric (with a direction and target effect)
-plus a set of constraints (other instruments that must pass or stay within
-bounds). Claude Code or Codex, driven by two embedded agent contracts, then
-loops:
+You define a goal: an objective metric, a set of constraints, and optionally
+a success threshold plus continuation policy. Claude Code or Codex, driven by
+two embedded agent contracts, then loops:
 
 ```mermaid
 sequenceDiagram
@@ -227,6 +226,7 @@ goal is active is bound to it via `goal_id`.
 
 ```sh
 autoresearch goal set   --objective-instrument host_timing --objective-direction decrease \
+                        --success-threshold 0.20 --on-success ask_human \
                         --constraint-max 'size_flash=131072' --constraint-require 'host_test=pass'
 autoresearch goal conclude --summary "demonstrated 18% gain"
 autoresearch goal new   --from G-0001 --trigger C-0012 \
@@ -240,7 +240,7 @@ Goals are markdown with YAML frontmatter, stored as `.research/goals/G-NNNN.md`:
 
 ```yaml
 ---
-schema_version: 2
+schema_version: 3
 id: G-0001
 status: active
 created_at: 2026-04-12T10:00:00Z
@@ -248,7 +248,9 @@ objective:
   instrument: host_timing
   target: dsp_fir
   direction: decrease
-  target_effect: 0.20
+completion:
+  threshold: 0.20
+  on_threshold: ask_human
 constraints:
   - instrument: size_flash
     max: 131072

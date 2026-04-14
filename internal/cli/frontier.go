@@ -27,6 +27,10 @@ by at least one matching observation in its candidate experiment. For v1
 we only filter on require-constraints; max/min are reported but not yet
 used to disqualify.
 
+` + "`goal_assessment`" + ` is stricter than the row filter: it only reports
+threshold satisfaction when a reviewed, supported conclusion reaches the
+goal threshold and its candidate satisfies every goal constraint.
+
 Orchestrators read ` + "`frontier --json`" + `'s ` + "`stalled_for`" + ` field against the
 configured ` + "`budgets.frontier_stall_k`" + ` to decide when to stop the loop.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -52,7 +56,9 @@ configured ` + "`budgets.frontier_stall_k`" + ` to decide when to stop the loop.
 			if err != nil {
 				return err
 			}
-			rows, stalledFor := computeFrontier(s, goal, concls)
+			obsByExp := loadObservationsByExperiment(s)
+			rows, stalledFor := computeFrontierFromObservations(goal, concls, obsByExp)
+			assessment := assessGoalCompletion(goal, concls, obsByExp)
 
 			cfg, err := s.Config()
 			if err != nil {
@@ -67,25 +73,38 @@ configured ` + "`budgets.frontier_stall_k`" + ` to decide when to stop the loop.
 						"direction":  goal.Objective.Direction,
 					},
 					"frontier":         rows,
+					"goal_assessment":  assessment,
 					"stalled_for":      stalledFor,
 					"frontier_stall_k": cfg.Budgets.FrontierStallK,
 					"stall_reached":    cfg.Budgets.FrontierStallK > 0 && stalledFor >= cfg.Budgets.FrontierStallK,
 				})
 			}
+			w.Textf("[goal: %s, objective: %s, %d supported conclusions]\n", goal.ID, formatGoalObjective(goal), len(rows))
+			w.Textln("")
 			if len(rows) == 0 {
 				w.Textln("(no supported+feasible conclusions yet)")
-				return nil
-			}
-			w.Textf("[goal: %s, objective: %s %s, %d supported conclusions]\n", goal.ID, goal.Objective.Direction, goal.Objective.Instrument, len(rows))
-			w.Textln("")
-			for i, r := range rows {
-				marker := "  "
-				if i == 0 {
-					marker = "* "
+				w.Textln("")
+			} else {
+				for i, r := range rows {
+					marker := "  "
+					if i == 0 {
+						marker = "* "
+					}
+					w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, goal.Objective.Instrument, r.Value)
 				}
-				w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, goal.Objective.Instrument, r.Value)
+				w.Textln("")
 			}
-			w.Textln("")
+			switch assessment.Mode {
+			case "threshold":
+				w.Textf("goal_assessment: threshold=%g -> %s", assessment.Threshold, assessment.OnThreshold)
+				if assessment.Met {
+					w.Textf(" (met by %s; recommended=%s)\n", assessment.MetByConclusion, assessment.RecommendedAction)
+				} else {
+					w.Textf(" (not yet met; recommended=%s)\n", assessment.RecommendedAction)
+				}
+			default:
+				w.Textln("goal_assessment: open-ended -> continue_until_stall (recommended=continue)")
+			}
 			w.Textf("stalled_for: %d", stalledFor)
 			if cfg.Budgets.FrontierStallK > 0 {
 				w.Textf(" (stall-k=%d)", cfg.Budgets.FrontierStallK)
@@ -139,54 +158,47 @@ type frontierRow struct {
 	DeltaFrac  float64 `json:"delta_frac"`
 }
 
+type frontierGoalAssessment struct {
+	Mode              string  `json:"mode"`
+	Threshold         float64 `json:"threshold,omitempty"`
+	OnThreshold       string  `json:"on_threshold,omitempty"`
+	Met               bool    `json:"met"`
+	MetByConclusion   string  `json:"met_by_conclusion,omitempty"`
+	RecommendedAction string  `json:"recommended_action"`
+}
+
+type frontierCandidate struct {
+	Conclusion *entity.Conclusion
+	Value      float64
+}
+
 // computeFrontier returns rows in best-first order for the objective and the
 // count of conclusions written since the last frontier improvement.
 func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclusion) (rows []frontierRow, stalledFor int) {
-	rows = []frontierRow{} // always non-nil so --json emits [] not null
-	// Filter: supported + feasible (require-constraints satisfied).
-	requireByInst := map[string]string{}
-	for _, c := range goal.Constraints {
-		if c.Require != "" {
-			requireByInst[c.Instrument] = c.Require
-		}
-	}
+	return computeFrontierFromObservations(goal, concls, loadObservationsByExperiment(s))
+}
 
-	// Load all observations once and index by experiment ID. This replaces
-	// per-conclusion ListObservationsForExperiment calls that previously
-	// re-read and re-parsed every observation file K×4 times (twice per
-	// loop × two loops).
-	obsByExp := loadObservationsByExperiment(s)
+func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation) (rows []frontierRow, stalledFor int) {
+	rows = []frontierRow{} // always non-nil so --json emits [] not null
+	requireByInst := frontierRequireConstraints(goal)
 
 	for _, c := range concls {
-		if c.Verdict != entity.VerdictSupported {
+		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		if !ok {
 			continue
 		}
-		if c.Effect.Instrument != goal.Objective.Instrument {
-			continue
-		}
-		if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
-			continue
-		}
-		value := candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
 		rows = append(rows, frontierRow{
 			Conclusion: c.ID,
 			Hypothesis: c.Hypothesis,
 			Candidate:  c.CandidateExp,
-			Value:      value,
+			Value:      val,
 			DeltaFrac:  c.Effect.DeltaFrac,
 		})
 	}
-	// Sort best-first.
 	sort.Slice(rows, func(i, j int) bool {
-		if goal.Objective.Direction == "decrease" {
-			return rows[i].Value < rows[j].Value
-		}
-		return rows[i].Value > rows[j].Value
+		return betterFrontierValue(goal.Objective.Direction, rows[i].Value, rows[j].Value)
 	})
 
-	// stalled_for: walk conclusions in chronological order, track the
-	// best-so-far, count how many supported conclusions written AFTER the
-	// last improvement.
 	sortedByTime := make([]*entity.Conclusion, len(concls))
 	copy(sortedByTime, concls)
 	sort.Slice(sortedByTime, func(i, j int) bool { return sortedByTime[i].CreatedAt.Before(sortedByTime[j].CreatedAt) })
@@ -194,33 +206,20 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 	hasBest := false
 	var bestValue float64
 	for _, c := range sortedByTime {
-		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
+		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		if !ok {
 			if hasBest {
 				stalledFor++
 			}
 			continue
 		}
-		if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
-			if hasBest {
-				stalledFor++
-			}
-			continue
-		}
-		val := candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
 		if !hasBest {
 			hasBest = true
 			bestValue = val
 			stalledFor = 0
 			continue
 		}
-		improved := false
-		if goal.Objective.Direction == "decrease" && val < bestValue {
-			improved = true
-		}
-		if goal.Objective.Direction == "increase" && val > bestValue {
-			improved = true
-		}
-		if improved {
+		if betterFrontierValue(goal.Objective.Direction, val, bestValue) {
 			bestValue = val
 			stalledFor = 0
 		} else {
@@ -228,6 +227,106 @@ func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 		}
 	}
 	return rows, stalledFor
+}
+
+func frontierRequireConstraints(goal *entity.Goal) map[string]string {
+	requireByInst := map[string]string{}
+	if goal == nil {
+		return requireByInst
+	}
+	for _, c := range goal.Constraints {
+		if c.Require != "" {
+			requireByInst[c.Instrument] = c.Require
+		}
+	}
+	return requireByInst
+}
+
+func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obsByExp map[string][]*entity.Observation, requireByInst map[string]string) (float64, bool) {
+	if goal == nil || c == nil {
+		return 0, false
+	}
+	if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
+		return 0, false
+	}
+	if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
+		return 0, false
+	}
+	return candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
+}
+
+func betterFrontierValue(direction string, candidate, incumbent float64) bool {
+	if direction == "decrease" {
+		return candidate < incumbent
+	}
+	return candidate > incumbent
+}
+
+func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation) frontierGoalAssessment {
+	if goal == nil || goal.IsOpenEnded() {
+		return frontierGoalAssessment{
+			Mode:              "open_ended",
+			Met:               false,
+			RecommendedAction: "continue",
+		}
+	}
+
+	assessment := frontierGoalAssessment{
+		Mode:              "threshold",
+		Threshold:         goal.Completion.Threshold,
+		OnThreshold:       goal.EffectiveOnThreshold(),
+		Met:               false,
+		RecommendedAction: "continue",
+	}
+
+	var bestReviewed frontierCandidate
+	hasReviewed := false
+	for _, c := range concls {
+		if c == nil || c.ReviewedBy == "" {
+			continue
+		}
+		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
+			continue
+		}
+		obs := obsByExp[c.CandidateExp]
+		if !goalConstraintsSatisfied(obs, goal.Constraints) {
+			continue
+		}
+		val, ok := candidateObjectiveValue(obs, goal.Objective.Instrument)
+		if !ok {
+			continue
+		}
+		if !hasReviewed || betterFrontierValue(goal.Objective.Direction, val, bestReviewed.Value) {
+			bestReviewed = frontierCandidate{Conclusion: c, Value: val}
+			hasReviewed = true
+		}
+	}
+	if !hasReviewed {
+		return assessment
+	}
+	if meetsGoalThreshold(goal.Objective.Direction, bestReviewed.Conclusion.Effect.DeltaFrac, goal.Completion.Threshold) {
+		assessment.Met = true
+		assessment.MetByConclusion = bestReviewed.Conclusion.ID
+		switch assessment.OnThreshold {
+		case entity.GoalOnThresholdAskHuman:
+			assessment.RecommendedAction = "ask_human"
+		case entity.GoalOnThresholdStop:
+			assessment.RecommendedAction = "stop"
+		default:
+			assessment.RecommendedAction = "continue"
+		}
+	}
+	return assessment
+}
+
+func meetsGoalThreshold(direction string, deltaFrac, threshold float64) bool {
+	if threshold <= 0 {
+		return false
+	}
+	if direction == "decrease" {
+		return deltaFrac <= -threshold
+	}
+	return deltaFrac >= threshold
 }
 
 // loadObservationsByExperiment reads all observations once and returns them
@@ -277,11 +376,48 @@ func requireSatisfied(obs []*entity.Observation, req map[string]string) bool {
 	return true
 }
 
-func candidateObjectiveValue(obs []*entity.Observation, instrument string) float64 {
-	for _, o := range obs {
-		if o.Instrument == instrument {
-			return o.Value
+func goalConstraintsSatisfied(obs []*entity.Observation, constraints []entity.Constraint) bool {
+	for _, c := range constraints {
+		if !goalConstraintSatisfied(obs, c) {
+			return false
 		}
 	}
-	return 0
+	return true
+}
+
+func goalConstraintSatisfied(obs []*entity.Observation, c entity.Constraint) bool {
+	for _, o := range obs {
+		if o.Instrument != c.Instrument {
+			continue
+		}
+		switch {
+		case c.Max != nil:
+			if o.Value <= *c.Max {
+				return true
+			}
+		case c.Min != nil:
+			if o.Value >= *c.Min {
+				return true
+			}
+		case c.Require != "":
+			switch c.Require {
+			case "pass":
+				if o.Pass != nil && *o.Pass {
+					return true
+				}
+			default:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func candidateObjectiveValue(obs []*entity.Observation, instrument string) (float64, bool) {
+	for _, o := range obs {
+		if o.Instrument == instrument {
+			return o.Value, true
+		}
+	}
+	return 0, false
 }

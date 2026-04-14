@@ -51,7 +51,7 @@ func (s *Store) migrateV1ToV2() error {
 	g.ID = newID
 	g.Status = entity.GoalStatusActive
 	g.CreatedAt = &createdAt
-	g.SchemaVersion = 2
+	g.SchemaVersion = entity.GoalSchemaVersion
 
 	if err := os.MkdirAll(s.GoalsDir(), 0o755); err != nil {
 		return fmt.Errorf("create goals dir: %w", err)
@@ -93,7 +93,7 @@ func (s *Store) migrateV1ToV2() error {
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"goal_id":           newID,
+		"goal_id":            newID,
 		"stamped_hypotheses": len(hyps),
 	})
 	return s.AppendEvent(Event{
@@ -122,4 +122,3 @@ func (s *Store) maybeMigrate() error {
 	}
 	return nil
 }
-

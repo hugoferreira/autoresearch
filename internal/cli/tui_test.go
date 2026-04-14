@@ -26,8 +26,9 @@ func tuiRichSnapshot() *dashboardSnapshot {
 		Mode:    "strict",
 		Goal: &entity.Goal{
 			Objective: entity.Objective{
-				Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.2,
+				Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
 			},
+			Completion: &entity.Completion{Threshold: 0.2, OnThreshold: entity.GoalOnThresholdAskHuman},
 			Constraints: []entity.Constraint{
 				{Instrument: "size_flash", Max: &flash},
 				{Instrument: "host_test", Require: "pass"},
@@ -389,9 +390,14 @@ func TestTUI_FrontierView(t *testing.T) {
 	v := newFrontierView()
 	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
 	rows := []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}}
-	nv, _ := v.update(frontierLoadedMsg{goal: g, rows: rows, stalled: 2}, nil)
+	nv, _ := v.update(frontierLoadedMsg{
+		goal:       g,
+		rows:       rows,
+		assessment: frontierGoalAssessment{Mode: "open_ended", RecommendedAction: "continue"},
+		stalled:    2,
+	}, nil)
 	out := stripANSI(nv.view(120, 20))
-	for _, want := range []string{"decrease qemu_cycles", "stalled_for=2", "C-0001", "H-0001", "750067"} {
+	for _, want := range []string{"decrease qemu_cycles", "stalled_for=2", "open-ended -> continue_until_stall", "C-0001", "H-0001", "750067"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("frontier view missing %q:\n%s", want, out)
 		}
@@ -402,12 +408,13 @@ func TestTUI_GoalView(t *testing.T) {
 	v := newGoalView()
 	flash := 65536.0
 	g := &entity.Goal{
-		Objective:   entity.Objective{Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease", TargetEffect: 0.2},
+		Objective:   entity.Objective{Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease"},
+		Completion:  &entity.Completion{Threshold: 0.2, OnThreshold: entity.GoalOnThresholdAskHuman},
 		Constraints: []entity.Constraint{{Instrument: "size_flash", Max: &flash}, {Instrument: "host_test", Require: "pass"}},
 	}
 	nv, _ := v.update(goalLoadedMsg{g: g}, nil)
 	out := stripANSI(nv.view(100, 20))
-	for _, want := range []string{"Objective:", "decrease qemu_cycles", "size_flash", "host_test", "require=pass"} {
+	for _, want := range []string{"Objective:", "decrease qemu_cycles", "Completion:", "threshold=0.2 -> ask_human", "size_flash", "host_test", "require=pass"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("goal view missing %q:\n%s", want, out)
 		}

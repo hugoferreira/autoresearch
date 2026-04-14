@@ -51,6 +51,24 @@ func ValidateGoal(g *entity.Goal, cfg *store.Config) error {
 	default:
 		return fmt.Errorf("objective direction must be 'increase' or 'decrease', got %q", g.Objective.Direction)
 	}
+	if g.Completion != nil {
+		if g.Completion.Threshold <= 0 {
+			return errors.New("goal completion.threshold must be > 0")
+		}
+		switch g.EffectiveOnThreshold() {
+		case entity.GoalOnThresholdAskHuman,
+			entity.GoalOnThresholdStop,
+			entity.GoalOnThresholdContinueUntilStall,
+			entity.GoalOnThresholdContinueUntilBudgetCap:
+		default:
+			return fmt.Errorf("goal completion.on_threshold must be one of %q, %q, %q, or %q, got %q",
+				entity.GoalOnThresholdAskHuman,
+				entity.GoalOnThresholdStop,
+				entity.GoalOnThresholdContinueUntilStall,
+				entity.GoalOnThresholdContinueUntilBudgetCap,
+				g.Completion.OnThreshold)
+		}
+	}
 	if len(g.Constraints) == 0 {
 		return errors.New("goal must declare at least one constraint (autoresearch needs something to bound the search)")
 	}

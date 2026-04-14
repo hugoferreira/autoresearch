@@ -177,12 +177,20 @@ by creating a new goal that ` + "`--from`" + ` the previous one; the new goal
 gets its own fresh hypotheses, experiments, and observations because
 the circumstances are different.
 
+Goals may be thresholded or open-ended. Use ` + "`--success-threshold`" + ` to
+declare what counts as "goal met", and ` + "`--on-success`" + ` to say whether
+the loop should stop, ask the human, or keep exploring once that threshold is
+cleared. If no threshold is declared, the goal is directional/open-ended and
+the default behavior is to continue until the frontier stalls, the budget is
+hit, or the human re-steers.
+
     # Bootstrap (first goal only — refuses if any goal already exists)
     autoresearch goal set \
         --objective-instrument qemu_cycles \
         --objective-target dsp_fir \
         --objective-direction decrease \
-        --objective-target-effect 0.20 \
+        --success-threshold 0.20 \
+        --on-success ask_human \
         --constraint-max 'binary_size=65536' \
         --constraint-require 'test=pass' \
         --steering "start with loop unrolling"
@@ -223,7 +231,7 @@ the firewall sees.
     autoresearch hypothesis diff     <hyp-id> [--conclusion C-NNNN]  # unified diff vs baseline
     autoresearch hypothesis apply    <hyp-id> [--conclusion C-NNNN] [--merge]  # ship it (requires reviewed conclusion)
     autoresearch tree               [--root H-XXXX]
-    autoresearch frontier                                  # best-first, stalled_for
+    autoresearch frontier                                  # best-first, stalled_for, goal_assessment
     autoresearch report             <hyp-id>               # markdown writeup
 
 ### Experiments
