@@ -84,6 +84,46 @@ func TestInitializeLessonState(t *testing.T) {
 	if systemLesson.Provenance == nil || systemLesson.Provenance.SourceChain != entity.LessonSourceSystem {
 		t.Fatalf("system lesson provenance = %+v, want %q", systemLesson.Provenance, entity.LessonSourceSystem)
 	}
+
+	h2 := &entity.Hypothesis{
+		ID:        "H-0002",
+		Claim:     "reorder taps",
+		Predicts:  entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+		KillIf:    []string{"flash grows"},
+		Status:    entity.StatusInconclusive,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h2); err != nil {
+		t.Fatal(err)
+	}
+	c2 := &entity.Conclusion{
+		ID:         "C-0002",
+		Hypothesis: h2.ID,
+		Verdict:    entity.VerdictInconclusive,
+		Author:     "agent:analyst",
+		CreatedAt:  now,
+	}
+	if err := s.WriteConclusion(c2); err != nil {
+		t.Fatal(err)
+	}
+	invalidatedLesson := &entity.Lesson{
+		ID:        "L-0003",
+		Claim:     "tap reordering just shifts variance around",
+		Scope:     entity.LessonScopeHypothesis,
+		Subjects:  []string{"C-0002"},
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := initializeLessonState(s, invalidatedLesson); err != nil {
+		t.Fatalf("initializeLessonState(inconclusive) failed: %v", err)
+	}
+	if invalidatedLesson.Status != entity.LessonStatusInvalidated {
+		t.Fatalf("invalidated lesson status = %q, want %q", invalidatedLesson.Status, entity.LessonStatusInvalidated)
+	}
+	if invalidatedLesson.Provenance == nil || invalidatedLesson.Provenance.SourceChain != entity.LessonSourceInconclusive {
+		t.Fatalf("invalidated lesson provenance = %+v, want %q", invalidatedLesson.Provenance, entity.LessonSourceInconclusive)
+	}
 }
 
 func TestSyncHypothesisLessons(t *testing.T) {
@@ -210,6 +250,77 @@ func TestSyncHypothesisLessons(t *testing.T) {
 	}
 }
 
+func TestSyncHypothesisLessons_ReclassifiesMalformedSystemLessons(t *testing.T) {
+	s := mustCreateCLIStore(t)
+	now := time.Now().UTC()
+
+	h := &entity.Hypothesis{
+		ID:        "H-0001",
+		Claim:     "unroll the loop",
+		Predicts:  entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+		KillIf:    []string{"flash grows"},
+		Status:    entity.StatusSupported,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h); err != nil {
+		t.Fatal(err)
+	}
+	c := &entity.Conclusion{
+		ID:         "C-0001",
+		Hypothesis: h.ID,
+		Verdict:    entity.VerdictSupported,
+		ReviewedBy: "agent:gate",
+		Author:     "agent:analyst",
+		CreatedAt:  now,
+	}
+	if err := s.WriteConclusion(c); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := &entity.Lesson{
+		ID:         "L-0009",
+		Claim:      "legacy malformed system lesson",
+		Scope:      entity.LessonScopeSystem,
+		Subjects:   []string{"C-0001"},
+		Status:     entity.LessonStatusActive,
+		Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceSystem},
+		Author:     "agent:analyst",
+		CreatedAt:  now,
+	}
+	if err := s.WriteLesson(legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	c.Verdict = entity.VerdictInconclusive
+	h.Status = entity.StatusInconclusive
+	if err := s.WriteConclusion(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteHypothesis(h); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := syncHypothesisLessons(s, h.ID, lessonSyncOnDowngrade)
+	if err != nil {
+		t.Fatalf("syncHypothesisLessons(downgrade malformed system) failed: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("changes = %+v, want 1", changes)
+	}
+	if changes[0].LessonID != "L-0009" || changes[0].ToStatus != entity.LessonStatusInvalidated || changes[0].ToSource != entity.LessonSourceInconclusive {
+		t.Fatalf("change = %+v", changes[0])
+	}
+
+	back, err := s.ReadLesson("L-0009")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Status != entity.LessonStatusInvalidated || back.Provenance == nil || back.Provenance.SourceChain != entity.LessonSourceInconclusive {
+		t.Fatalf("reclassified malformed system lesson = %+v", back)
+	}
+}
+
 func TestWriteWorktreeBrief_ExcludesNonSteeringLessons(t *testing.T) {
 	s := mustCreateCLIStore(t)
 	now := time.Now().UTC()
@@ -224,6 +335,30 @@ func TestWriteWorktreeBrief_ExcludesNonSteeringLessons(t *testing.T) {
 		CreatedAt: now,
 	}
 	if err := s.WriteHypothesis(h); err != nil {
+		t.Fatal(err)
+	}
+	h2 := &entity.Hypothesis{
+		ID:        "H-0002",
+		Claim:     "vectorize the taps",
+		Predicts:  entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+		KillIf:    []string{"flash grows"},
+		Status:    entity.StatusUnreviewed,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h2); err != nil {
+		t.Fatal(err)
+	}
+	h3 := &entity.Hypothesis{
+		ID:        "H-0003",
+		Claim:     "reorder the taps",
+		Predicts:  entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+		KillIf:    []string{"flash grows"},
+		Status:    entity.StatusInconclusive,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h3); err != nil {
 		t.Fatal(err)
 	}
 	e := &entity.Experiment{
@@ -255,7 +390,7 @@ func TestWriteWorktreeBrief_ExcludesNonSteeringLessons(t *testing.T) {
 			ID:         "L-0002",
 			Claim:      "provisional lesson",
 			Scope:      entity.LessonScopeHypothesis,
-			Subjects:   []string{"H-0001"},
+			Subjects:   []string{"H-0002"},
 			Status:     entity.LessonStatusProvisional,
 			Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceUnreviewedDecisive},
 			Author:     "agent:analyst",
@@ -265,7 +400,7 @@ func TestWriteWorktreeBrief_ExcludesNonSteeringLessons(t *testing.T) {
 			ID:         "L-0003",
 			Claim:      "invalidated lesson",
 			Scope:      entity.LessonScopeHypothesis,
-			Subjects:   []string{"H-0001"},
+			Subjects:   []string{"H-0003"},
 			Status:     entity.LessonStatusInvalidated,
 			Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceInconclusive},
 			Author:     "agent:analyst",

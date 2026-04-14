@@ -250,6 +250,15 @@ func TestValidateLesson(t *testing.T) {
 			t.Errorf("valid system lesson rejected: %v", err)
 		}
 	})
+	t.Run("system scope rejects subjects", func(t *testing.T) {
+		l := &entity.Lesson{
+			Claim: "x", Scope: entity.LessonScopeSystem, Subjects: []string{"H-0001"},
+		}
+		if err := firewall.ValidateLesson(l); err == nil ||
+			!strings.Contains(err.Error(), "cannot cite --from subjects") {
+			t.Errorf("system scope with subjects should fail, got %v", err)
+		}
+	})
 	t.Run("empty claim", func(t *testing.T) {
 		l := &entity.Lesson{Scope: entity.LessonScopeSystem}
 		if err := firewall.ValidateLesson(l); err == nil {
@@ -310,6 +319,25 @@ func TestAssessLessonSourceChain(t *testing.T) {
 		}
 		if got != entity.LessonSourceSystem {
 			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceSystem)
+		}
+	})
+
+	t.Run("malformed system lessons with subjects still resolve from subjects", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
+			},
+			conclusions: map[string]*entity.Conclusion{
+				"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
+			},
+		}
+		lesson := &entity.Lesson{ID: "L-0003", Scope: entity.LessonScopeSystem, Subjects: []string{"C-0003"}}
+		got, err := firewall.AssessLessonSourceChain(reader, lesson)
+		if err != nil {
+			t.Fatalf("AssessLessonSourceChain failed: %v", err)
+		}
+		if got != entity.LessonSourceUnreviewedDecisive {
+			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceUnreviewedDecisive)
 		}
 	})
 
@@ -403,6 +431,22 @@ func TestCheckInspiredByLessonsReviewed(t *testing.T) {
 		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
 		if err == nil || !strings.Contains(err.Error(), "unreviewed decisive chain") {
 			t.Fatalf("expected unreviewed decisive lesson to be rejected, got %v", err)
+		}
+	})
+
+	t.Run("rejects malformed system lessons on unreviewed decisive chains", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0005": {ID: "H-0005", Status: entity.StatusUnreviewed},
+			},
+			conclusions: map[string]*entity.Conclusion{
+				"C-0005": {ID: "C-0005", Hypothesis: "H-0005", Verdict: entity.VerdictSupported},
+			},
+		}
+		lessons := []*entity.Lesson{{ID: "L-0005", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Subjects: []string{"C-0005"}}}
+		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
+		if err == nil || !strings.Contains(err.Error(), "unreviewed decisive chain") {
+			t.Fatalf("expected malformed system lesson to be rejected, got %v", err)
 		}
 	})
 

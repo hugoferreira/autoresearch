@@ -25,6 +25,19 @@ type lessonStateChange struct {
 	ToSource   string
 }
 
+func lessonStatusForSourceChain(sourceChain string) (string, bool) {
+	switch sourceChain {
+	case entity.LessonSourceSystem, entity.LessonSourceReviewedDecisive:
+		return entity.LessonStatusActive, true
+	case entity.LessonSourceUnreviewedDecisive:
+		return entity.LessonStatusProvisional, true
+	case entity.LessonSourceInconclusive:
+		return entity.LessonStatusInvalidated, true
+	default:
+		return "", false
+	}
+}
+
 func initializeLessonState(s *store.Store, l *entity.Lesson) error {
 	if l == nil {
 		return nil
@@ -37,11 +50,11 @@ func initializeLessonState(s *store.Store, l *entity.Lesson) error {
 		l.Provenance = &entity.LessonProvenance{}
 	}
 	l.Provenance.SourceChain = sourceChain
-	if l.Scope == entity.LessonScopeSystem || sourceChain == entity.LessonSourceReviewedDecisive {
-		l.Status = entity.LessonStatusActive
+	if status, ok := lessonStatusForSourceChain(sourceChain); ok {
+		l.Status = status
 		return nil
 	}
-	l.Status = entity.LessonStatusProvisional
+	l.Status = l.EffectiveStatus()
 	return nil
 }
 
@@ -66,22 +79,16 @@ func annotateLessonForRead(s *store.Store, l *entity.Lesson) (*entity.Lesson, er
 }
 
 func lessonDisplayStatus(l *entity.Lesson, sourceChain string) string {
-	status := entity.LessonStatusActive
-	if l != nil {
-		status = l.EffectiveStatus()
+	if l != nil && l.EffectiveStatus() == entity.LessonStatusSuperseded {
+		return entity.LessonStatusSuperseded
 	}
-	if l != nil && l.Scope == entity.LessonScopeSystem {
+	if status, ok := lessonStatusForSourceChain(sourceChain); ok {
 		return status
 	}
-	if status == entity.LessonStatusActive {
-		switch sourceChain {
-		case entity.LessonSourceUnreviewedDecisive:
-			return entity.LessonStatusProvisional
-		case entity.LessonSourceInconclusive:
-			return entity.LessonStatusInvalidated
-		}
+	if l == nil {
+		return entity.LessonStatusActive
 	}
-	return status
+	return l.EffectiveStatus()
 }
 
 func lessonIsSteering(s *store.Store, l *entity.Lesson) bool {
@@ -92,10 +99,15 @@ func lessonIsSteering(s *store.Store, l *entity.Lesson) bool {
 	if view.Status != entity.LessonStatusActive {
 		return false
 	}
-	if view.Scope == entity.LessonScopeSystem {
-		return true
+	if view.Provenance == nil {
+		return false
 	}
-	return view.Provenance != nil && view.Provenance.SourceChain == entity.LessonSourceReviewedDecisive
+	switch view.Provenance.SourceChain {
+	case entity.LessonSourceSystem, entity.LessonSourceReviewedDecisive:
+		return true
+	default:
+		return false
+	}
 }
 
 func syncHypothesisLessons(s *store.Store, hypID string, mode lessonSyncMode) ([]lessonStateChange, error) {
@@ -106,7 +118,7 @@ func syncHypothesisLessons(s *store.Store, hypID string, mode lessonSyncMode) ([
 
 	var changes []lessonStateChange
 	for _, l := range lessons {
-		if l == nil || l.Scope != entity.LessonScopeHypothesis || l.EffectiveStatus() == entity.LessonStatusSuperseded {
+		if l == nil || l.EffectiveStatus() == entity.LessonStatusSuperseded {
 			continue
 		}
 		touches, err := lessonTouchesHypothesis(s, l, hypID)
@@ -150,23 +162,11 @@ func syncHypothesisLessons(s *store.Store, hypID string, mode lessonSyncMode) ([
 	return changes, nil
 }
 
-func lessonSyncedStatus(mode lessonSyncMode, sourceChain string) string {
-	switch mode {
-	case lessonSyncOnAccept:
-		if sourceChain == entity.LessonSourceReviewedDecisive || sourceChain == entity.LessonSourceSystem {
-			return entity.LessonStatusActive
-		}
-		return entity.LessonStatusProvisional
-	case lessonSyncOnAppeal:
-		return entity.LessonStatusProvisional
-	case lessonSyncOnDowngrade:
-		return entity.LessonStatusInvalidated
-	default:
-		if sourceChain == entity.LessonSourceReviewedDecisive || sourceChain == entity.LessonSourceSystem {
-			return entity.LessonStatusActive
-		}
-		return entity.LessonStatusProvisional
+func lessonSyncedStatus(_ lessonSyncMode, sourceChain string) string {
+	if status, ok := lessonStatusForSourceChain(sourceChain); ok {
+		return status
 	}
+	return entity.LessonStatusProvisional
 }
 
 func lessonTouchesHypothesis(s *store.Store, l *entity.Lesson, hypID string) (bool, error) {

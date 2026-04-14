@@ -68,7 +68,8 @@ use. If you cannot state it in one sentence, it probably isn't a lesson yet.
 Scope is inferred from --from when not set explicitly: if --from has any
 subjects, the lesson defaults to scope=hypothesis; otherwise it defaults
 to scope=system (an incidental finding about the target codebase or the
-research apparatus itself).`,
+research apparatus itself). Explicit --scope system cannot be combined
+with --from.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			if strings.TrimSpace(claim) == "" {
@@ -160,7 +161,7 @@ research apparatus itself).`,
 		},
 	}
 	c.Flags().StringVar(&claim, "claim", "", "one-sentence lesson claim (required)")
-	c.Flags().StringVar(&scope, "scope", "", "hypothesis | system (default: inferred from --from)")
+	c.Flags().StringVar(&scope, "scope", "", "hypothesis | system (default: inferred from --from; system requires no --from)")
 	c.Flags().StringSliceVar(&subjects, "from", nil, "H-/E-/C- ids this lesson was extracted from; may be repeated or comma-separated")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&body, "body", "", "prose expansion of the claim — required for agents. Expected structure: `## Evidence`, `## Mechanism`, `## Scope and counterexamples`, `## For the next generator`. See the research-orchestrator subagent brief for a worked example. A lesson without a body is a one-liner the next generator cannot act on.")

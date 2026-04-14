@@ -335,6 +335,9 @@ func ValidateLesson(l *entity.Lesson) error {
 	if l.Scope == entity.LessonScopeHypothesis && len(l.Subjects) == 0 {
 		return errors.New("lesson with scope=hypothesis requires at least one subject (--from H-NNNN,C-NNNN,...)")
 	}
+	if l.Scope == entity.LessonScopeSystem && len(l.Subjects) > 0 {
+		return errors.New("lesson with scope=system cannot cite --from subjects; omit --scope to infer hypothesis, or drop --from for a free-floating system note")
+	}
 	for i, sub := range l.Subjects {
 		if !isValidSubjectID(sub) {
 			return fmt.Errorf("subject[%d] %q must be an H-/E-/C- id", i, sub)
@@ -396,8 +399,11 @@ func AssessLessonSourceChain(r inspiredByReviewReader, lesson *entity.Lesson) (s
 	if lesson == nil {
 		return "", errors.New("cannot assess source chain for a nil lesson")
 	}
-	if lesson.Scope == entity.LessonScopeSystem || len(lesson.Subjects) == 0 {
-		return entity.LessonSourceSystem, nil
+	if len(lesson.Subjects) == 0 {
+		if lesson.Scope == entity.LessonScopeSystem {
+			return entity.LessonSourceSystem, nil
+		}
+		return entity.LessonSourceInconclusive, nil
 	}
 	if r == nil {
 		return "", errors.New("cannot assess lesson source chain without a store reader")
