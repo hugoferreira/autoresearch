@@ -139,7 +139,7 @@ For the routine optimization loop, the canonical command spine is:
     autoresearch analyze <E-id> [--baseline <baseline-exp-id>] --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
-    autoresearch conclusion accept <C-id> ...  # or downgrade, before the next cycle
+    # then yield with review pending so the parent/main session can dispatch research-gate-reviewer
 
 This document is the primary contract for routine autoresearch work. Use
 ` + "`<verb> --help`" + ` only when a verb or flag you need is missing or ambiguous
