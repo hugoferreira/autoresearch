@@ -13,12 +13,13 @@ import (
 // ---- list view ----
 
 type lessonListView struct {
-	all      []*entity.Lesson
-	filtered []*entity.Lesson
-	cursor   int
-	scope    string // "" means all
-	status   string // "" means all
-	err      error
+	goalScope goalScope
+	all       []*entity.Lesson
+	filtered  []*entity.Lesson
+	cursor    int
+	scope     string // "" means all
+	status    string // "" means all
+	err       error
 }
 
 type lessonListLoadedMsg struct {
@@ -26,13 +27,16 @@ type lessonListLoadedMsg struct {
 	err  error
 }
 
-func newLessonListView() *lessonListView { return &lessonListView{} }
+func newLessonListView(scope goalScope) *lessonListView { return &lessonListView{goalScope: scope} }
 
 func (v *lessonListView) title() string { return "Lessons" }
 
 func (v *lessonListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		list, err := s.ListLessons()
+		if err == nil {
+			list, err = newGoalScopeResolver(s, v.goalScope).filterLessons(list)
+		}
 		if err == nil {
 			views := make([]*entity.Lesson, 0, len(list))
 			for _, l := range list {

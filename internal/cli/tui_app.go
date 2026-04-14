@@ -61,6 +61,7 @@ type tuiView interface {
 
 type tuiModel struct {
 	store    *store.Store
+	scope    goalScope
 	stack    []tuiView
 	width    int
 	height   int
@@ -71,10 +72,11 @@ type tuiModel struct {
 	chrome chromeLoadedMsg
 }
 
-func newTuiModel(s *store.Store, refresh time.Duration) tuiModel {
+func newTuiModel(s *store.Store, scope goalScope, refresh time.Duration) tuiModel {
 	return tuiModel{
 		store:   s,
-		stack:   []tuiView{newDashboardView()},
+		scope:   scope,
+		stack:   []tuiView{newDashboardView(scope)},
 		refresh: refresh,
 	}
 }
@@ -82,7 +84,7 @@ func newTuiModel(s *store.Store, refresh time.Duration) tuiModel {
 func (m tuiModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.top().init(m.store),
-		fetchChrome(m.store),
+		fetchChrome(m.store, m.scope),
 		tuiTick(m.refresh),
 	)
 }
@@ -97,7 +99,7 @@ func tuiTick(d time.Duration) tea.Cmd {
 // fetchChrome reads the cheap state+config+counts summary used by the header
 // status bar. It is scheduled independently of the active view so the header
 // stays fresh on every tick regardless of what's on top of the stack.
-func fetchChrome(s *store.Store) tea.Cmd {
+func fetchChrome(s *store.Store, scope goalScope) tea.Cmd {
 	return func() tea.Msg {
 		msg := chromeLoadedMsg{}
 		if s == nil {
@@ -110,8 +112,23 @@ func fetchChrome(s *store.Store) tea.Cmd {
 		if cfg, err := s.Config(); err == nil {
 			msg.mode = cfg.Mode
 		}
-		if counts, err := s.Counts(); err == nil {
-			msg.counts = counts
+		resolver := newGoalScopeResolver(s, scope)
+		hyps, herr := s.ListHypotheses()
+		exps, eerr := s.ListExperiments()
+		obs, oerr := s.ListObservations()
+		concls, cerr := s.ListConclusions()
+		if herr == nil && eerr == nil && oerr == nil && cerr == nil {
+			exps, eerr = resolver.filterExperiments(exps)
+			obs, oerr = resolver.filterObservations(obs)
+			concls, cerr = resolver.filterConclusions(concls)
+			if eerr == nil && oerr == nil && cerr == nil {
+				msg.counts = map[string]int{
+					"hypotheses":   len(resolver.filterHypotheses(hyps)),
+					"experiments":  len(exps),
+					"observations": len(obs),
+					"conclusions":  len(concls),
+				}
+			}
 		}
 		return msg
 	}
@@ -140,7 +157,7 @@ func (m *tuiModel) jumpTo(v tuiView, s *store.Store) tea.Cmd {
 			return nil
 		}
 	}
-	m.stack = []tuiView{newDashboardView(), v}
+	m.stack = []tuiView{newDashboardView(m.scope), v}
 	return v.init(s)
 }
 
@@ -160,7 +177,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		top := m.top()
 		nv, cmd := top.update(msg, m.store)
 		m.setTop(nv)
-		return m, tea.Batch(cmd, fetchChrome(m.store), tuiTick(m.refresh))
+		return m, tea.Batch(cmd, fetchChrome(m.store, m.scope), tuiTick(m.refresh))
 
 	case chromeLoadedMsg:
 		m.chrome = msg
@@ -171,7 +188,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, msg.v.init(m.store)
 
 	case tuiResetMsg:
-		m.stack = []tuiView{newDashboardView()}
+		m.stack = []tuiView{newDashboardView(m.scope)}
 		return m, m.top().init(m.store)
 
 	case tea.KeyMsg:
@@ -192,29 +209,29 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "H":
-			return m, m.jumpTo(newHypothesisListView(), m.store)
+			return m, m.jumpTo(newHypothesisListView(m.scope), m.store)
 		case "E":
-			return m, m.jumpTo(newExperimentListView(), m.store)
+			return m, m.jumpTo(newExperimentListView(m.scope), m.store)
 		case "C":
-			return m, m.jumpTo(newConclusionListView(), m.store)
+			return m, m.jumpTo(newConclusionListView(m.scope), m.store)
 		case "L":
-			return m, m.jumpTo(newEventListView(), m.store)
+			return m, m.jumpTo(newEventListView(m.scope), m.store)
 		case "N":
-			return m, m.jumpTo(newLessonListView(), m.store)
+			return m, m.jumpTo(newLessonListView(m.scope), m.store)
 		case "T":
-			return m, m.jumpTo(newTreeView(), m.store)
+			return m, m.jumpTo(newTreeView(m.scope), m.store)
 		case "F":
-			return m, m.jumpTo(newFrontierView(), m.store)
+			return m, m.jumpTo(newFrontierView(m.scope), m.store)
 		case "O":
-			return m, m.jumpTo(newGoalView(), m.store)
+			return m, m.jumpTo(newGoalListView(), m.store)
 		case "S":
-			return m, m.jumpTo(newStatusView(), m.store)
+			return m, m.jumpTo(newStatusView(m.scope), m.store)
 		case "A":
-			return m, m.jumpTo(newArtifactListView(), m.store)
+			return m, m.jumpTo(newArtifactListView(m.scope), m.store)
 		case "I":
 			return m, m.jumpTo(newInstrumentListView(), m.store)
 		case "R":
-			return m, m.jumpTo(newHypothesisListViewForReport(), m.store)
+			return m, m.jumpTo(newHypothesisListViewForReport(m.scope), m.store)
 		case "D":
 			return m, func() tea.Msg { return tuiResetMsg{} }
 		}
@@ -353,6 +370,7 @@ func (m tuiModel) renderHeader() string {
 			m.chrome.counts["observations"],
 			m.chrome.counts["conclusions"]))
 	}
+	rightOrder = append(rightOrder, tuiDim.Render("scope=")+m.scope.label())
 	if m.refresh > 0 {
 		rightOrder = append(rightOrder, tuiDim.Render("↻"+m.refresh.String()))
 	}
@@ -433,7 +451,7 @@ func (m tuiModel) renderHelp() string {
 		"Jump to view:",
 		"  H hypotheses   E experiments   C conclusions",
 		"  L event log    T tree          F frontier",
-		"  O goal         S status         A artifacts",
+		"  O goals        S status         A artifacts",
 		"  I instruments  R report picker  N notebook",
 		"",
 		"Within a list:",

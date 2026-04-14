@@ -64,7 +64,7 @@ func tuiRichSnapshot() *dashboardSnapshot {
 }
 
 func TestTUI_DashboardRenders(t *testing.T) {
-	v := newDashboardView()
+	v := newDashboardView(goalScope{All: true})
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
 	out := nv.view(140, 40)
 	for _, want := range []string{
@@ -81,7 +81,7 @@ func TestTUI_DashboardRenders(t *testing.T) {
 }
 
 func TestTUI_DashboardNarrowFallback(t *testing.T) {
-	v := newDashboardView()
+	v := newDashboardView(goalScope{All: true})
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
 	out := stripANSI(nv.view(80, 40))
 	// Narrow width still renders the key sections in single-column layout.
@@ -93,7 +93,7 @@ func TestTUI_DashboardNarrowFallback(t *testing.T) {
 }
 
 func TestTUI_HypothesisList(t *testing.T) {
-	v := newHypothesisListView()
+	v := newHypothesisListView(goalScope{All: true})
 	hs := []*entity.Hypothesis{
 		{ID: "H-0001", Claim: "one", Status: entity.StatusOpen, Author: "human"},
 		{ID: "H-0002", Claim: "two", Status: entity.StatusSupported, Author: "agent"},
@@ -169,7 +169,7 @@ func TestTUI_HypothesisDetailOpensLinkedEntities(t *testing.T) {
 }
 
 func TestTUI_ExperimentList(t *testing.T) {
-	v := newExperimentListView()
+	v := newExperimentListView(goalScope{All: true})
 	es := []*entity.Experiment{
 		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Instruments: []string{"qemu_cycles"}},
 	}
@@ -240,7 +240,7 @@ func TestTUI_ObservationDetail(t *testing.T) {
 }
 
 func TestTUI_ConclusionList(t *testing.T) {
-	v := newConclusionListView()
+	v := newConclusionListView(goalScope{All: true})
 	cs := []*entity.Conclusion{
 		{ID: "C-0001", Hypothesis: "H-0001", Verdict: entity.VerdictSupported,
 			Effect: entity.Effect{DeltaFrac: -0.25, PValue: 0.01}},
@@ -275,7 +275,7 @@ func TestTUI_ConclusionDetail(t *testing.T) {
 }
 
 func TestTUI_EventListAndDetail(t *testing.T) {
-	v := newEventListView()
+	v := newEventListView(goalScope{All: true})
 	es := []store.Event{
 		{Ts: time.Now().UTC(), Kind: "experiment.implement", Actor: "agent:impl", Subject: "E-0007",
 			Data: []byte(`{"worktree":"/tmp/wt","branch":"autoresearch/E-0007","samples":5,"pass":true}`)},
@@ -373,7 +373,7 @@ func TestTUI_PrettyJSON(t *testing.T) {
 }
 
 func TestTUI_TreeView(t *testing.T) {
-	v := newTreeView()
+	v := newTreeView(goalScope{All: true})
 	nodes := []*treeNode{
 		{ID: "H-0001", Claim: "root hyp", Status: entity.StatusOpen},
 		{ID: "H-0002", Claim: "another", Status: entity.StatusSupported},
@@ -388,7 +388,7 @@ func TestTUI_TreeView(t *testing.T) {
 }
 
 func TestTUI_FrontierView(t *testing.T) {
-	v := newFrontierView()
+	v := newFrontierView(goalScope{GoalID: "G-0001"})
 	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
 	rows := []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}}
 	nv, _ := v.update(frontierLoadedMsg{
@@ -405,28 +405,45 @@ func TestTUI_FrontierView(t *testing.T) {
 	}
 }
 
-func TestTUI_GoalView(t *testing.T) {
-	v := newGoalView()
+func TestTUI_GoalDetailView(t *testing.T) {
+	v := newGoalDetailView("G-0001")
 	flash := 65536.0
 	g := &entity.Goal{
+		ID:          "G-0001",
+		Status:      entity.GoalStatusActive,
 		Objective:   entity.Objective{Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease"},
 		Completion:  &entity.Completion{Threshold: 0.2, OnThreshold: entity.GoalOnThresholdAskHuman},
 		Constraints: []entity.Constraint{{Instrument: "size_flash", Max: &flash}, {Instrument: "host_test", Require: "pass"}},
 	}
-	nv, _ := v.update(goalLoadedMsg{g: g}, nil)
+	nv, _ := v.update(goalDetailLoadedMsg{g: g}, nil)
 	out := stripANSI(nv.view(100, 20))
-	for _, want := range []string{"Objective:", "decrease qemu_cycles", "Completion:", "threshold=0.2 -> ask_human", "size_flash", "host_test", "require=pass"} {
+	for _, want := range []string{"G-0001", "Objective:", "decrease qemu_cycles", "Completion:", "threshold=0.2 -> ask_human", "size_flash", "host_test", "require=pass"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("goal view missing %q:\n%s", want, out)
+			t.Errorf("goal detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_GoalListView(t *testing.T) {
+	v := newGoalListView()
+	goals := []*entity.Goal{
+		{ID: "G-0001", Status: entity.GoalStatusConcluded, Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"}},
+		{ID: "G-0002", Status: entity.GoalStatusActive, Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}},
+	}
+	nv, _ := v.update(goalListLoadedMsg{all: goals, current: "G-0002"}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"2 goals", "G-0001", "G-0002", "qemu_cycles"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("goal list missing %q:\n%s", want, out)
 		}
 	}
 }
 
 func TestTUI_StatusView(t *testing.T) {
-	v := newStatusView()
+	v := newStatusView(goalScope{All: true})
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
 	out := stripANSI(nv.view(100, 30))
-	for _, want := range []string{"State:", "active", "Mode:", "strict", "Main checkout:", "clean", "Budget:", "5/20 experiments", "Counts:"} {
+	for _, want := range []string{"Scope:", "all", "State:", "active", "Mode:", "strict", "Main checkout:", "clean", "Budget:", "5/20 experiments", "Counts:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status view missing %q:\n%s", want, out)
 		}
@@ -438,7 +455,7 @@ func TestTUI_DashboardAndStatusShowDirtyMainCheckout(t *testing.T) {
 	snap.MainCheckoutDirty = true
 	snap.MainCheckoutDirtyPaths = []string{"bootstrap.sh"}
 
-	dash := newDashboardView()
+	dash := newDashboardView(goalScope{All: true})
 	nv, _ := dash.update(dashLoadedMsg{snap: snap}, nil)
 	out := stripANSI(nv.view(140, 40))
 	for _, want := range []string{"Main checkout dirty:", "bootstrap.sh"} {
@@ -447,7 +464,7 @@ func TestTUI_DashboardAndStatusShowDirtyMainCheckout(t *testing.T) {
 		}
 	}
 
-	status := newStatusView()
+	status := newStatusView(goalScope{All: true})
 	nv, _ = status.update(dashLoadedMsg{snap: snap}, nil)
 	out = stripANSI(nv.view(100, 30))
 	for _, want := range []string{"Main checkout:", "dirty outside autoresearch-managed files", "bootstrap.sh"} {
@@ -458,7 +475,7 @@ func TestTUI_DashboardAndStatusShowDirtyMainCheckout(t *testing.T) {
 }
 
 func TestTUI_ModelHeaderAndHints(t *testing.T) {
-	m := newTuiModel(nil, 2*time.Second)
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
 	m.width, m.height = 120, 30
 	// Feed a loaded snapshot to the dashboard so it renders non-empty.
 	top := m.top()
@@ -473,7 +490,7 @@ func TestTUI_ModelHeaderAndHints(t *testing.T) {
 }
 
 func TestTUI_ArtifactList(t *testing.T) {
-	v := newArtifactListView()
+	v := newArtifactListView(goalScope{All: true})
 	rows := []artifactRow{
 		{Observation: "O-0001", Instrument: "qemu_cycles", Name: "primary", SHA: "abc123def45678", Bytes: 2048, Path: "artifacts/ab/abc123def45678"},
 		{Observation: "O-0002", Instrument: "host_test", Name: "primary", SHA: "fed987abc12345", Bytes: 512000, Path: "artifacts/fe/fed987abc12345"},
@@ -573,18 +590,18 @@ func TestTUI_ExperimentDetailWithStats(t *testing.T) {
 }
 
 func TestTUI_JumpToCanonicalizes(t *testing.T) {
-	m := newTuiModel(nil, 2*time.Second)
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
 	// Start: [dashboard]
 	if got := len(m.stack); got != 1 {
 		t.Fatalf("initial stack depth = %d, want 1", got)
 	}
 	// Jump to hypotheses: [dashboard, hypotheses]
-	m.jumpTo(newHypothesisListView(), nil)
+	m.jumpTo(newHypothesisListView(goalScope{All: true}), nil)
 	if got := len(m.stack); got != 2 || m.top().kind() != kindHypothesisList {
 		t.Fatalf("after H: depth=%d top=%s", got, m.top().kind())
 	}
 	// Jump to hypotheses again: still [dashboard, hypotheses], not 3-deep.
-	m.jumpTo(newHypothesisListView(), nil)
+	m.jumpTo(newHypothesisListView(goalScope{All: true}), nil)
 	if got := len(m.stack); got != 2 {
 		t.Errorf("H after H: depth=%d want 2", got)
 	}
@@ -594,7 +611,7 @@ func TestTUI_JumpToCanonicalizes(t *testing.T) {
 		t.Fatalf("after push detail: depth=%d want 3", got)
 	}
 	// Jump to hypotheses again: truncates to [dashboard, hypotheses], dropping the detail.
-	m.jumpTo(newHypothesisListView(), nil)
+	m.jumpTo(newHypothesisListView(goalScope{All: true}), nil)
 	if got := len(m.stack); got != 2 {
 		t.Errorf("H from detail: depth=%d want 2", got)
 	}
@@ -602,19 +619,19 @@ func TestTUI_JumpToCanonicalizes(t *testing.T) {
 		t.Errorf("top = %s, want hypothesis.list", m.top().kind())
 	}
 	// Jump to experiments from hypotheses: [dashboard, experiments].
-	m.jumpTo(newExperimentListView(), nil)
+	m.jumpTo(newExperimentListView(goalScope{All: true}), nil)
 	if got := len(m.stack); got != 2 || m.top().kind() != kindExperimentList {
 		t.Fatalf("E after H: depth=%d top=%s", got, m.top().kind())
 	}
 	// R opens the report-mode hypothesis list — a different kind, so it pushes.
-	m.jumpTo(newHypothesisListViewForReport(), nil)
+	m.jumpTo(newHypothesisListViewForReport(goalScope{All: true}), nil)
 	if got := len(m.stack); got != 2 || m.top().kind() != kindHypothesisReport {
 		t.Errorf("R after E: depth=%d top=%s", got, m.top().kind())
 	}
 }
 
 func TestTUI_EventListKeysDoNotConflictWithRootShortcuts(t *testing.T) {
-	v := newEventListView()
+	v := newEventListView(goalScope{All: true})
 	es := []store.Event{
 		{Ts: time.Now().UTC(), Kind: "init", Subject: "A"},
 		{Ts: time.Now().UTC(), Kind: "hypothesis.add", Subject: "B"},
@@ -624,8 +641,8 @@ func TestTUI_EventListKeysDoNotConflictWithRootShortcuts(t *testing.T) {
 	ev.cursor = 0
 	ev.follow = false
 
-	m := newTuiModel(nil, 2*time.Second)
-	m.stack = []tuiView{newDashboardView(), ev}
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
+	m.stack = []tuiView{newDashboardView(goalScope{All: true}), ev}
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
 	m = model.(tuiModel)
@@ -649,16 +666,16 @@ func TestTUI_EventListKeysDoNotConflictWithRootShortcuts(t *testing.T) {
 }
 
 func TestTUI_GoalShortcutUsesO(t *testing.T) {
-	m := newTuiModel(nil, 2*time.Second)
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'O'}})
 	m = model.(tuiModel)
-	if m.top().kind() != kindGoal {
+	if m.top().kind() != kindGoalList {
 		t.Fatalf("O should jump to goal view, top=%s", m.top().kind())
 	}
 }
 
 func TestTUI_DashboardForwardsLoadMsgToOverlay(t *testing.T) {
-	d := newDashboardView()
+	d := newDashboardView(goalScope{All: true})
 	// Prime the dashboard with a snapshot so focus/cursor are meaningful.
 	snap := tuiRichSnapshot()
 	nv, _ := d.update(dashLoadedMsg{snap: snap}, nil)
@@ -687,7 +704,7 @@ func TestTUI_DashboardForwardsLoadMsgToOverlay(t *testing.T) {
 }
 
 func TestTUI_DashboardTreePanelTitleUsesBorder(t *testing.T) {
-	d := newDashboardView()
+	d := newDashboardView(goalScope{All: true})
 	d.snap = tuiRichSnapshot()
 
 	out := stripANSI(d.renderTreePanel(60, 8))
@@ -716,12 +733,12 @@ func TestTUI_DashboardRecentEventsPaging(t *testing.T) {
 		}
 	}
 
-	d := newDashboardView()
+	d := newDashboardView(goalScope{All: true})
 	nv, _ := d.update(dashLoadedMsg{snap: baseSnapshot()}, s)
 	d = nv.(*dashboardView)
 	d.focus = dashFocusEvents
 
-	msg := loadDashboardEventsCmd(s, 0, dashboardRecentEventsPageSize, true)()
+	msg := loadDashboardEventsCmd(s, goalScope{All: true}, 0, dashboardRecentEventsPageSize, true)()
 	nv, _ = d.update(msg, s)
 	d = nv.(*dashboardView)
 
@@ -755,7 +772,7 @@ func TestTUI_DashboardRecentEventsPaging(t *testing.T) {
 }
 
 func TestTUI_DashboardRightColumnGivesEventsRemainder(t *testing.T) {
-	d := newDashboardView()
+	d := newDashboardView(goalScope{All: true})
 	d.snap = tuiRichSnapshot()
 
 	frontierH, inFlightH, eventsH := d.rightColumnHeights(30)
@@ -787,7 +804,7 @@ func TestTUI_DashboardVisualDump(t *testing.T) {
 	snap.Paused = true
 	snap.PauseReason = "10/10 experiment budget reached"
 
-	m := newTuiModel(nil, 2*time.Second)
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
 	m.width, m.height = 130, 40
 	m.chrome = chromeLoadedMsg{
 		paused: true, pauseReason: "10/10 experiment budget reached",

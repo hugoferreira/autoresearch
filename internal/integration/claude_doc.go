@@ -112,9 +112,11 @@ by hand, you are lying to future-you — don't.
 
 Every hypothesis is bound to the goal that was active when it was
 added (its ` + "`goal_id`" + ` field); experiments, observations, and
-conclusions inherit that binding by chain. Read-only views like
-` + "`tree`" + ` and ` + "`frontier`" + ` default to the active goal and accept
-` + "`--goal G-NNNN`" + ` to page through closed goals' histories.
+conclusions inherit that binding by chain. Read-only views that aggregate
+goal-derived entities default to the active goal and accept
+` + "`--goal G-NNNN`" + ` to page through closed goals' histories or
+` + "`--goal all`" + ` to broaden the view across goals. System lessons stay
+visible in scoped views.
 
 Backward transitions are explicit and auditable:
 
@@ -154,8 +156,8 @@ only when this reference does not answer the question you have.
 
 ### Lifecycle
     autoresearch init       --build-cmd ... --test-cmd ...
-    autoresearch status
-    autoresearch log        [--tail N] [--kind prefix] [--since RFC3339]
+    autoresearch status     [--goal G-NNNN|all]
+    autoresearch log        [--goal G-NNNN|all] [--tail N] [--kind prefix] [--since RFC3339]
     autoresearch pause      [--reason "..."]
     autoresearch resume
 
@@ -222,7 +224,7 @@ the firewall sees.
         --claim "..." \
         --predicts-instrument NAME --predicts-target T --predicts-direction {increase|decrease} --predicts-min-effect F \
         --kill-if "..." [--kill-if "..."] [--inspired-by L-XXXX,L-YYYY] [--parent H-XXXX] [--author human:alice]
-    autoresearch hypothesis list    [--status ...] [--parent ...]
+    autoresearch hypothesis list    [--goal G-NNNN|all] [--status ...] [--parent ...]
     autoresearch hypothesis show    <hyp-id>
     autoresearch hypothesis kill    <hyp-id> --reason "..."
     autoresearch hypothesis reopen  <hyp-id> --reason "..."
@@ -230,8 +232,8 @@ the firewall sees.
     autoresearch hypothesis worktree <hyp-id> [--conclusion C-NNNN]  # worktree of winning experiment
     autoresearch hypothesis diff     <hyp-id> [--conclusion C-NNNN]  # unified diff vs baseline
     autoresearch hypothesis apply    <hyp-id> [--conclusion C-NNNN] [--merge]  # ship it (requires reviewed conclusion)
-    autoresearch tree               [--root H-XXXX]
-    autoresearch frontier                                  # best-first, stalled_for, goal_assessment
+    autoresearch tree               [--goal G-NNNN|all]
+    autoresearch frontier           [--goal G-NNNN|all]   # best-first, stalled_for, goal_assessment
     autoresearch report             <hyp-id>               # markdown writeup
 
 The active goal defines the optimization problem. ` + "`predicts.instrument`" + ` must
@@ -246,7 +248,7 @@ unless the goal names them.
     autoresearch experiment implement  <exp-id>
     autoresearch experiment reset      <exp-id> --reason "..."
     autoresearch experiment worktree   <exp-id>
-    autoresearch experiment list       [--status ...] [--hypothesis ...]
+    autoresearch experiment list       [--goal G-NNNN|all] [--status ...] [--hypothesis ...]
     autoresearch experiment show       <exp-id>
 
 Instrument dependencies: instruments may declare ` + "`--requires`" + ` dependencies
@@ -268,7 +270,7 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
         # (frontier best). JSON output includes both effect and incremental_effect.
 
 ### Conclusions (review and gate reviewer)
-    autoresearch conclusion list       [--hypothesis H-XXXX] [--verdict X]
+    autoresearch conclusion list       [--goal G-NNNN|all] [--hypothesis H-XXXX] [--verdict X]
     autoresearch conclusion show       <C-id>
     autoresearch conclusion accept     <C-id> --reviewed-by ... --rationale "..."
         # Gate reviewer's acceptance: sets reviewed_by, promotes hypothesis
@@ -284,7 +286,7 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
 
 ### Artifact navigation (bounded by default)
-    autoresearch artifact list   [--experiment E-XXXX | --observation O-XXXX]
+    autoresearch artifact list   [--goal G-NNNN|all] [--experiment E-XXXX | --observation O-XXXX]
     autoresearch artifact stat   <sha-or-prefix>
     autoresearch artifact path   <sha-or-prefix>
     autoresearch artifact head   <sha> [--lines N]         # default 50
@@ -411,7 +413,7 @@ Verbs:
 
     autoresearch lesson add --claim "..." --body "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
         [--predict-instrument X --predict-direction {increase|decrease} --predict-min-effect N [--predict-max-effect M]]
-    autoresearch lesson list [--scope ...] [--status ...] [--subject ...] [--tag ...]
+    autoresearch lesson list [--goal G-NNNN|all] [--scope ...] [--status ...] [--subject ...] [--tag ...]
     autoresearch lesson show <L-id>
     autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
     autoresearch lesson accuracy   # compare predicted effects vs actual outcomes (read-only)
@@ -584,16 +586,20 @@ the main store from a worktree context, pass ` + "`-C <project-root>`" + ` expli
 When you want to see what's happening across the whole research state without
 spamming four separate verbs:
 
-    autoresearch dashboard              # one-shot composite snapshot
-    autoresearch dashboard --refresh 2  # live, auto-refreshes every 2 seconds
-    autoresearch log --follow           # tail events.jsonl as new events land
+    autoresearch dashboard                   # one-shot composite snapshot (scoped to active goal)
+    autoresearch dashboard --goal all        # broaden the snapshot across goals
+    autoresearch dashboard --refresh 2       # live, auto-refreshes every 2 seconds
+    autoresearch dashboard tui --goal G-0007 # read-only TUI pinned to one goal
+    autoresearch log --follow                # tail events.jsonl as new events land
 
 The dashboard composes goal + budget + hypothesis tree + frontier + in-flight
 experiments + recent events into one frame. It is **read-only**: it works
 while the store is paused and it is not a steering surface. Humans steer by
 talking to the main session, which translates intent into CLI calls; leave
 ` + "`autoresearch dashboard --refresh 2`" + ` running in a second terminal or tmux
-pane while you drive research.
+pane while you drive research. Read surfaces that aggregate goal-derived
+entities default to the active goal; pass ` + "`--goal G-NNNN`" + ` to inspect a
+closed goal or ` + "`--goal all`" + ` to broaden the view across goals.
 
 ` + "`autoresearch dashboard --json`" + ` emits a structured snapshot for external
 tooling (` + "`--refresh`" + ` is refused in JSON mode — use a polling loop

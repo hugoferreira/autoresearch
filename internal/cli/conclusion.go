@@ -20,7 +20,7 @@ func conclusionCommands() []*cobra.Command {
 }
 
 func conclusionListCmd() *cobra.Command {
-	var hyp, verdict string
+	var hyp, verdict, goalFlag string
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List conclusions",
@@ -30,7 +30,15 @@ func conclusionListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
 			all, err := s.ListConclusions()
+			if err != nil {
+				return err
+			}
+			all, err = newGoalScopeResolver(s, scope).filterConclusions(all)
 			if err != nil {
 				return err
 			}
@@ -64,6 +72,7 @@ func conclusionListCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&hyp, "hypothesis", "", "filter by hypothesis id")
 	c.Flags().StringVar(&verdict, "verdict", "", "filter by verdict (supported|refuted|inconclusive)")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
 

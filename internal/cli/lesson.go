@@ -175,10 +175,11 @@ with --from.`,
 
 func lessonListCmd() *cobra.Command {
 	var (
-		scope   string
-		status  string
-		subject string
-		tag     string
+		scope    string
+		status   string
+		subject  string
+		tag      string
+		goalFlag string
 	)
 	c := &cobra.Command{
 		Use:   "list",
@@ -189,7 +190,15 @@ func lessonListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			goalScope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
 			all, err := s.ListLessons()
+			if err != nil {
+				return err
+			}
+			all, err = newGoalScopeResolver(s, goalScope).filterLessons(all)
 			if err != nil {
 				return err
 			}
@@ -239,6 +248,7 @@ func lessonListCmd() *cobra.Command {
 	c.Flags().StringVar(&status, "status", "", "filter by status (active | provisional | invalidated | superseded)")
 	c.Flags().StringVar(&subject, "subject", "", "filter by subject id (returns lessons citing this id)")
 	c.Flags().StringVar(&tag, "tag", "", "filter by tag")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
 

@@ -14,11 +14,12 @@ import (
 // ---- list view ----
 
 type experimentListView struct {
-	all      []*entity.Experiment
-	filtered []*entity.Experiment
-	cursor   int
+	scope        goalScope
+	all          []*entity.Experiment
+	filtered     []*entity.Experiment
+	cursor       int
 	statusFilter string
-	err      error
+	err          error
 }
 
 type expListLoadedMsg struct {
@@ -26,13 +27,18 @@ type expListLoadedMsg struct {
 	err  error
 }
 
-func newExperimentListView() *experimentListView { return &experimentListView{} }
+func newExperimentListView(scope goalScope) *experimentListView {
+	return &experimentListView{scope: scope}
+}
 
 func (v *experimentListView) title() string { return "Experiments" }
 
 func (v *experimentListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		list, err := s.ListExperiments()
+		if err == nil {
+			list, err = newGoalScopeResolver(s, v.scope).filterExperiments(list)
+		}
 		return expListLoadedMsg{list: list, err: err}
 	}
 }
@@ -277,5 +283,3 @@ func (v *experimentDetailView) view(width, height int) string {
 	}
 	return clampLines(strings.Join(lines, "\n"), height, width)
 }
-
-

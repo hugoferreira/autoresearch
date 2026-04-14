@@ -11,6 +11,7 @@ import (
 // ---- list view ----
 
 type eventListView struct {
+	scope      goalScope
 	all        []store.Event
 	filtered   []store.Event
 	cursor     int
@@ -24,13 +25,18 @@ type eventListLoadedMsg struct {
 	err  error
 }
 
-func newEventListView() *eventListView { return &eventListView{follow: true} }
+func newEventListView(scope goalScope) *eventListView {
+	return &eventListView{scope: scope, follow: true}
+}
 
 func (v *eventListView) title() string { return "Event log" }
 
 func (v *eventListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		list, err := s.Events(0)
+		if err == nil {
+			list, err = newGoalScopeResolver(s, v.scope).filterEvents(list)
+		}
 		return eventListLoadedMsg{list: list, err: err}
 	}
 }

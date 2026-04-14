@@ -29,11 +29,12 @@ type artifactRow struct {
 // ---- artifact list view ----
 
 type artifactListView struct {
-	all      []artifactRow
-	filtered []artifactRow
-	cursor   int
+	scope      goalScope
+	all        []artifactRow
+	filtered   []artifactRow
+	cursor     int
 	instFilter string
-	err      error
+	err        error
 }
 
 type artifactListLoadedMsg struct {
@@ -41,13 +42,17 @@ type artifactListLoadedMsg struct {
 	err  error
 }
 
-func newArtifactListView() *artifactListView { return &artifactListView{} }
+func newArtifactListView(scope goalScope) *artifactListView { return &artifactListView{scope: scope} }
 
 func (v *artifactListView) title() string { return "Artifacts" }
 
 func (v *artifactListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		obs, err := s.ListObservations()
+		if err != nil {
+			return artifactListLoadedMsg{err: err}
+		}
+		obs, err = newGoalScopeResolver(s, v.scope).filterObservations(obs)
 		if err != nil {
 			return artifactListLoadedMsg{err: err}
 		}
@@ -186,12 +191,12 @@ const (
 )
 
 type artifactView struct {
-	row      artifactRow
-	sha      string
-	absPath  string
-	relPath  string
-	mode     artifactMode
-	lines    []string
+	row       artifactRow
+	sha       string
+	absPath   string
+	relPath   string
+	mode      artifactMode
+	lines     []string
 	total     int
 	fsBytes   int64
 	grep      string
@@ -510,4 +515,3 @@ func colorizeDiff(lines []string) string {
 	}
 	return buf.String()
 }
-

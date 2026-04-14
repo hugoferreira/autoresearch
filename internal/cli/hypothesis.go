@@ -167,7 +167,7 @@ func hypothesisAddCmd() *cobra.Command {
 }
 
 func hypothesisListCmd() *cobra.Command {
-	var status, parent string
+	var status, parent, goalFlag string
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List hypotheses",
@@ -177,10 +177,15 @@ func hypothesisListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
 			all, err := s.ListHypotheses()
 			if err != nil {
 				return err
 			}
+			all = newGoalScopeResolver(s, scope).filterHypotheses(all)
 			var filtered []*entity.Hypothesis
 			for _, h := range all {
 				if status != "" && h.Status != status {
@@ -210,6 +215,7 @@ func hypothesisListCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&status, "status", "", "filter by status")
 	c.Flags().StringVar(&parent, "parent", "", "filter by parent id")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
 

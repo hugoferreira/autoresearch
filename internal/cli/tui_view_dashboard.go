@@ -16,8 +16,9 @@ import (
 // four panels (tree, frontier, in-flight, events) and Enter on a selected row
 // replaces the right column with a compact detail panel for that entity.
 type dashboardView struct {
-	snap *dashboardSnapshot
-	err  error
+	scope goalScope
+	snap  *dashboardSnapshot
+	err   error
 
 	focus        dashFocus
 	cursors      [dashPanelCount]int
@@ -60,8 +61,8 @@ const (
 	dashboardCompactPanelMinHeight    = 4
 )
 
-func newDashboardView() *dashboardView {
-	return &dashboardView{}
+func newDashboardView(scope goalScope) *dashboardView {
+	return &dashboardView{scope: scope}
 }
 
 func (v *dashboardView) title() string { return "Dashboard" }
@@ -69,8 +70,8 @@ func (v *dashboardView) title() string { return "Dashboard" }
 func (v *dashboardView) init(s *store.Store) tea.Cmd {
 	v.eventsLoading = true
 	return tea.Batch(
-		loadDashboardSnapshotCmd(s),
-		loadDashboardEventsCmd(s, 0, dashboardRecentEventsPageSize, true),
+		loadDashboardSnapshotCmd(s, v.scope),
+		loadDashboardEventsCmd(s, v.scope, 0, dashboardRecentEventsPageSize, true),
 	)
 }
 
@@ -100,10 +101,10 @@ func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 	case tuiTickMsg:
 		// Refresh both the dashboard and any open right-column overlay so
 		// drilled-down details stay live.
-		cmds := []tea.Cmd{loadDashboardSnapshotCmd(s)}
+		cmds := []tea.Cmd{loadDashboardSnapshotCmd(s, v.scope)}
 		if !v.eventsLoading {
 			v.eventsLoading = true
-			cmds = append(cmds, loadDashboardEventsCmd(s, 0, max(len(v.currentEvents()), dashboardRecentEventsPageSize), true))
+			cmds = append(cmds, loadDashboardEventsCmd(s, v.scope, 0, max(len(v.currentEvents()), dashboardRecentEventsPageSize), true))
 		}
 		if v.rightOverlay != nil {
 			nv, cmd := v.rightOverlay.update(msg, s)
@@ -520,16 +521,20 @@ func (v *dashboardView) renderEventsPanel(width, height int) string {
 	return boxPanel(title, strings.Join(lines, "\n"), width, height, active)
 }
 
-func loadDashboardSnapshotCmd(s *store.Store) tea.Cmd {
+func loadDashboardSnapshotCmd(s *store.Store, scope goalScope) tea.Cmd {
 	return func() tea.Msg {
-		snap, err := captureDashboard(s)
+		snap, err := captureDashboardScoped(s, scope)
 		return dashLoadedMsg{snap: snap, err: err}
 	}
 }
 
-func loadDashboardEventsCmd(s *store.Store, offsetNewest, limit int, replace bool) tea.Cmd {
+func loadDashboardEventsCmd(s *store.Store, scope goalScope, offsetNewest, limit int, replace bool) tea.Cmd {
 	return func() tea.Msg {
 		all, err := s.Events(0)
+		if err != nil {
+			return dashEventsLoadedMsg{err: err}
+		}
+		all, err = newGoalScopeResolver(s, scope).filterEvents(all)
 		if err != nil {
 			return dashEventsLoadedMsg{err: err}
 		}
@@ -581,7 +586,7 @@ func (v *dashboardView) maybeLoadMoreEvents(s *store.Store) tea.Cmd {
 		return nil
 	}
 	v.eventsLoading = true
-	return loadDashboardEventsCmd(s, len(v.events), dashboardRecentEventsPageSize, false)
+	return loadDashboardEventsCmd(s, v.scope, len(v.events), dashboardRecentEventsPageSize, false)
 }
 
 func dashboardEventKey(e store.Event) string {
