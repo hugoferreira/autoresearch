@@ -93,6 +93,42 @@ worktrees. Setup refreshes under `AGENTS.md`, `.claude/`, `.codex/`,
 and surface explicit maintenance instead of quietly patching bootstrap files in
 place.
 
+## Core concepts
+
+`autoresearch` deliberately separates intent, change, evidence, and judgment.
+The core nouns are:
+
+| Concept | What it is | Why it exists |
+| --- | --- | --- |
+| **Goal** | The optimization contract: objective instrument + direction, constraints, optional success threshold, and steering notes. | Defines what "better" means and scopes the research loop. |
+| **Hypothesis** | A falsifiable claim that a concrete kind of change will move a named instrument in a named direction, optionally by at least `min_effect`. | Forces speculation to be explicit before code changes or verdicts happen. |
+| **Experiment** | One concrete implementation attempt for a hypothesis, executed in its own git worktree. | Separates "what we changed" from "what we learned" and makes attempts reproducible. |
+| **Baseline** | A special experiment representing the reference code for a goal. | Gives every later comparison a stable "better than what?" anchor. |
+| **Observation** | The recorded result of running one instrument on one experiment: value, samples, CI, pass/fail, command, artifacts, and metadata. | This is the evidence layer. Conclusions may cite observations, not anecdotes. |
+| **Conclusion** | A verdict over a hypothesis, derived from observations and compared against the goal baseline. | Records whether the evidence actually supports, refutes, or fails to decide the claim. |
+| **Lesson** | A reusable takeaway extracted from prior work, either tied to a hypothesis chain or scoped to the system as a whole. | Prevents later cycles from rediscovering the same dead ends or overestimating future gains. |
+| **Frontier** | A derived view of the best supported conclusions for the current goal. | Shows whether the search is still improving or has stalled. |
+| **Instrument** | A command plus parser that turns program behavior into a number or pass/fail result. | Makes optimization targets measurable and repeatable. |
+| **Artifact** | Content-addressed captured output attached to an observation. | Preserves the exact evidence a reviewer or human needs to audit a measurement. |
+
+`analyze` is a read-only computation over observations, not a first-class stored
+entity. It summarizes an experiment relative to the baseline and prepares the
+material a later `conclude` step will judge.
+
+## Gates and firewalls
+
+The system is intentionally gated at a few hard boundaries:
+
+| Gate | Applied at | Why |
+| --- | --- | --- |
+| **Goal gate** | Only one goal may be active; new hypotheses bind to it; read surfaces default to that goal unless `--goal all` is used. | Keeps independent optimization efforts from contaminating each other. |
+| **Experiment isolation** | Every experiment runs in its own git worktree from the recorded baseline. | Prevents cross-experiment leakage and makes resets cheap. |
+| **Observation dependency gate** | `observe` refuses an instrument whose declared prerequisites (for example `host_test=pass`) have not passed on the same experiment, unless `--force` is used. | Stops invalid preconditions from being mistaken for meaningful measurements. |
+| **Strict conclusion gate** | `conclude` may downgrade `supported` to `inconclusive` when the CI crosses zero in the wrong direction or the observed effect misses the hypothesis's `min_effect`. | Makes "supported" hard to earn. |
+| **Independent review gate** | Decisive conclusions can be independently accepted or downgraded by the gate reviewer or `conclusion downgrade`. | Adds a second pass over stats, artifacts, and diffs before a result is treated as settled. |
+| **Pause and budget gates** | Mutating verbs refuse to proceed when the project is paused or budgets are exhausted. | Gives humans and policies a hard stop on the loop. |
+| **Single-writer gate** | Only the CLI writes `.research/`. Agents and subagents must go through verbs, not file edits. | Keeps state atomic, auditable, and machine-readable. |
+
 ## Install
 
 ```sh
@@ -211,7 +247,7 @@ is paused.
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
 | **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |
 | **tree / frontier** | `tree [--goal G-NNNN\|all]`, `frontier [--goal G-NNNN\|all]` |
-| **log** | `log [--tail --kind --since --follow]` |
+| **log** | `log [--goal G-NNNN\|all] [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
 | **artifact** | `list`, `stat`, `path`, `head`, `tail`, `range`, `grep`, `diff`, `show` |
 | **lesson** | `add`, `list`, `show`, `supersede`, `accuracy` |
@@ -390,8 +426,10 @@ A Bubble Tea TUI built on top of the same `captureDashboard` snapshot.
 Richer than the one-shot view, but the read-only constraint is
 identical: it never mutates `.research/`, and there are no "quick
 action" keystrokes — steering is still conversational with the main
-agent session. Like the CLI read surfaces, it defaults to the active goal and
-accepts `--goal G-NNNN` or `--goal all` at launch.
+agent session. Like the CLI read surfaces, it defaults to the active goal.
+You can pass `--goal G-NNNN` or `--goal all` at launch, then retarget the
+TUI's read-only session scope from the Goals view with `s` (selected goal) or
+broaden back to all goals with `a`.
 
 The TUI surfaces every read-only CLI verb as a navigable view:
 
@@ -407,7 +445,9 @@ The TUI surfaces every read-only CLI verb as a navigable view:
   strings, numbers, and literals.
 - **Tree / Frontier / Goals / Status / Instruments**: full-screen
   versions of the corresponding CLI verbs.
-- **Goals**: list + detail, with the current goal marked in the list.
+- **Goals**: list + detail, with the active goal marked in the list, the
+  current TUI scope shown, `s` to scope to the selected goal, and `a` to
+  broaden back to all goals.
 - **Artifacts**: list + scrollable viewer with head/tail/full/grep
   modes. `d` prompts for a second SHA and shows the unified diff,
   colorized.
