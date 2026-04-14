@@ -63,6 +63,15 @@ func tuiRichSnapshot() *dashboardSnapshot {
 	return snap
 }
 
+func lineContaining(s, needle string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
+
 func TestTUI_DashboardRenders(t *testing.T) {
 	v := newDashboardView(goalScope{All: true})
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
@@ -89,6 +98,46 @@ func TestTUI_DashboardNarrowFallback(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("narrow dashboard missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestTUI_DashboardLessonPanelUsesAccuracyArrows(t *testing.T) {
+	snap := tuiRichSnapshot()
+	snap.RecentLessons = []*entity.Lesson{
+		{
+			ID: "L-0001", Claim: "overshooting lesson", Scope: entity.LessonScopeHypothesis,
+			Status: entity.LessonStatusActive, PredictedEffect: &entity.PredictedEffect{MinEffect: 0.10},
+		},
+		{
+			ID: "L-0002", Claim: "undershooting lesson", Scope: entity.LessonScopeHypothesis,
+			Status: entity.LessonStatusActive, PredictedEffect: &entity.PredictedEffect{MinEffect: 0.10},
+		},
+		{
+			ID: "L-0003", Claim: "no data lesson", Scope: entity.LessonScopeHypothesis,
+			Status: entity.LessonStatusActive, PredictedEffect: &entity.PredictedEffect{MinEffect: 0.10},
+		},
+	}
+	snap.recentLessonAccuracy = map[string]lessonAccuracySummary{
+		"L-0001": {Overshoot: 2, Undershoot: 1},
+		"L-0002": {Overshoot: 1, Undershoot: 2},
+	}
+
+	v := newDashboardView(goalScope{All: true})
+	nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
+	d := nv.(*dashboardView)
+	out := stripANSI(d.renderLessonsPanel(70, 8))
+
+	overshoot := lineContaining(out, "L-0001")
+	if !strings.Contains(overshoot, "↓") {
+		t.Fatalf("overshoot row missing down arrow:\n%s", out)
+	}
+	undershoot := lineContaining(out, "L-0002")
+	if !strings.Contains(undershoot, "↑") {
+		t.Fatalf("undershoot row missing up arrow:\n%s", out)
+	}
+	noData := lineContaining(out, "L-0003")
+	if strings.Contains(noData, "↓") || strings.Contains(noData, "↑") {
+		t.Fatalf("no-data row should not show an accuracy arrow:\n%s", out)
 	}
 }
 
@@ -338,6 +387,38 @@ func TestTUI_LessonDetailRendersMarkdown(t *testing.T) {
 		if strings.Contains(out, bad) {
 			t.Errorf("lesson detail leaked raw markdown %q:\n%s", bad, out)
 		}
+	}
+}
+
+func TestTUI_LessonListUsesAccuracyArrows(t *testing.T) {
+	v := newLessonListView(goalScope{All: true})
+	lessons := []*entity.Lesson{
+		{
+			ID: "L-0001", Claim: "validated lesson without follow-up", Scope: entity.LessonScopeHypothesis,
+			Status: entity.LessonStatusActive, PredictedEffect: &entity.PredictedEffect{MinEffect: 0.10},
+			Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceReviewedDecisive},
+		},
+		{
+			ID: "L-0002", Claim: "lesson that is undershooting", Scope: entity.LessonScopeHypothesis,
+			Status: entity.LessonStatusActive, PredictedEffect: &entity.PredictedEffect{MinEffect: 0.10},
+			Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceReviewedDecisive},
+		},
+	}
+	nv, _ := v.update(lessonListLoadedMsg{
+		list: lessons,
+		accuracy: map[string]lessonAccuracySummary{
+			"L-0002": {Overshoot: 1, Undershoot: 2},
+		},
+	}, nil)
+	out := stripANSI(nv.view(120, 20))
+
+	noData := lineContaining(out, "L-0001")
+	if strings.Contains(noData, "↓") || strings.Contains(noData, "↑") {
+		t.Fatalf("validated lesson without comparisons should not show an arrow:\n%s", out)
+	}
+	undershoot := lineContaining(out, "L-0002")
+	if !strings.Contains(undershoot, "↑≥10%") {
+		t.Fatalf("undershooting lesson row missing up arrow:\n%s", out)
 	}
 }
 

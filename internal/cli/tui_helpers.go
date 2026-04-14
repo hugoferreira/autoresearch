@@ -416,17 +416,23 @@ func formatPredictedEffect(pe *entity.PredictedEffect) string {
 	return s
 }
 
-// predictedEffectArrow returns a colored "↓" (red) or "↑" (green) based on direction.
-func predictedEffectArrow(pe *entity.PredictedEffect) string {
-	if pe.Direction == "increase" {
+// lessonAccuracyArrow returns a colored arrow when accuracy comparisons show
+// a dominant trend. Down means overshooting; up means undershooting.
+func lessonAccuracyArrow(summary lessonAccuracySummary) string {
+	switch summary.trend() {
+	case lessonAccuracyTrendDown:
+		return tuiRed.Render("↓")
+	case lessonAccuracyTrendUp:
 		return tuiGreen.Render("↑")
+	default:
+		return " "
 	}
-	return tuiRed.Render("↓")
 }
 
-// formatPredictedEffectCompact renders a colored short form like "↓≥5%" for list views.
-func formatPredictedEffectCompact(pe *entity.PredictedEffect) string {
-	return predictedEffectArrow(pe) + tuiYellow.Render(fmt.Sprintf("≥%.0f%%", pe.MinEffect*100))
+// formatPredictedEffectCompact renders a short form like "↓≥5%" when the
+// accuracy trend is known, or " ≥5%" when it is not.
+func formatPredictedEffectCompact(pe *entity.PredictedEffect, summary lessonAccuracySummary) string {
+	return lessonAccuracyArrow(summary) + tuiYellow.Render(fmt.Sprintf("≥%.0f%%", pe.MinEffect*100))
 }
 
 // Compile-time anchor: all view files can refer to entity.Hypothesis via

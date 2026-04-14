@@ -117,8 +117,9 @@ type dashboardSnapshot struct {
 	InFlight               []dashboardInFlight `json:"in_flight"`
 	StaleExperiments       []dashboardStaleExp `json:"stale_experiments,omitempty"`
 	RecentLessons          []*entity.Lesson    `json:"recent_lessons,omitempty"`
-	RecentEvents           []store.Event       `json:"recent_events"`
-	CapturedAt             time.Time           `json:"captured_at"`
+	recentLessonAccuracy   map[string]lessonAccuracySummary
+	RecentEvents           []store.Event `json:"recent_events"`
+	CapturedAt             time.Time     `json:"captured_at"`
 }
 
 type dashboardBudgets struct {
@@ -353,6 +354,11 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		if err != nil {
 			return nil, err
 		}
+		_, accuracy, err := computeLessonAccuracy(s, lessons, concls, hyps)
+		if err != nil {
+			return nil, err
+		}
+		snap.recentLessonAccuracy = accuracy
 		lessonCount = len(lessons)
 		// Split by effective lifecycle so steering lessons surface first.
 		buckets := map[string][]*entity.Lesson{
