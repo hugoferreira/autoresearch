@@ -12,6 +12,9 @@ func TestCodexDoc_RewrittenForCodex(t *testing.T) {
 	if !strings.Contains(doc, ".codex/autoresearch.md") {
 		t.Fatal("codex doc should reference .codex/autoresearch.md")
 	}
+	if strings.Contains(doc, "@.codex/autoresearch.md") {
+		t.Fatal("codex doc should use plain .codex/autoresearch.md paths, not @ mention syntax")
+	}
 	if strings.Contains(doc, ".claude/") {
 		t.Error("codex doc should not reference .claude/ anywhere after rewrite")
 	}
@@ -26,6 +29,12 @@ func TestCodexDoc_RewrittenForCodex(t *testing.T) {
 	}
 	if !strings.Contains(doc, "treats Codex as an agentic researcher") {
 		t.Fatal("codex doc should mention Codex in the intro")
+	}
+	if !strings.Contains(doc, ".codex/agents/research-orchestrator.toml") {
+		t.Fatal("codex doc should reference .codex/agents/research-orchestrator.toml")
+	}
+	if strings.Contains(doc, ".codex/agents/research-orchestrator.md") {
+		t.Fatal("codex doc should not reference legacy .md codex agents")
 	}
 
 	// Notebook layer must propagate through the rewriter unchanged so Codex
@@ -50,6 +59,12 @@ func TestCodexDoc_RewrittenForCodex(t *testing.T) {
 		"## Mechanism",
 		"## Scope and counterexamples",
 		"## For the next generator",
+		"## Core cycle cheat sheet",
+		"primary contract for routine autoresearch work",
+		"`<verb> --help` only when",
+		"Limits are ceilings, not quotas",
+		"provisional until gate review",
+		"do not start another cycle while the chain is",
 	}
 	for _, s := range notebookInvariants {
 		if !strings.Contains(doc, s) {

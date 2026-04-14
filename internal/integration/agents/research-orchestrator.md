@@ -42,6 +42,13 @@ load-bearing.
 8. Enough of the codebase (via Read / Grep / Glob) to understand what's
    being optimized. Focus on `goal.objective.target`.
 
+Do not spend early turns rediscovering routine syntax with a burst of
+`--help`. `.claude/autoresearch.md` already contains the canonical flag
+skeletons for the baseline/design/implement/observe/analyze/conclude/
+lesson/review spine. Use `--help` only when this brief or the installed
+reference is missing a flag you actually need, and at most once per
+unfamiliar verb.
+
 ### 0. Ensure a baseline exists
 
 Before your first hypothesis cycle under this goal, check whether a
@@ -55,6 +62,21 @@ If the list is empty, create one:
 
 The `conclude` command auto-derives the baseline — you do not need to
 pass `--baseline-experiment` manually.
+
+### Command spine
+
+This is the default command sequence for one full cycle. Reach for it
+before you reach for `--help`:
+
+    autoresearch experiment baseline --json                              # once per goal, if missing
+    autoresearch hypothesis add ... --author agent:orchestrator --json
+    autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
+    autoresearch experiment implement <E-id> --impl-notes "..." --json
+    autoresearch observe <E-id> --all --json
+    autoresearch analyze <E-id> [--baseline <baseline-exp-id>] --json
+    autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
+    autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
+    autoresearch conclusion accept <C-id> ...  # or downgrade, before the next cycle
 
 ## The cycle
 
@@ -76,7 +98,9 @@ When proposing, each hypothesis MUST be:
 - **Reviewed parent** — if using `--parent`, the parent hypothesis must
   have been through gate review first. The CLI enforces this: you cannot
   derive sub-hypotheses from an `unreviewed` parent. If you want to
-  build on a conclusion, dispatch the gate reviewer first.
+  build on a conclusion, dispatch the gate reviewer first. The same rule
+  applies to `--inspired-by`: provisional lessons from an `unreviewed`
+  decisive chain are not a bypass.
 - **Kill-if-equipped** — at least one `--kill-if` clause. `"CI upper
   bound crosses zero"` is a useful default.
 
@@ -97,6 +121,10 @@ it. `lesson accuracy` uses this link to compare predicted vs actual
 effects — without it, accuracy tracking falls back to coarse instrument
 matching. Always pass the lesson IDs you consulted, even if the
 hypothesis contradicts them.
+
+If a lesson came from a decisive conclusion that is still
+`unreviewed`, it is provisional. Do not cite it in a new hypothesis
+until the gate reviewer has accepted or downgraded that chain.
 
 **Strategy guidance:**
 
@@ -306,6 +334,11 @@ Wait for the reviewer to return. Then:
   failure and move on. Most downgrades are correct and should not be
   contested.
 
+If the Agent tool or review delegation is unavailable in this
+environment, stop here and yield to the main session with review pending.
+Do not start another hypothesis cycle while the conclusion is still
+`unreviewed`, even if budget remains.
+
 Only if you **strongly disagree** with the reviewer's reasoning (not
 the statistics — those are not appealable), you may appeal:
 
@@ -354,8 +387,14 @@ if none exists.
   parents are rejected, and `hypothesis apply` is blocked.
 - **Derive sub-hypotheses from unreviewed parents.** Wait for the gate
   reviewer to accept or downgrade before building on a conclusion.
+- **Use lesson links to bypass review.** Provisional lessons from
+  unreviewed decisive conclusions are not a substitute for reviewed
+  parents.
 - **Run multiple hypothesis cycles without yielding.** One cycle per
   invocation so the main session stays in control.
+- **Spend budget for its own sake.** `max-experiments` is a ceiling, not
+  a target. Leaving budget unused is correct when no high-value next
+  experiment remains or review is pending.
 - **Propose feature-delivery hypotheses.** If the goal reads like
   "implement X" rather than "make X faster / smaller / more accurate",
   stop and tell the main session.

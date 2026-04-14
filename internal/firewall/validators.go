@@ -168,10 +168,10 @@ func CheckStrictVerdict(requested string, h *entity.Hypothesis, c *stats.Compari
 // BudgetBreach describes which budget rule a would-be mutation violates.
 // A zero value means no breach; Ok() reports that.
 type BudgetBreach struct {
-	Rule      string // "max_experiments" | "max_wall_time_h" | ""
-	Limit     any
-	Observed  any
-	Message   string
+	Rule     string // "max_experiments" | "max_wall_time_h" | ""
+	Limit    any
+	Observed any
+	Message  string
 }
 
 func (b BudgetBreach) Ok() bool { return b.Rule == "" }
@@ -343,6 +343,80 @@ func isValidSubjectID(id string) bool {
 	return strings.HasPrefix(id, "H-") ||
 		strings.HasPrefix(id, "E-") ||
 		strings.HasPrefix(id, "C-")
+}
+
+type inspiredByReviewReader interface {
+	ReadHypothesis(id string) (*entity.Hypothesis, error)
+	ReadExperiment(id string) (*entity.Experiment, error)
+	ReadConclusion(id string) (*entity.Conclusion, error)
+}
+
+// CheckInspiredByLessonsReviewed blocks lessons whose supporting chain still
+// depends on an unreviewed decisive conclusion. This closes the loophole where
+// an orchestrator cites a lesson from an unreviewed chain via --inspired-by
+// instead of using --parent directly.
+func CheckInspiredByLessonsReviewed(r inspiredByReviewReader, lessons []*entity.Lesson) error {
+	if len(lessons) == 0 {
+		return nil
+	}
+	if r == nil {
+		return errors.New("cannot validate inspired-by lessons without a store reader")
+	}
+	for _, lesson := range lessons {
+		if lesson == nil {
+			continue
+		}
+		for _, subject := range lesson.Subjects {
+			if err := checkInspiredBySubjectReviewed(r, lesson, subject); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func checkInspiredBySubjectReviewed(r inspiredByReviewReader, lesson *entity.Lesson, subject string) error {
+	switch {
+	case strings.HasPrefix(subject, "H-"):
+		h, err := r.ReadHypothesis(subject)
+		if err != nil {
+			return fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+		}
+		if h.Status == entity.StatusUnreviewed {
+			return fmt.Errorf("lesson %s cites hypothesis %s, which is still unreviewed — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID, h.ID)
+		}
+	case strings.HasPrefix(subject, "E-"):
+		e, err := r.ReadExperiment(subject)
+		if err != nil {
+			return fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+		}
+		if strings.TrimSpace(e.Hypothesis) == "" {
+			return nil
+		}
+		h, err := r.ReadHypothesis(e.Hypothesis)
+		if err != nil {
+			return fmt.Errorf("lesson %s subject %s hypothesis %s: %w", lesson.ID, subject, e.Hypothesis, err)
+		}
+		if h.Status == entity.StatusUnreviewed {
+			return fmt.Errorf("lesson %s cites experiment %s under unreviewed hypothesis %s — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID, e.ID, h.ID)
+		}
+	case strings.HasPrefix(subject, "C-"):
+		c, err := r.ReadConclusion(subject)
+		if err != nil {
+			return fmt.Errorf("lesson %s subject %s: %w", lesson.ID, subject, err)
+		}
+		if c.Verdict != entity.VerdictSupported && c.Verdict != entity.VerdictRefuted {
+			return nil
+		}
+		h, err := r.ReadHypothesis(c.Hypothesis)
+		if err != nil {
+			return fmt.Errorf("lesson %s subject %s hypothesis %s: %w", lesson.ID, subject, c.Hypothesis, err)
+		}
+		if h.Status == entity.StatusUnreviewed {
+			return fmt.Errorf("lesson %s cites decisive conclusion %s for unreviewed hypothesis %s — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID, c.ID, h.ID)
+		}
+	}
+	return nil
 }
 
 // CheckParentReviewed ensures that a hypothesis's parent (if any) has been

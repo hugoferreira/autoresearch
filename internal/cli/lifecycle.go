@@ -302,7 +302,7 @@ suite.`,
 
 			codexAgentRes, err := integration.InstallCodexAgents(globalProjectDir)
 			if err != nil {
-				return fmt.Errorf("install codex role briefs: %w", err)
+				return fmt.Errorf("install codex custom agents: %w", err)
 			}
 
 			codexInstructionsRes, err := integration.EnsureCodexInstructions(globalProjectDir)
@@ -311,7 +311,7 @@ suite.`,
 			}
 
 			return w.Emit(
-				fmt.Sprintf("initialized .research/ at %s\ngitignore: %s\nclaude: wrote %s\nclaude: wrote %d subagent prompt(s) to %s\nclaude: settings: %s\ncodex: wrote %s\ncodex: wrote %d role brief(s) to %s\ncodex: AGENTS.md: %s\n(to load the Claude reference into Claude Code's main session, add `@.claude/autoresearch.md` to your CLAUDE.md)",
+				fmt.Sprintf("initialized .research/ at %s\ngitignore: %s\nclaude: wrote %s\nclaude: wrote %d subagent prompt(s) to %s\nclaude: settings: %s\ncodex: wrote %s\ncodex: wrote %d custom agent(s) to %s\ncodex: AGENTS.md: %s\n(to load the Claude reference into Claude Code's main session, add `@.claude/autoresearch.md` to your CLAUDE.md)",
 					s.DirPath(),
 					describeGitignoreAction(gi),
 					claudePath,

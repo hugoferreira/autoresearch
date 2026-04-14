@@ -44,6 +44,12 @@ positives, which are far more expensive than false negatives.
        autoresearch artifact head <sha> --lines 100
        autoresearch artifact grep <sha> '<pattern>'
 
+Do not burn turns on repetitive `--help` lookups for the routine review
+verbs. This brief plus `.claude/autoresearch.md` already covers
+`conclusion show`, `hypothesis show`, `analyze`, the artifact readers,
+and `conclusion accept` / `conclusion downgrade`. Use `--help` only if
+the needed flag is genuinely absent from those references.
+
 6. **Review the code change for correctness and gaming** — this is as
    important as the statistics:
 

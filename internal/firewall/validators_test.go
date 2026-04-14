@@ -1,6 +1,7 @@
 package firewall_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,6 +16,33 @@ func cfgWith(names ...string) *store.Config {
 		cfg.Instruments[n] = store.Instrument{Unit: "x"}
 	}
 	return cfg
+}
+
+type fakeInspiredByReader struct {
+	hypotheses  map[string]*entity.Hypothesis
+	experiments map[string]*entity.Experiment
+	conclusions map[string]*entity.Conclusion
+}
+
+func (f fakeInspiredByReader) ReadHypothesis(id string) (*entity.Hypothesis, error) {
+	if h, ok := f.hypotheses[id]; ok {
+		return h, nil
+	}
+	return nil, fmt.Errorf("hypothesis %s not found", id)
+}
+
+func (f fakeInspiredByReader) ReadExperiment(id string) (*entity.Experiment, error) {
+	if e, ok := f.experiments[id]; ok {
+		return e, nil
+	}
+	return nil, fmt.Errorf("experiment %s not found", id)
+}
+
+func (f fakeInspiredByReader) ReadConclusion(id string) (*entity.Conclusion, error) {
+	if c, ok := f.conclusions[id]; ok {
+		return c, nil
+	}
+	return nil, fmt.Errorf("conclusion %s not found", id)
 }
 
 func TestRequireActiveGoal(t *testing.T) {
@@ -224,6 +252,80 @@ func TestValidateLesson(t *testing.T) {
 		if err := firewall.ValidateLesson(l); err == nil ||
 			!strings.Contains(err.Error(), "L- id") {
 			t.Errorf("non-L supersedes target should fail, got %v", err)
+		}
+	})
+}
+
+func TestCheckInspiredByLessonsReviewed(t *testing.T) {
+	t.Run("allows reviewed hypothesis chain", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0001": {ID: "H-0001", Status: entity.StatusSupported},
+			},
+		}
+		lessons := []*entity.Lesson{{ID: "L-0001", Subjects: []string{"H-0001"}}}
+		if err := firewall.CheckInspiredByLessonsReviewed(reader, lessons); err != nil {
+			t.Fatalf("reviewed hypothesis lesson should pass, got %v", err)
+		}
+	})
+
+	t.Run("rejects unreviewed hypothesis subject", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0002": {ID: "H-0002", Status: entity.StatusUnreviewed},
+			},
+		}
+		lessons := []*entity.Lesson{{ID: "L-0002", Subjects: []string{"H-0002"}}}
+		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
+		if err == nil || !strings.Contains(err.Error(), "L-0002") || !strings.Contains(err.Error(), "H-0002") {
+			t.Fatalf("expected unreviewed hypothesis lesson to be rejected, got %v", err)
+		}
+	})
+
+	t.Run("rejects decisive conclusion on unreviewed chain", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
+			},
+			conclusions: map[string]*entity.Conclusion{
+				"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
+			},
+		}
+		lessons := []*entity.Lesson{{ID: "L-0003", Subjects: []string{"C-0003"}}}
+		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
+		if err == nil || !strings.Contains(err.Error(), "C-0003") || !strings.Contains(err.Error(), "H-0003") {
+			t.Fatalf("expected decisive unreviewed conclusion lesson to be rejected, got %v", err)
+		}
+	})
+
+	t.Run("allows inconclusive conclusion subjects", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0004": {ID: "H-0004", Status: entity.StatusInconclusive},
+			},
+			conclusions: map[string]*entity.Conclusion{
+				"C-0004": {ID: "C-0004", Hypothesis: "H-0004", Verdict: entity.VerdictInconclusive},
+			},
+		}
+		lessons := []*entity.Lesson{{ID: "L-0004", Subjects: []string{"C-0004"}}}
+		if err := firewall.CheckInspiredByLessonsReviewed(reader, lessons); err != nil {
+			t.Fatalf("inconclusive conclusion lesson should pass, got %v", err)
+		}
+	})
+
+	t.Run("rejects experiment subject under unreviewed chain", func(t *testing.T) {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0005": {ID: "H-0005", Status: entity.StatusUnreviewed},
+			},
+			experiments: map[string]*entity.Experiment{
+				"E-0005": {ID: "E-0005", Hypothesis: "H-0005"},
+			},
+		}
+		lessons := []*entity.Lesson{{ID: "L-0005", Subjects: []string{"E-0005"}}}
+		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
+		if err == nil || !strings.Contains(err.Error(), "E-0005") || !strings.Contains(err.Error(), "H-0005") {
+			t.Fatalf("expected experiment subject under unreviewed chain to be rejected, got %v", err)
 		}
 	})
 }

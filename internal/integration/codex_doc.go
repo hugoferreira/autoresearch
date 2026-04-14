@@ -10,8 +10,8 @@ const CodexDocRelPath = ".codex/autoresearch.md"
 func CodexDoc(moduleVersion string) string {
 	doc := ClaudeDoc(moduleVersion)
 	doc = strings.ReplaceAll(doc, "autoresearch install claude", "autoresearch install codex")
+	doc = strings.ReplaceAll(doc, "@.claude/autoresearch.md", ".codex/autoresearch.md")
 	doc = strings.ReplaceAll(doc, ".claude/autoresearch.md", ".codex/autoresearch.md")
-	doc = strings.ReplaceAll(doc, "@.codex/autoresearch.md", ".codex/autoresearch.md")
 	doc = strings.ReplaceAll(doc, "CLAUDE.md", "AGENTS.md")
 	doc = strings.ReplaceAll(
 		doc,
@@ -25,5 +25,11 @@ func CodexDoc(moduleVersion string) string {
 	// matters — this must run AFTER the specific ".claude/autoresearch.md"
 	// replacement above, which has already handled its own form.
 	doc = strings.ReplaceAll(doc, ".claude/", ".codex/")
+	doc = strings.ReplaceAll(doc, ".codex/agents/research-orchestrator.md", ".codex/agents/research-orchestrator.toml")
+	doc = strings.ReplaceAll(doc, ".codex/agents/research-gate-reviewer.md", ".codex/agents/research-gate-reviewer.toml")
+	doc = strings.ReplaceAll(doc, "the two prompts under\n`.codex/agents/`", "the two custom-agent configs under\n`.codex/agents/`")
+	doc = strings.ReplaceAll(doc, "The subagent briefs under\n`.codex/agents/research-orchestrator.toml` has a full worked\nexample.", "The custom agent at\n`.codex/agents/research-orchestrator.toml` has a full worked\nexample.")
+	doc = strings.ReplaceAll(doc, "agents/research-orchestrator.toml   — full hypothesis cycle prompt, managed", "agents/research-orchestrator.toml   — full hypothesis cycle custom agent, managed")
+	doc = strings.ReplaceAll(doc, "agents/research-gate-reviewer.toml  — independent adversarial reviewer, managed", "agents/research-gate-reviewer.toml  — independent adversarial reviewer custom agent, managed")
 	return doc
 }

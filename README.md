@@ -127,12 +127,15 @@ For example:
 ```text
 Read the local autoresearch docs for this project. Use autoresearch as the
 only writer of research state, and start the research loop for the current
-goal. I will observe via the dashboard.
+goal. You may delegate to the installed research-orchestrator and
+research-gate-reviewer subagents whenever delegation or independent gate
+review is needed. I will observe via the dashboard.
 ```
 
 Claude reads `.claude/autoresearch.md` plus the `.claude/agents/research-*.md`
 prompts. Codex reads the managed `AGENTS.md` block,
-`.codex/autoresearch.md`, and the `.codex/agents/research-*.md` role briefs.
+`.codex/autoresearch.md`, and the `.codex/agents/research-*.toml`
+custom-agent configs.
 
 ### Worked example: FIR filter optimization
 
@@ -146,7 +149,9 @@ a 20% reduction goal, and a 20-experiment budget.
 cp -r examples/cortex-m4-synth /tmp/my-fir
 cd /tmp/my-fir
 
-# Bootstrap: creates git repo, inits .research/, registers instruments, and sets an initial goal
+# Bootstrap: deletes any linked worktrees for this copy, recreates the local
+# git repo from scratch, inits .research/, registers instruments, and sets an
+# initial goal
 ./bootstrap.sh
 
 # Terminal 1 — watch the dashboard (interactive read-only TUI)
@@ -158,15 +163,20 @@ autoresearch dashboard tui
 ```text
 Read the local autoresearch docs for this project. Use autoresearch as
 the only writer of research state, and start the research loop for the
-current goal. I will observe via the dashboard.
+current goal. You may delegate to the installed research-orchestrator and
+research-gate-reviewer subagents whenever delegation or independent gate
+review is needed. I will observe via the dashboard.
 ```
 
-The agent reads `.claude/autoresearch.md` and the two prompts under
-`.claude/agents/`, then drives the loop autonomously: proposing hypotheses,
-designing experiments, implementing changes in isolated worktrees, running
-instruments (with dependency ordering — `host_test` must pass before
-`host_timing` runs), and concluding with the strict-mode firewall. The
-gate reviewer is dispatched automatically for decisive verdicts.
+Claude reads `.claude/autoresearch.md` and the two prompts under
+`.claude/agents/`. Codex reads the managed `AGENTS.md` block,
+`.codex/autoresearch.md`, and the two custom-agent configs under
+`.codex/agents/`. Either way, the agent then drives the loop
+autonomously: proposing hypotheses, designing experiments, implementing
+changes in isolated worktrees, running instruments (with dependency
+ordering — `host_test` must pass before `host_timing` runs), and
+concluding with the strict-mode firewall. The gate reviewer is
+dispatched automatically for decisive verdicts.
 
 For a more hands-on first step:
 

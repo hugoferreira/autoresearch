@@ -7,12 +7,17 @@
 #   cd /tmp/my-fir
 #   ./bootstrap.sh
 #
+# Re-running this script is destructive by design: it removes any linked git
+# worktrees for this local copy, drops the local git history, deletes
+# `.research/`, and recreates the repo from a fresh initial-import commit.
+#
 # This script assumes you already have `autoresearch` on your PATH. Set
 # AR=/path/to/autoresearch to override.
 #
 set -e
 
 AR="${AR:-autoresearch}"
+ROOT="$(pwd -P)"
 
 if [ ! -f src/dsp_fir.c ] || [ ! -f Makefile ]; then
     echo "bootstrap.sh: run this inside a copy of the cortex-m4-synth example." >&2
@@ -47,15 +52,46 @@ EOF
     exit 1
 fi
 
-if [ ! -d .git ]; then
-    echo "=> initializing git repo"
-    git init --initial-branch=main -q
-    git add .
-    git -c user.email=bootstrap@autoresearch.local \
-        -c user.name=bootstrap \
-        -c commit.gpgsign=false \
-        commit -qm "cortex-m4-synth initial import"
+if [ -e .git ]; then
+    echo "=> removing linked git worktrees"
+    git -C "$ROOT" worktree list --porcelain | while IFS= read -r line; do
+        case "$line" in
+            "worktree "*) wt=${line#worktree } ;;
+            *) continue ;;
+        esac
+        if [ "$wt" = "$ROOT" ]; then
+            continue
+        fi
+        echo "   removing $wt"
+        if [ -e "$wt" ]; then
+            git -C "$ROOT" worktree remove --force "$wt"
+            if [ -e "$wt" ]; then
+                rm -rf "$wt"
+            fi
+        fi
+    done
+    git -C "$ROOT" worktree prune --expire now >/dev/null 2>&1 || true
+
+    echo "=> resetting local example copy"
+    if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+        git -C "$ROOT" reset --hard -q HEAD
+    fi
+    git -C "$ROOT" clean -fdx -q
+
+    echo "=> removing local git history"
+    rm -rf .git
 fi
+
+echo "=> removing previous .research state"
+rm -rf .research
+
+echo "=> initializing git repo"
+git init --initial-branch=main -q
+git add .
+git -c user.email=bootstrap@autoresearch.local \
+    -c user.name=bootstrap \
+    -c commit.gpgsign=false \
+    commit -qm "cortex-m4-synth initial import"
 
 echo "=> autoresearch init"
 "$AR" init --build-cmd "make all" --test-cmd "make test"
@@ -89,7 +125,7 @@ if command -v arm-none-eabi-gcc >/dev/null 2>&1 && command -v qemu-system-arm >/
     make firmware
 
     "$AR" instrument register qemu_cycles \
-        --cmd qemu-system-arm,-machine,mps2-an386,-kernel,build/firmware.elf,-icount,shift=0,-nographic,-semihosting-config,enable=on,target=native \
+        --cmd sh,-lc,qemu-system-arm\ -machine\ mps2-an386\ -kernel\ build/firmware.elf\ -icount\ shift=0\ -nographic\ -semihosting-config\ enable=on\ -semihosting-config\ target=native \
         --parser builtin:scalar \
         --pattern 'cycles:\s*(\d+)' \
         --unit cycles --min-samples 3 \
@@ -119,7 +155,9 @@ Human workflow from here:
   Main Claude Code or Codex session, opened in this directory:
     "Read the local autoresearch docs for this project. Use autoresearch as
      the only writer of research state, and start the research loop for the
-     current goal. I will observe via the dashboard."
+     current goal. You may delegate to the installed research-orchestrator
+     and research-gate-reviewer subagents whenever delegation or
+     independent gate review is needed. I will observe via the dashboard."
 
 If you want a narrower first step, ask the main agent:
 

@@ -140,7 +140,8 @@ a worktree — different tree, different store. Don't "fix" that.
   When you add or rename a verb, update the verb table here too.
 - `agents.go` embeds the two Claude prompts under `agents/`
   (`research-orchestrator.md` + `research-gate-reviewer.md`).
-  `codex_agents.go` derives the Codex role briefs from the same contracts.
+  `codex_agents.go` derives the Codex custom-agent configs from the same
+  contracts.
 - `claude_settings.go` merges a Bash allow entry into `.claude/settings.json`
   so subagents can invoke `autoresearch` without permission prompts.
 - `codex_instructions.go` maintains the managed autoresearch block in the

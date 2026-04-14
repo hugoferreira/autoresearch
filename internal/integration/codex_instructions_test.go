@@ -29,6 +29,19 @@ func TestEnsureCodexInstructions_Created(t *testing.T) {
 	if !strings.Contains(text, "spawn_agent") {
 		t.Fatalf("missing spawn_agent guidance: %s", text)
 	}
+	for _, needle := range []string{
+		".codex/agents/research-orchestrator.toml",
+		"Budgets are caps, not quotas",
+		"review pending",
+		"--inspired-by",
+		"Do not spend early turns probing `--help`",
+		"exact `agent_type` name",
+		"Do not emulate those roles by spawning `explorer`",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("managed block missing %q: %s", needle, text)
+		}
+	}
 }
 
 func TestEnsureCodexInstructions_AppendsManagedBlock(t *testing.T) {

@@ -95,7 +95,11 @@ unchanged; passing -1 clears it. Passing a positive integer sets it.
 Budgets are enforced in "dry-up" mode: when a new experiment design would
 exceed a limit, the CLI refuses with exit code 4 (budget exhausted).
 Experiments already in flight (implemented/measured/analyzing) are not
-touched — finish what you started, open no new fronts.`,
+touched — finish what you started, open no new fronts.
+
+These limits are ceilings, not quotas. It is correct to stop early when
+there is no credible next experiment, the frontier is exhausted, or a
+decisive conclusion is still waiting on gate review.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			s, err := openStoreLive()
@@ -137,7 +141,7 @@ touched — finish what you started, open no new fronts.`,
 			)
 		},
 	}
-	c.Flags().IntVar(&maxExperiments, "max-experiments", 0, "cap on total experiments (-1 to clear, 0 to leave unchanged)")
+	c.Flags().IntVar(&maxExperiments, "max-experiments", 0, "ceiling on total experiments; not a target (-1 to clear, 0 to leave unchanged)")
 	c.Flags().IntVar(&maxWallTimeH, "max-wall-time-h", 0, "wall-time budget in hours since init (-1 to clear)")
 	c.Flags().IntVar(&frontierStallK, "frontier-stall-k", 0, "stop suggestion after K conclusions without frontier improvement (-1 to clear)")
 	c.Flags().IntVar(&staleExperimentMinutes, "stale-experiment-minutes", 0, "flag experiments idle longer than N minutes in status/dashboard (-1 to clear)")

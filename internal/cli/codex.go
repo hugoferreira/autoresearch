@@ -11,7 +11,7 @@ import (
 func installCodexCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "codex",
-		Short: "Install Codex integration (AGENTS.md block, docs, role briefs)",
+		Short: "Install Codex integration (AGENTS.md block, docs, custom agents)",
 	}
 	c.AddCommand(installCodexDocsCmd(), installCodexAgentsCmd())
 	c.RunE = func(cmd *cobra.Command, args []string) error {
@@ -56,7 +56,7 @@ func installCodexCmd() *cobra.Command {
 			)
 		}
 		return w.Emit(
-			fmt.Sprintf("wrote %s\nAGENTS.md: %s\nagents: wrote %d role brief(s) to %s",
+			fmt.Sprintf("wrote %s\nAGENTS.md: %s\nagents: wrote %d custom agent(s) to %s",
 				wrote, describeCodexInstructionsAction(instrRes), agentRes.Count, agentRes.Dir),
 			payload,
 		)
@@ -67,7 +67,7 @@ func installCodexCmd() *cobra.Command {
 func installCodexDocsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "docs",
-		Short: "Write .codex/autoresearch.md and AGENTS.md block only (no role briefs)",
+		Short: "Write .codex/autoresearch.md and AGENTS.md block only (no custom agents)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			wrote, err := writeCodexDoc(globalProjectDir, false, globalDryRun)
@@ -109,20 +109,20 @@ func installCodexDocsCmd() *cobra.Command {
 func installCodexAgentsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "agents",
-		Short: "Write the research-* role briefs into .codex/agents/",
-		Long: `Write the orchestrator and gate-reviewer role briefs into the target
-project's .codex/agents/ directory. Codex does not auto-discover these,
-but the main session can read the matching brief before calling
-spawn_agent.
+		Short: "Write the research-* custom-agent configs into .codex/agents/",
+		Long: `Write the orchestrator and gate-reviewer custom-agent configs into the
+target project's .codex/agents/ directory. Codex auto-discovers
+project-scoped custom agents from that directory when the project is
+trusted.
 
 This command never touches non-research files in .codex/agents/. The
-research-*.md files are fully managed — re-running this command
-overwrites them with the current bundled version, so any hand edits you
-made will be lost. If you want custom behavior, create a sibling file
-with a different name.
+managed research-*.toml files are overwritten on every run, and legacy
+managed research-*.md briefs from older autoresearch versions are
+removed. If you want custom behavior, create a sibling custom agent with
+a different name.
 
 This is idempotent; run it after upgrading autoresearch to pull in
-updated role briefs.`,
+updated custom-agent configs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			if globalDryRun {
@@ -131,7 +131,7 @@ updated role briefs.`,
 					return err
 				}
 				return w.Emit(
-					fmt.Sprintf("[dry-run] would write %d role brief(s) to %s", preview.Count, preview.Dir),
+					fmt.Sprintf("[dry-run] would write %d custom agent(s) to %s", preview.Count, preview.Dir),
 					map[string]any{
 						"status": "dry-run",
 						"dir":    preview.Dir,
@@ -144,7 +144,7 @@ updated role briefs.`,
 				return fmt.Errorf("install codex agents: %w", err)
 			}
 			return w.Emit(
-				fmt.Sprintf("wrote %d role brief(s) to %s", res.Count, res.Dir),
+				fmt.Sprintf("wrote %d custom agent(s) to %s", res.Count, res.Dir),
 				map[string]any{
 					"status": "ok",
 					"dir":    res.Dir,

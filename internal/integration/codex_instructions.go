@@ -111,11 +111,17 @@ This block is managed by ` + "`autoresearch init`" + ` and ` + "`autoresearch in
 Edits inside this block will be overwritten.
 
 - Read ` + "`.codex/autoresearch.md`" + ` before mutating research state.
+- Before any autonomous research loop, read ` + "`.codex/agents/research-orchestrator.toml`" + ` and follow its ` + "`developer_instructions`" + ` so your control flow matches the orchestrator contract even if you stay in the main session.
+- Treat ` + "`.codex/autoresearch.md`" + ` as the canonical syntax reference for routine verbs. Do not spend early turns probing ` + "`--help`" + ` for the baseline/design/implement/observe/analyze/conclude/lesson/review spine; use help only when the installed reference leaves a real flag question unanswered.
 - Use ` + "`autoresearch <verb>`" + ` to record every hypothesis, experiment, observation, and conclusion.
 - Never edit ` + "`.research/`" + ` directly; the CLI is the only writer.
 - Capture reasoning, not just measurements: pass ` + "`--rationale`" + ` on ` + "`hypothesis add`" + `, ` + "`--design-notes`" + ` on ` + "`experiment design`" + `, ` + "`--impl-notes`" + ` on ` + "`experiment implement`" + `, and ` + "`--interpretation`" + ` on ` + "`conclude`" + `. Record cumulative lessons with ` + "`autoresearch lesson add`" + ` on decisive conclusions, and read ` + "`autoresearch lesson list --status active`" + ` before proposing new hypotheses — the loop should not re-derive what it already knows.
+- Lessons sourced from a decisive conclusion are provisional until gate review. Do not use ` + "`--inspired-by`" + ` to cite lessons whose source chain is still ` + "`unreviewed`" + `.
+- Budgets are caps, not quotas. ` + "`max-experiments`" + ` is a ceiling, not a target; do not create or kill filler hypotheses just to hit a number.
 - Humans steer through the main Codex conversation. Read-only views like ` + "`dashboard`" + `, ` + "`log`" + `, ` + "`tree`" + `, ` + "`frontier`" + `, ` + "`lesson list`" + `, and ` + "`report`" + ` are windows onto state, not steering surfaces.
-- When delegating with ` + "`spawn_agent`" + `, read the matching brief under ` + "`.codex/agents/research-*.md`" + ` first. Use ` + "`research-orchestrator`" + ` to run a full hypothesis cycle, and ` + "`research-gate-reviewer`" + ` to independently review decisive conclusions.
+- After every ` + "`supported`" + ` or ` + "`refuted`" + ` conclusion, dispatch ` + "`research-gate-reviewer`" + ` before starting another cycle. If review delegation is unavailable, stop and yield with review pending rather than continuing unreviewed.
+- When delegating with ` + "`spawn_agent`" + `, read the matching installed custom agent under ` + "`.codex/agents/research-*.toml`" + ` first, then spawn it by exact ` + "`agent_type`" + ` name. Use ` + "`research-orchestrator`" + ` to run a full hypothesis cycle, and ` + "`research-gate-reviewer`" + ` to independently review decisive conclusions.
+- Do not emulate those roles by spawning ` + "`explorer`" + `, ` + "`worker`" + `, or ` + "`default`" + ` with pasted instructions. If the named custom agent is unavailable, stop and report that ` + "`autoresearch install codex agents`" + ` must be rerun.
 ` + codexBlockEnd + `
 `
 }

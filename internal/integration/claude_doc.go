@@ -127,11 +127,30 @@ Backward transitions are explicit and auditable:
 
 Reasons are required on every backward move and recorded in ` + "`events.jsonl`" + `.
 
+## Core cycle cheat sheet
+
+For the routine optimization loop, the canonical command spine is:
+
+    autoresearch experiment baseline --json                              # once per goal, if missing
+    autoresearch hypothesis add ... --author agent:orchestrator --json
+    autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
+    autoresearch experiment implement <E-id> --impl-notes "..." --json
+    autoresearch observe <E-id> --all --json
+    autoresearch analyze <E-id> [--baseline <baseline-exp-id>] --json
+    autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
+    autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
+    autoresearch conclusion accept <C-id> ...  # or downgrade, before the next cycle
+
+This document is the primary contract for routine autoresearch work. Use
+` + "`<verb> --help`" + ` only when a verb or flag you need is missing or ambiguous
+here; do not burn early turns rediscovering the baseline/design/implement/
+observe/analyze/conclude loop with repeated help calls.
+
 ## Command surface
 
 Everything supports ` + "`--json`" + ` for structured output and ` + "`--dry-run`" + ` where
-mutations happen. ` + "`--project-dir`" + ` / ` + "`-C`" + ` is global. Invoke ` + "`<verb> --help`" + ` for
-flag details.
+mutations happen. ` + "`--project-dir`" + ` / ` + "`-C`" + ` is global. Use ` + "`<verb> --help`" + `
+only when this reference does not answer the question you have.
 
 ### Lifecycle
     autoresearch init       --build-cmd ... --test-cmd ...
@@ -144,6 +163,8 @@ flag details.
     autoresearch budget show
     autoresearch budget set --max-experiments N --max-wall-time-h H --frontier-stall-k K --stale-experiment-minutes M
         # Pass -1 to clear a specific limit; 0 leaves it unchanged.
+        # Limits are ceilings, not quotas. Leaving budget unused is correct
+        # when no high-value next experiment remains or review is still pending.
         # stale-experiment-minutes: when > 0, status and dashboard flag idle experiments.
 
 ### Goal lifecycle (serialized, one active at a time)
@@ -246,6 +267,8 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
         # Appeal a critic downgrade: restores original verdict, clears
         # reviewed_by, records rebuttal. Only valid for critic downgrades.
 
+Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session — do not start another cycle while the chain is still ` + "`unreviewed`" + `.
+
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--experiment E-XXXX | --observation O-XXXX]
     autoresearch artifact stat   <sha-or-prefix>
@@ -314,6 +337,8 @@ fix the input instead.
 
 - ` + "`hypothesis add`" + `: requires claim, predicts.{instrument,target,direction,
   min_effect}, and at least one ` + "`--kill-if`" + ` clause. Missing any is exit 1.
+  ` + "`--inspired-by`" + ` lessons whose subject chain still depends on an
+  ` + "`unreviewed`" + ` decisive conclusion are rejected — review first.
 - ` + "`goal set`" + `: rejects goals whose ` + "`objective.instrument`" + ` is not in the
   registered instruments, including goals with no instrument at all (feature
   delivery goals).
@@ -415,6 +440,11 @@ example.
   (supported, or cleanly refuted with a mechanism). If you cannot
   state a one-sentence reusable claim, the verdict was not decisive —
   mark it inconclusive instead.
+- Lessons whose subjects resolve to an ` + "`unreviewed`" + ` decisive chain are
+  **provisional**. They may exist in the notebook, but they MUST NOT be
+  cited via ` + "`--inspired-by`" + ` or treated as a reviewed-parent surrogate
+  until the gate reviewer accepts or downgrades the underlying
+  conclusion.
 - The **gate reviewer** MAY call ` + "`lesson add`" + ` on downgrade, but only for
   cross-cutting patterns. One-off reasons stay in
   ` + "`conclusion.strict_check.reasons`" + `.

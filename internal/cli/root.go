@@ -21,7 +21,11 @@ worktrees, and draws statistically-sound conclusions — with a strict
 firewall between speculation and observation.
 
 autoresearch is for optimizing existing, working systems against
-measurable goals. It is not a feature-delivery or program-synthesis tool.`,
+measurable goals. It is not a feature-delivery or program-synthesis tool.
+
+In projects initialized with autoresearch, the installed .claude/autoresearch.md
+or .codex/autoresearch.md file is the primary agent reference for the
+routine research loop; use it before walking subcommands with --help.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

@@ -81,11 +81,18 @@ func hypothesisAddCmd() *cobra.Command {
 				}
 			}
 
-			// Validate inspired_by references exist.
+			// Validate inspired_by references exist and do not point at lessons
+			// sourced from an unreviewed decisive chain.
+			inspiredByLessons := make([]*entity.Lesson, 0, len(inspiredBy))
 			for _, lid := range inspiredBy {
-				if _, err := s.ReadLesson(lid); err != nil {
+				lesson, err := s.ReadLesson(lid)
+				if err != nil {
 					return fmt.Errorf("--inspired-by %s: %w", lid, err)
 				}
+				inspiredByLessons = append(inspiredByLessons, lesson)
+			}
+			if err := firewall.CheckInspiredByLessonsReviewed(s, inspiredByLessons); err != nil {
+				return err
 			}
 
 			h := &entity.Hypothesis{
@@ -145,7 +152,7 @@ func hypothesisAddCmd() *cobra.Command {
 	c.Flags().StringVar(&predDirection, "predicts-direction", "", "predicted direction: increase | decrease (required)")
 	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum fractional effect required to call it supported (required)")
 	c.Flags().StringArrayVar(&killIf, "kill-if", nil, "kill criterion; may be repeated (at least one required)")
-	c.Flags().StringSliceVar(&inspiredBy, "inspired-by", nil, "lesson IDs this hypothesis draws on (L-NNNN; comma-separated or repeated)")
+	c.Flags().StringSliceVar(&inspiredBy, "inspired-by", nil, "lesson IDs this hypothesis draws on (L-NNNN; reviewed lessons only; comma-separated or repeated)")
 	addAuthorFlag(c, &author, "")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&rationale, "rationale", "", "one-line rationale: why this hypothesis, what evidence or lesson led you here (persisted in the hypothesis body under `# Rationale`; first 200 chars also land on the hypothesis.add event)")
