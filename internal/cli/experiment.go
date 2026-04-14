@@ -462,7 +462,7 @@ func experimentWorktreeCmd() *cobra.Command {
 }
 
 func experimentListCmd() *cobra.Command {
-	var status, hyp string
+	var status, hyp, goalFlag string
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List experiments",
@@ -472,7 +472,15 @@ func experimentListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
 			all, err := s.ListExperiments()
+			if err != nil {
+				return err
+			}
+			all, err = newGoalScopeResolver(s, scope).filterExperiments(all)
 			if err != nil {
 				return err
 			}
@@ -502,6 +510,7 @@ func experimentListCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&status, "status", "", "filter by status")
 	c.Flags().StringVar(&hyp, "hypothesis", "", "filter by hypothesis id")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
 

@@ -19,10 +19,11 @@ import (
 
 func logCommands() []*cobra.Command {
 	var (
-		tail   int
-		kind   string
-		since  string
-		follow bool
+		tail     int
+		kind     string
+		since    string
+		follow   bool
+		goalFlag string
 	)
 	c := &cobra.Command{
 		Use:   "log",
@@ -42,6 +43,11 @@ event is appended with the standard formatter; in --json mode emits JSONL
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
+			resolver := newGoalScopeResolver(s, scope)
 
 			limits := map[string]any{"tail": tail}
 			if kind != "" {
@@ -53,8 +59,15 @@ event is appended with the standard formatter; in --json mode emits JSONL
 			if follow {
 				limits["follow"] = true
 			}
+			for k, v := range scope.payload() {
+				limits[k] = v
+			}
 
 			all, err := s.Events(0)
+			if err != nil {
+				return err
+			}
+			all, err = resolver.filterEvents(all)
 			if err != nil {
 				return err
 			}
@@ -96,13 +109,13 @@ event is appended with the standard formatter; in --json mode emits JSONL
 			truncated := !follow && total > len(filtered)
 
 			if w.IsJSON() && !follow {
-				return w.JSON(map[string]any{
+				return w.JSON(mergeGoalScopePayload(map[string]any{
 					"limits":       limits,
 					"total_events": total,
 					"shown_events": len(filtered),
 					"truncated":    truncated,
 					"events":       filtered,
-				})
+				}, scope))
 			}
 
 			if w.IsJSON() && follow {
@@ -129,7 +142,7 @@ event is appended with the standard formatter; in --json mode emits JSONL
 			}
 
 			if follow {
-				return followEvents(s, keep, w.IsJSON())
+				return followEvents(s, newFollowEventFilter(s, scope, keep), w.IsJSON())
 			}
 			return nil
 		},
@@ -138,6 +151,7 @@ event is appended with the standard formatter; in --json mode emits JSONL
 	c.Flags().StringVar(&kind, "kind", "", "filter by event kind (exact or prefix, e.g. 'conclusion.')")
 	c.Flags().StringVar(&since, "since", "", "only events at or after this RFC3339 timestamp")
 	c.Flags().BoolVar(&follow, "follow", false, "after printing history, tail events.jsonl for new events (Ctrl-C to exit)")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the log to (defaults to active goal; use 'all' for every goal)")
 	return []*cobra.Command{c}
 }
 
@@ -155,6 +169,23 @@ func writeEventLine(w io.Writer, e store.Event) {
 		subject,
 		e.Actor,
 	)
+}
+
+// newFollowEventFilter recreates the scope resolver per streamed event so
+// baseline ownership picks up experiment.baseline events appended after
+// `log --follow` starts.
+func newFollowEventFilter(s *store.Store, scope goalScope, keep func(store.Event) bool) func(store.Event) bool {
+	if scope.All {
+		return keep
+	}
+	return func(e store.Event) bool {
+		resolver := newGoalScopeResolver(s, scope)
+		ok, err := resolver.eventMatches(e)
+		if err != nil || !ok {
+			return false
+		}
+		return keep(e)
+	}
 }
 
 // followEvents is the tail loop. It polls events.jsonl by byte offset every

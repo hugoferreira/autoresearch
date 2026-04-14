@@ -7,17 +7,17 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
-	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 )
 
 func treeCommands() []*cobra.Command {
-	var goalID string
+	var goalFlag string
 	c := &cobra.Command{
 		Use:   "tree",
-		Short: "Render the hypothesis tree for the active goal (or --goal G-NNNN)",
+		Short: "Render the hypothesis tree for the active goal (or --goal G-NNNN|all)",
 		Long: `Render the hypothesis forest scoped to a single goal. Defaults to
-the active goal; pass --goal G-NNNN to view a historical goal's tree.
+the active goal; pass --goal G-NNNN to view a historical goal's tree, or
+--goal all to broaden the view across goals.
 Hypotheses are bound to a goal at creation time; the tree view never
 mixes contexts.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -26,7 +26,7 @@ mixes contexts.`,
 			if err != nil {
 				return err
 			}
-			scopeID, err := resolveGoalScope(s, goalID)
+			scope, err := resolveGoalScope(s, goalFlag)
 			if err != nil {
 				return err
 			}
@@ -34,18 +34,16 @@ mixes contexts.`,
 			if err != nil {
 				return err
 			}
-			filtered := filterHypothesesByGoal(all, scopeID)
+			filtered := filterHypothesesByScope(all, scope)
 			roots, children := buildHypothesisForest(filtered)
 
 			if w.IsJSON() {
-				return w.JSON(map[string]any{
-					"goal_id": scopeID,
+				return w.JSON(mergeGoalScopePayload(map[string]any{
+					"goal_id": scope.GoalID,
 					"tree":    buildTreeJSON(roots, children),
-				})
+				}, scope))
 			}
-			if scopeID != "" {
-				w.Textf("[goal: %s]\n", scopeID)
-			}
+			w.Textf("[goal: %s]\n", scope.label())
 			if len(roots) == 0 && len(filtered) == 0 {
 				w.Textln("(no hypotheses)")
 				return nil
@@ -54,30 +52,8 @@ mixes contexts.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&goalID, "goal", "", "goal to scope the tree to (defaults to active goal)")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the tree to (defaults to active goal; use 'all' for every goal)")
 	return []*cobra.Command{c}
-}
-
-// resolveGoalScope picks the goal id a read-only view should scope to. An
-// explicit --goal flag is verified against the store; an empty flag falls
-// back to the active goal id from state (which may itself be empty when
-// the store has no goal yet — callers must handle that).
-func resolveGoalScope(s *store.Store, flag string) (string, error) {
-	if flag != "" {
-		ok, err := s.GoalExists(flag)
-		if err != nil {
-			return "", err
-		}
-		if !ok {
-			return "", fmt.Errorf("--goal %s: goal does not exist", flag)
-		}
-		return flag, nil
-	}
-	st, err := s.State()
-	if err != nil {
-		return "", err
-	}
-	return st.CurrentGoalID, nil
 }
 
 // filterHypothesesByGoal keeps only hypotheses bound to goalID. When goalID
@@ -88,9 +64,16 @@ func filterHypothesesByGoal(all []*entity.Hypothesis, goalID string) []*entity.H
 	if goalID == "" {
 		return all
 	}
+	return filterHypothesesByScope(all, goalScope{GoalID: goalID})
+}
+
+func filterHypothesesByScope(all []*entity.Hypothesis, scope goalScope) []*entity.Hypothesis {
+	if scope.All {
+		return all
+	}
 	out := make([]*entity.Hypothesis, 0, len(all))
 	for _, h := range all {
-		if h.GoalID == goalID {
+		if h != nil && h.GoalID == scope.GoalID {
 			out = append(out, h)
 		}
 	}

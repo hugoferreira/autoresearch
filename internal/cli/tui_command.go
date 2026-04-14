@@ -12,6 +12,7 @@ import (
 
 func dashboardTuiCmd() *cobra.Command {
 	var refresh int
+	var goalFlag string
 	c := &cobra.Command{
 		Use:   "tui",
 		Short: "Interactive read-only TUI over the research state",
@@ -26,7 +27,7 @@ main agent session, which translates intent into CLI calls.
 
 Press ? inside the TUI for a full key reference. Top-level jumps:
 H hypotheses  E experiments  C conclusions  L log
-T tree  F frontier  O goal  S status  D dashboard
+T tree  F frontier  O goals  S status  D dashboard
 A artifacts  I instruments  R report picker`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -36,16 +37,21 @@ A artifacts  I instruments  R report picker`,
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
 			if refresh < 1 {
 				// Default cadence when --refresh is omitted or set to 0.
 				refresh = 2
 			}
-			m := newTuiModel(s, time.Duration(refresh)*time.Second)
+			m := newTuiModel(s, scope, time.Duration(refresh)*time.Second)
 			p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 			_, err = p.Run()
 			return err
 		},
 	}
 	c.Flags().IntVar(&refresh, "refresh", 2, "seconds between background refreshes (min 1)")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the TUI to (defaults to active goal; use 'all' for every goal)")
 	return c
 }

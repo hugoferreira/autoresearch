@@ -210,7 +210,7 @@ is paused.
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
 | **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |
-| **tree / frontier** | `tree [--goal G-NNNN]`, `frontier [--goal G-NNNN]` |
+| **tree / frontier** | `tree [--goal G-NNNN\|all]`, `frontier [--goal G-NNNN\|all]` |
 | **log** | `log [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
 | **artifact** | `list`, `stat`, `path`, `head`, `tail`, `range`, `grep`, `diff`, `show` |
@@ -219,7 +219,7 @@ is paused.
 | **budget** | `show`, `set` |
 | **gc** | `gc` |
 | **install** | `install claude [docs\|agents] [--trust-shell]`, `install codex [docs\|agents]` |
-| **dashboard** | `dashboard [--refresh N] [--color auto\|always\|never]`, `dashboard tui` |
+| **dashboard** | `dashboard [--goal G-NNNN\|all] [--refresh N] [--color auto\|always\|never]`, `dashboard tui [--goal G-NNNN\|all]` |
 
 Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,
 `4` budget exhausted. The orchestrator loop uses 3/4 to decide when to stop.
@@ -248,6 +248,13 @@ either the objective instrument or one of the explicit constraint instruments.
 Other registered instruments are still useful as supporting measurements on
 experiments, but they are not standalone optimization targets unless the goal
 names them.
+
+Read surfaces that aggregate goal-derived entities default to the active goal:
+`hypothesis list`, `experiment list`, `conclusion list`, `lesson list`,
+`artifact list`, `log`, `status`, `dashboard`, `dashboard tui`, `tree`, and
+`frontier`. Pass `--goal G-NNNN` to inspect a historical goal or `--goal all`
+to broaden the view across goals. System lessons remain visible in scoped
+views.
 
 ## Goal format
 
@@ -359,7 +366,9 @@ you drive research from the main session.
 
 ```sh
 autoresearch dashboard                  # one-shot composite snapshot
-autoresearch dashboard tui              # interactive read-only TUI
+autoresearch dashboard --goal all       # broaden the dashboard across goals
+autoresearch dashboard tui              # interactive read-only TUI (scoped to active goal)
+autoresearch dashboard tui --goal G-0001
 autoresearch dashboard --refresh 2      # live, auto-redraws every 2s (TTY only)
 autoresearch dashboard --json           # structured snapshot for tools
 autoresearch log --follow               # tail events.jsonl as they arrive
@@ -381,7 +390,8 @@ A Bubble Tea TUI built on top of the same `captureDashboard` snapshot.
 Richer than the one-shot view, but the read-only constraint is
 identical: it never mutates `.research/`, and there are no "quick
 action" keystrokes — steering is still conversational with the main
-agent session.
+agent session. Like the CLI read surfaces, it defaults to the active goal and
+accepts `--goal G-NNNN` or `--goal all` at launch.
 
 The TUI surfaces every read-only CLI verb as a navigable view:
 
@@ -395,8 +405,9 @@ The TUI surfaces every read-only CLI verb as a navigable view:
 - **Event log**: full log with follow mode, kind filter, and an event
   detail view that pretty-prints JSON payloads with colorized keys,
   strings, numbers, and literals.
-- **Tree / Frontier / Goal / Status / Instruments**: full-screen
+- **Tree / Frontier / Goals / Status / Instruments**: full-screen
   versions of the corresponding CLI verbs.
+- **Goals**: list + detail, with the current goal marked in the list.
 - **Artifacts**: list + scrollable viewer with head/tail/full/grep
   modes. `d` prompts for a second SHA and shows the unified diff,
   colorized.
@@ -407,7 +418,7 @@ Top-level jump keys reach every view from anywhere:
 
 ```
 H hypotheses      E experiments     C conclusions     L event log
-T tree            F frontier        G goal            S status
+T tree            F frontier        O goals           S status
 A artifacts       I instruments     R report picker   D dashboard
 ? help overlay    Esc / ⌫  pop current view           q / Ctrl-C  quit
 ```

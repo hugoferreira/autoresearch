@@ -393,7 +393,8 @@ func runProjectCommand(projectDir, shellCmd string) error {
 }
 
 func statusCmd() *cobra.Command {
-	return &cobra.Command{
+	var goalFlag string
+	c := &cobra.Command{
 		Use:   "status",
 		Short: "Show pause state, budget consumption, and entity counts",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -403,11 +404,12 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := s.State()
+			scope, err := resolveGoalScope(s, goalFlag)
 			if err != nil {
 				return err
 			}
-			counts, err := s.Counts()
+			resolver := newGoalScopeResolver(s, scope)
+			st, err := s.State()
 			if err != nil {
 				return err
 			}
@@ -419,8 +421,43 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			hyps, err := s.ListHypotheses()
+			if err != nil {
+				return err
+			}
+			hyps = resolver.filterHypotheses(hyps)
+			exps, err := s.ListExperiments()
+			if err != nil {
+				return err
+			}
+			exps, err = resolver.filterExperiments(exps)
+			if err != nil {
+				return err
+			}
+			obs, err := s.ListObservations()
+			if err != nil {
+				return err
+			}
+			obs, err = resolver.filterObservations(obs)
+			if err != nil {
+				return err
+			}
+			concls, err := s.ListConclusions()
+			if err != nil {
+				return err
+			}
+			concls, err = resolver.filterConclusions(concls)
+			if err != nil {
+				return err
+			}
+			counts := map[string]int{
+				"hypotheses":   len(hyps),
+				"experiments":  len(exps),
+				"observations": len(obs),
+				"conclusions":  len(concls),
+			}
 
-			payload := map[string]any{
+			payload := mergeGoalScopePayload(map[string]any{
 				"root":                      s.Root(),
 				"dir":                       s.DirPath(),
 				"mode":                      cfg.Mode,
@@ -431,7 +468,7 @@ func statusCmd() *cobra.Command {
 				"last_event_at":             st.LastEventAt,
 				"main_checkout_dirty":       mainCheckout.Dirty,
 				"main_checkout_dirty_paths": mainCheckout.Paths,
-			}
+			}, scope)
 
 			// Stale experiment detection.
 			type staleExp struct {
@@ -443,11 +480,10 @@ func statusCmd() *cobra.Command {
 			}
 			var stale []staleExp
 			if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
-				exps, err := s.ListExperiments()
+				allEvents, err := s.Events(0)
 				if err != nil {
 					return err
 				}
-				allEvents, _ := s.Events(0)
 				threshold := time.Duration(staleMinutes) * time.Minute
 				now := time.Now().UTC()
 				for _, e := range exps {
@@ -484,16 +520,14 @@ func statusCmd() *cobra.Command {
 			// observations anywhere. A nudge for the orchestrator that it
 			// may be skipping a required measurement.
 			var unobservedInstruments []string
-			if st.CurrentGoalID != "" {
-				if goal, err := s.ActiveGoal(); err == nil {
+			if !scope.All && scope.GoalID != "" {
+				if goal, err := s.ReadGoal(scope.GoalID); err == nil {
 					needed := map[string]bool{goal.Objective.Instrument: true}
 					for _, c := range goal.Constraints {
 						needed[c.Instrument] = true
 					}
-					if obs, err := s.ListObservations(); err == nil {
-						for _, o := range obs {
-							delete(needed, o.Instrument)
-						}
+					for _, o := range obs {
+						delete(needed, o.Instrument)
 					}
 					for inst := range needed {
 						unobservedInstruments = append(unobservedInstruments, inst)
@@ -511,6 +545,7 @@ func statusCmd() *cobra.Command {
 
 			w.Textf("root:           %s\n", s.Root())
 			w.Textf("dir:            %s\n", s.DirPath())
+			w.Textf("scope:          %s\n", scope.label())
 			w.Textf("mode:           %s\n", cfg.Mode)
 			if mainCheckout.Dirty {
 				w.Textf("main checkout:  DIRTY (%d path(s) outside autoresearch-managed files)\n", len(mainCheckout.Paths))
@@ -566,4 +601,6 @@ func statusCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the status view to (defaults to active goal; use 'all' for every goal)")
+	return c
 }

@@ -113,7 +113,7 @@ func findArtifactOwners(s *store.Store, sha string) []string {
 // ---- list ----
 
 func artifactListCmd() *cobra.Command {
-	var experiment, observation string
+	var experiment, observation, goalFlag string
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List artifacts produced by observations",
@@ -123,6 +123,11 @@ func artifactListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
+			resolver := newGoalScopeResolver(s, scope)
 
 			var obs []*entity.Observation
 			switch {
@@ -142,6 +147,10 @@ func artifactListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+			}
+			obs, err = resolver.filterObservations(obs)
+			if err != nil {
+				return err
 			}
 
 			type row struct {
@@ -166,7 +175,7 @@ func artifactListCmd() *cobra.Command {
 				}
 			}
 			if w.IsJSON() {
-				return w.JSON(map[string]any{"artifacts": rows})
+				return w.JSON(mergeGoalScopePayload(map[string]any{"artifacts": rows}, scope))
 			}
 			if len(rows) == 0 {
 				w.Textln("(no artifacts)")
@@ -185,6 +194,7 @@ func artifactListCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&experiment, "experiment", "", "filter by experiment id")
 	c.Flags().StringVar(&observation, "observation", "", "filter by observation id")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
 

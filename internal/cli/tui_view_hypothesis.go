@@ -13,6 +13,7 @@ import (
 // ---- list view ----
 
 type hypothesisListView struct {
+	scope        goalScope
 	all          []*entity.Hypothesis
 	filtered     []*entity.Hypothesis
 	cursor       int
@@ -26,13 +27,15 @@ type hypListLoadedMsg struct {
 	err  error
 }
 
-func newHypothesisListView() *hypothesisListView { return &hypothesisListView{} }
+func newHypothesisListView(scope goalScope) *hypothesisListView {
+	return &hypothesisListView{scope: scope}
+}
 
 // newHypothesisListViewForReport is the hypothesis list whose Enter key
 // opens the report view instead of the detail view. Used when the user hits
 // the top-level `R` shortcut.
-func newHypothesisListViewForReport() *hypothesisListView {
-	return &hypothesisListView{reportMode: true}
+func newHypothesisListViewForReport(scope goalScope) *hypothesisListView {
+	return &hypothesisListView{scope: scope, reportMode: true}
 }
 
 func (v *hypothesisListView) title() string {
@@ -45,6 +48,9 @@ func (v *hypothesisListView) title() string {
 func (v *hypothesisListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		list, err := s.ListHypotheses()
+		if err == nil {
+			list = newGoalScopeResolver(s, v.scope).filterHypotheses(list)
+		}
 		return hypListLoadedMsg{list: list, err: err}
 	}
 }

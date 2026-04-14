@@ -32,6 +32,7 @@ func dashboardCmd() *cobra.Command {
 	var (
 		refresh   int
 		colorMode string
+		goalFlag  string
 	)
 	c := &cobra.Command{
 		Use:   "dashboard",
@@ -65,8 +66,12 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 			if err != nil {
 				return err
 			}
+			scope, err := resolveGoalScope(s, goalFlag)
+			if err != nil {
+				return err
+			}
 			if globalJSON {
-				snap, err := captureDashboard(s)
+				snap, err := captureDashboardScoped(s, scope)
 				if err != nil {
 					return err
 				}
@@ -75,7 +80,7 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 				return enc.Encode(snap)
 			}
 			if refresh == 0 {
-				return runDashboardOnce(s, os.Stdout, colors)
+				return runDashboardOnce(s, scope, os.Stdout, colors)
 			}
 			if refresh < 1 {
 				return errors.New("--refresh must be at least 1 second")
@@ -83,11 +88,12 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 			if !term.IsTerminal(int(os.Stdout.Fd())) {
 				return errors.New("dashboard --refresh requires a TTY; for scripting use one-shot `dashboard --json`")
 			}
-			return runDashboardLoop(s, os.Stdout, time.Duration(refresh)*time.Second, colors)
+			return runDashboardLoop(s, scope, os.Stdout, time.Duration(refresh)*time.Second, colors)
 		},
 	}
 	c.Flags().IntVar(&refresh, "refresh", 0, "seconds between auto-refreshes (0 = one-shot, requires a TTY when > 0)")
 	c.Flags().StringVar(&colorMode, "color", "auto", "color output: auto (TTY-detect), always (force on, for `watch -c`), never")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the dashboard to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
 
@@ -95,6 +101,8 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 
 type dashboardSnapshot struct {
 	Project                string              `json:"project"`
+	ScopeGoalID            string              `json:"scope_goal_id,omitempty"`
+	ScopeAll               bool                `json:"scope_all"`
 	Paused                 bool                `json:"paused"`
 	PauseReason            string              `json:"pause_reason,omitempty"`
 	Mode                   string              `json:"mode"`
@@ -169,8 +177,18 @@ func readDashboardRecentEvents(all []store.Event, offsetNewest, limit int) ([]st
 // captureDashboard gathers everything the dashboard renders. All reads go
 // through existing store methods — no new store APIs, no mutation.
 func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
+	scope, err := resolveGoalScope(s, "")
+	if err != nil {
+		return nil, err
+	}
+	return captureDashboardScoped(s, scope)
+}
+
+func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot, error) {
 	snap := &dashboardSnapshot{
 		Project:                s.Root(),
+		ScopeGoalID:            scope.GoalID,
+		ScopeAll:               scope.All,
 		CapturedAt:             time.Now().UTC(),
 		MainCheckoutDirtyPaths: []string{},
 		Tree:                   []*treeNode{},
@@ -198,10 +216,8 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	snap.MainCheckoutDirty = mainCheckout.Dirty
 	snap.MainCheckoutDirtyPaths = mainCheckout.Paths
 
-	// Use the already-loaded state to read the goal directly, avoiding a
-	// second State() read inside ActiveGoal().
-	if st.CurrentGoalID != "" {
-		if g, err := s.ReadGoal(st.CurrentGoalID); err == nil {
+	if !scope.All && scope.GoalID != "" {
+		if g, err := s.ReadGoal(scope.GoalID); err == nil {
 			snap.Goal = g
 		}
 	}
@@ -214,14 +230,21 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		snap.Budgets.Usage.ElapsedH = time.Since(*st.ResearchStartedAt).Hours()
 	}
 
+	resolver := newGoalScopeResolver(s, scope)
+
 	hyps, err := s.ListHypotheses()
 	if err != nil {
 		return nil, err
 	}
+	hyps = resolver.filterHypotheses(hyps)
 	roots, children := buildHypothesisForest(hyps)
 	snap.Tree = buildTreeJSON(roots, children)
 
 	concls, err := s.ListConclusions()
+	if err != nil {
+		return nil, err
+	}
+	concls, err = resolver.filterConclusions(concls)
 	if err != nil {
 		return nil, err
 	}
@@ -238,8 +261,16 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	allEvents, err = resolver.filterEvents(allEvents)
+	if err != nil {
+		return nil, err
+	}
 
 	exps, err := s.ListExperiments()
+	if err != nil {
+		return nil, err
+	}
+	exps, err = resolver.filterExperiments(exps)
 	if err != nil {
 		return nil, err
 	}
@@ -307,8 +338,21 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 		}
 	}
 
+	allObs, err := s.ListObservations()
+	if err != nil {
+		return nil, err
+	}
+	allObs, err = resolver.filterObservations(allObs)
+	if err != nil {
+		return nil, err
+	}
+
 	var lessonCount int
 	if lessons, err := s.ListLessons(); err == nil {
+		lessons, err = resolver.filterLessons(lessons)
+		if err != nil {
+			return nil, err
+		}
 		lessonCount = len(lessons)
 		// Split by effective lifecycle so steering lessons surface first.
 		buckets := map[string][]*entity.Lesson{
@@ -342,19 +386,11 @@ func captureDashboard(s *store.Store) (*dashboardSnapshot, error) {
 	// targeted ReadDir because they're loaded inside computeFrontier, not
 	// directly available here.
 	snap.Counts = map[string]int{
-		"hypotheses":  len(hyps),
-		"experiments": len(exps),
-		"conclusions": len(concls),
-		"lessons":     lessonCount,
-	}
-	if entries, err := os.ReadDir(s.ObservationsDir()); err == nil {
-		n := 0
-		for _, e := range entries {
-			if !e.IsDir() {
-				n++
-			}
-		}
-		snap.Counts["observations"] = n
+		"hypotheses":   len(hyps),
+		"experiments":  len(exps),
+		"observations": len(allObs),
+		"conclusions":  len(concls),
+		"lessons":      lessonCount,
 	}
 
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
@@ -377,8 +413,8 @@ func findLastEventForExperiment(events []store.Event, expID string) (ts *time.Ti
 
 // ---- one-shot + refresh loop ----
 
-func runDashboardOnce(s *store.Store, w io.Writer, colors *ansi) error {
-	snap, err := captureDashboard(s)
+func runDashboardOnce(s *store.Store, scope goalScope, w io.Writer, colors *ansi) error {
+	snap, err := captureDashboardScoped(s, scope)
 	if err != nil {
 		return err
 	}
@@ -388,7 +424,7 @@ func runDashboardOnce(s *store.Store, w io.Writer, colors *ansi) error {
 	return err
 }
 
-func runDashboardLoop(s *store.Store, w io.Writer, refresh time.Duration, colors *ansi) error {
+func runDashboardLoop(s *store.Store, scope goalScope, w io.Writer, refresh time.Duration, colors *ansi) error {
 	_, _ = io.WriteString(w, "\x1b[?25l")
 	defer io.WriteString(w, "\x1b[?25h\n")
 
@@ -405,7 +441,7 @@ func runDashboardLoop(s *store.Store, w io.Writer, refresh time.Duration, colors
 	refreshLabel := fmt.Sprintf("refreshing every %s", refresh)
 
 	render := func() error {
-		snap, err := captureDashboard(s)
+		snap, err := captureDashboardScoped(s, scope)
 		if err != nil {
 			return err
 		}
@@ -499,10 +535,16 @@ func renderDashboardHeader(w io.Writer, snap *dashboardSnapshot, width int, a *a
 }
 
 func renderDashboardGoal(w io.Writer, snap *dashboardSnapshot, a *ansi) {
+	if snap.ScopeAll {
+		fmt.Fprintln(w, " "+a.bold("Scope:")+" "+a.cyan("all goals"))
+		fmt.Fprintln(w, " "+a.bold("Goal:")+" "+a.dim("(goal-specific panels are disabled in all-goal scope)"))
+		return
+	}
 	if snap.Goal == nil {
 		fmt.Fprintln(w, " "+a.bold("Goal:")+" "+a.dim("(no goal set — run `autoresearch goal set`)"))
 		return
 	}
+	fmt.Fprintln(w, " "+a.bold("Scope:")+" "+a.cyan(snap.Goal.ID))
 	fmt.Fprintln(w, " "+a.bold("Goal:")+" "+a.cyan(formatGoalObjective(snap.Goal)))
 	fmt.Fprintln(w, " "+a.bold("Completion:")+" "+formatGoalCompletion(snap.Goal))
 	if len(snap.Goal.Constraints) > 0 {
@@ -541,7 +583,7 @@ func renderDashboardBudget(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 		s := fmt.Sprintf("%.1fh/%dh elapsed", snap.Budgets.Usage.ElapsedH, lim)
 		parts = append(parts, meterColor(a, snap.Budgets.Usage.ElapsedH, float64(lim), s))
 	}
-	if lim := snap.Budgets.Limits.FrontierStallK; lim > 0 {
+	if lim := snap.Budgets.Limits.FrontierStallK; lim > 0 && !snap.ScopeAll {
 		s := fmt.Sprintf("stalled %d/%d", snap.StalledFor, lim)
 		parts = append(parts, meterColor(a, float64(snap.StalledFor), float64(lim), s))
 	}
@@ -577,6 +619,10 @@ func renderDashboardTree(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 
 func renderDashboardFrontier(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 	sectionHeader(w, "Frontier", a)
+	if snap.ScopeAll {
+		fmt.Fprintln(w, "   "+a.dim("(goal-specific — rerun with --goal G-NNNN)"))
+		return
+	}
 	if snap.Goal == nil {
 		fmt.Fprintln(w, "   "+a.dim("(no goal set)"))
 		return

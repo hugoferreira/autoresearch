@@ -13,6 +13,7 @@ import (
 // ---- list view ----
 
 type conclusionListView struct {
+	scope    goalScope
 	all      []*entity.Conclusion
 	filtered []*entity.Conclusion
 	cursor   int
@@ -25,13 +26,18 @@ type concListLoadedMsg struct {
 	err  error
 }
 
-func newConclusionListView() *conclusionListView { return &conclusionListView{} }
+func newConclusionListView(scope goalScope) *conclusionListView {
+	return &conclusionListView{scope: scope}
+}
 
 func (v *conclusionListView) title() string { return "Conclusions" }
 
 func (v *conclusionListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		list, err := s.ListConclusions()
+		if err == nil {
+			list, err = newGoalScopeResolver(s, v.scope).filterConclusions(list)
+		}
 		return concListLoadedMsg{list: list, err: err}
 	}
 }

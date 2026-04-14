@@ -10,7 +10,7 @@ import (
 )
 
 func frontierCommands() []*cobra.Command {
-	var goalID string
+	var goalFlag string
 	c := &cobra.Command{
 		Use:   "frontier",
 		Short: "Show the Pareto frontier of conclusions on the goal's objective",
@@ -19,8 +19,9 @@ func frontierCommands() []*cobra.Command {
 written since the last one that actually improved the frontier.
 
 Defaults to the active goal; pass --goal G-NNNN to view a historical
-goal's frontier. Only conclusions whose hypothesis was bound to the
-scoped goal are considered.
+goal's frontier, or --goal all to render one frontier section per goal.
+Only conclusions whose hypothesis was bound to the scoped goal are
+considered.
 
 A conclusion is "feasible" if every constraint with op=require is satisfied
 by at least one matching observation in its candidate experiment. For v1
@@ -39,87 +40,72 @@ configured ` + "`budgets.frontier_stall_k`" + ` to decide when to stop the loop.
 			if err != nil {
 				return err
 			}
-			var goal *entity.Goal
-			if goalID != "" {
-				goal, err = s.ReadGoal(goalID)
-			} else {
-				goal, err = s.ActiveGoal()
-			}
+			scope, err := resolveGoalScope(s, goalFlag)
 			if err != nil {
 				return err
 			}
-			concls, err := s.ListConclusions()
+			frontiers, err := collectFrontiers(s, scope)
 			if err != nil {
 				return err
 			}
-			concls, err = scopeConclusionsToGoal(s, concls, goal.ID)
-			if err != nil {
-				return err
-			}
-			obsByExp := loadObservationsByExperiment(s)
-			rows, stalledFor := computeFrontierFromObservations(goal, concls, obsByExp)
-			assessment := assessGoalCompletion(goal, concls, obsByExp)
-
 			cfg, err := s.Config()
 			if err != nil {
 				return err
 			}
 
-			if w.IsJSON() {
-				return w.JSON(map[string]any{
-					"goal_id": goal.ID,
-					"objective": map[string]any{
-						"instrument": goal.Objective.Instrument,
-						"direction":  goal.Objective.Direction,
-					},
-					"frontier":         rows,
-					"goal_assessment":  assessment,
-					"stalled_for":      stalledFor,
-					"frontier_stall_k": cfg.Budgets.FrontierStallK,
-					"stall_reached":    cfg.Budgets.FrontierStallK > 0 && stalledFor >= cfg.Budgets.FrontierStallK,
-				})
-			}
-			w.Textf("[goal: %s, objective: %s, %d supported conclusions]\n", goal.ID, formatGoalObjective(goal), len(rows))
-			w.Textln("")
-			if len(rows) == 0 {
-				w.Textln("(no supported+feasible conclusions yet)")
-				w.Textln("")
-			} else {
-				for i, r := range rows {
-					marker := "  "
-					if i == 0 {
-						marker = "* "
+			if scope.All {
+				if w.IsJSON() {
+					items := make([]map[string]any, 0, len(frontiers))
+					for _, f := range frontiers {
+						items = append(items, map[string]any{
+							"goal_id":          f.Goal.ID,
+							"objective":        f.Goal.Objective,
+							"frontier":         f.Rows,
+							"goal_assessment":  f.Assessment,
+							"stalled_for":      f.StalledFor,
+							"frontier_stall_k": cfg.Budgets.FrontierStallK,
+							"stall_reached":    cfg.Budgets.FrontierStallK > 0 && f.StalledFor >= cfg.Budgets.FrontierStallK,
+						})
 					}
-					w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, goal.Objective.Instrument, r.Value)
+					return w.JSON(mergeGoalScopePayload(map[string]any{"frontiers": items}, scope))
 				}
-				w.Textln("")
-			}
-			switch assessment.Mode {
-			case "threshold":
-				w.Textf("goal_assessment: threshold=%g -> %s", assessment.Threshold, assessment.OnThreshold)
-				if assessment.Met {
-					w.Textf(" (met by %s; recommended=%s)\n", assessment.MetByConclusion, assessment.RecommendedAction)
-				} else {
-					w.Textf(" (not yet met; recommended=%s)\n", assessment.RecommendedAction)
+				w.Textln("[goal: all]")
+				if len(frontiers) == 0 {
+					w.Textln("(no goals)")
+					return nil
 				}
-			default:
-				w.Textln("goal_assessment: open-ended -> continue_until_stall (recommended=continue)")
-			}
-			w.Textf("stalled_for: %d", stalledFor)
-			if cfg.Budgets.FrontierStallK > 0 {
-				w.Textf(" (stall-k=%d)", cfg.Budgets.FrontierStallK)
-				if stalledFor >= cfg.Budgets.FrontierStallK {
-					w.Textln(" — STALL REACHED, orchestrator should stop")
-				} else {
-					w.Textln("")
+				for i, f := range frontiers {
+					if i > 0 {
+						w.Textln("")
+					}
+					renderFrontierSection(w, f, cfg.Budgets.FrontierStallK)
 				}
-			} else {
-				w.Textln("")
+				return nil
 			}
+
+			if len(frontiers) == 0 {
+				return nil
+			}
+			f := frontiers[0]
+			if w.IsJSON() {
+				return w.JSON(mergeGoalScopePayload(map[string]any{
+					"goal_id": f.Goal.ID,
+					"objective": map[string]any{
+						"instrument": f.Goal.Objective.Instrument,
+						"direction":  f.Goal.Objective.Direction,
+					},
+					"frontier":         f.Rows,
+					"goal_assessment":  f.Assessment,
+					"stalled_for":      f.StalledFor,
+					"frontier_stall_k": cfg.Budgets.FrontierStallK,
+					"stall_reached":    cfg.Budgets.FrontierStallK > 0 && f.StalledFor >= cfg.Budgets.FrontierStallK,
+				}, scope))
+			}
+			renderFrontierSection(w, f, cfg.Budgets.FrontierStallK)
 			return nil
 		},
 	}
-	c.Flags().StringVar(&goalID, "goal", "", "goal to scope the frontier to (defaults to active goal)")
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the frontier to (defaults to active goal; use 'all' for every goal)")
 	return []*cobra.Command{c}
 }
 
@@ -130,24 +116,99 @@ func scopeConclusionsToGoal(s *store.Store, concls []*entity.Conclusion, goalID 
 	if goalID == "" {
 		return concls, nil
 	}
-	cache := map[string]string{}
-	out := make([]*entity.Conclusion, 0, len(concls))
-	for _, c := range concls {
-		hid := c.Hypothesis
-		gid, ok := cache[hid]
-		if !ok {
-			h, err := s.ReadHypothesis(hid)
+	return newGoalScopeResolver(s, goalScope{GoalID: goalID}).filterConclusions(concls)
+}
+
+type goalFrontier struct {
+	Goal       *entity.Goal
+	Rows       []frontierRow
+	Assessment frontierGoalAssessment
+	StalledFor int
+}
+
+func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
+	allConcls, err := s.ListConclusions()
+	if err != nil {
+		return nil, err
+	}
+	obsByExp := loadObservationsByExperiment(s)
+	if scope.All {
+		goals, err := s.ListGoals()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]goalFrontier, 0, len(goals))
+		for _, goal := range goals {
+			concls, err := scopeConclusionsToGoal(s, allConcls, goal.ID)
 			if err != nil {
 				return nil, err
 			}
-			gid = h.GoalID
-			cache[hid] = gid
+			rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp)
+			out = append(out, goalFrontier{
+				Goal:       goal,
+				Rows:       rows,
+				Assessment: assessGoalCompletion(goal, concls, obsByExp),
+				StalledFor: stalled,
+			})
 		}
-		if gid == goalID {
-			out = append(out, c)
+		return out, nil
+	}
+	goal, err := s.ReadGoal(scope.GoalID)
+	if err != nil {
+		return nil, err
+	}
+	concls, err := scopeConclusionsToGoal(s, allConcls, goal.ID)
+	if err != nil {
+		return nil, err
+	}
+	rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp)
+	return []goalFrontier{{
+		Goal:       goal,
+		Rows:       rows,
+		Assessment: assessGoalCompletion(goal, concls, obsByExp),
+		StalledFor: stalled,
+	}}, nil
+}
+
+func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
+	if f.Goal == nil {
+		return
+	}
+	w.Textf("[goal: %s, objective: %s, %d supported conclusions]\n", f.Goal.ID, formatGoalObjective(f.Goal), len(f.Rows))
+	w.Textln("")
+	if len(f.Rows) == 0 {
+		w.Textln("(no supported+feasible conclusions yet)")
+		w.Textln("")
+	} else {
+		for i, r := range f.Rows {
+			marker := "  "
+			if i == 0 {
+				marker = "* "
+			}
+			w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, f.Goal.Objective.Instrument, r.Value)
+		}
+		w.Textln("")
+	}
+	switch f.Assessment.Mode {
+	case "threshold":
+		w.Textf("goal_assessment: threshold=%g -> %s", f.Assessment.Threshold, f.Assessment.OnThreshold)
+		if f.Assessment.Met {
+			w.Textf(" (met by %s; recommended=%s)\n", f.Assessment.MetByConclusion, f.Assessment.RecommendedAction)
+		} else {
+			w.Textf(" (not yet met; recommended=%s)\n", f.Assessment.RecommendedAction)
+		}
+	default:
+		w.Textln("goal_assessment: open-ended -> continue_until_stall (recommended=continue)")
+	}
+	w.Textf("stalled_for: %d", f.StalledFor)
+	if stallK > 0 {
+		w.Textf(" (stall-k=%d)", stallK)
+		if f.StalledFor >= stallK {
+			w.Textln(" — STALL REACHED, orchestrator should stop")
+			return
 		}
 	}
-	return out, nil
+	w.Textln("")
 }
 
 type frontierRow struct {

@@ -18,7 +18,8 @@ const (
 	kindEventDetail       = "event.detail"
 	kindTree              = "tree"
 	kindFrontier          = "frontier"
-	kindGoal              = "goal"
+	kindGoalList          = "goal.list"
+	kindGoalDetail        = "goal.detail"
 	kindStatus            = "status"
 	kindArtifactList      = "artifact.list"
 	kindArtifactView      = "artifact.view"
@@ -46,7 +47,8 @@ func (v *eventListView) kind() string         { return kindEventList }
 func (v *eventDetailView) kind() string       { return kindEventDetail }
 func (v *treeView) kind() string              { return kindTree }
 func (v *frontierView) kind() string          { return kindFrontier }
-func (v *goalView) kind() string              { return kindGoal }
+func (v *goalListView) kind() string          { return kindGoalList }
+func (v *goalDetailView) kind() string        { return kindGoalDetail }
 func (v *statusView) kind() string            { return kindStatus }
 func (v *artifactListView) kind() string      { return kindArtifactList }
 func (v *artifactView) kind() string          { return kindArtifactView }
