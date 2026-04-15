@@ -319,6 +319,18 @@ EOF
 Both `--claim` AND `--body` are required. If you can't fill all four
 sections, the conclusion wasn't decisive — mark it `inconclusive`.
 
+**Choosing lesson scope:**
+
+- The default in the command above is `--from ...`, which keeps the
+  lesson `scope=hypothesis`. Keep it that way when the claim comes from
+  this H-/E-/C- chain, depends on the conditions of this chain, or
+  recommends continuing the same optimization direction.
+- Use `--scope system` only for facts expected to hold across goals,
+  such as harness behavior, environment quirks, measurement caveats, or
+  target-wide invariants.
+- If unsure, prefer `scope=hypothesis`. A local lesson misclassified as
+  system leaks into unrelated goals; the inverse is safer.
+
 **Predicted effect (when the lesson implies a continuing direction):**
 
 If the lesson suggests more of the same approach could yield further

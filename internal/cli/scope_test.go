@@ -155,6 +155,89 @@ func scopedFixtureStore(t *testing.T) *store.Store {
 
 func ptrFloat(v float64) *float64 { return &v }
 
+func scopedSystemLessonAccuracyFixtureStore(t *testing.T) (*store.Store, goalScope) {
+	t.Helper()
+
+	s, err := store.Create(t.TempDir(), store.Config{
+		Build: store.CommandSpec{Command: "true"},
+		Test:  store.CommandSpec{Command: "true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	g1 := &entity.Goal{
+		ID:        "G-0001",
+		Status:    entity.GoalStatusActive,
+		CreatedAt: &base,
+		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
+	}
+	g2 := &entity.Goal{
+		ID:        "G-0002",
+		Status:    entity.GoalStatusConcluded,
+		CreatedAt: &base,
+		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
+	}
+	for _, g := range []*entity.Goal{g1, g2} {
+		if err := s.WriteGoal(g); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Legacy malformed system lesson: read surfaces should still avoid
+	// coarse fallback if linked hypotheses exist outside the scoped goal.
+	lesson := &entity.Lesson{
+		ID:    "L-0007",
+		Claim: "legacy system steering lesson",
+		Scope: entity.LessonScopeSystem,
+		PredictedEffect: &entity.PredictedEffect{
+			Instrument: "host_timing",
+			Direction:  "decrease",
+			MinEffect:  0.10,
+			MaxEffect:  0.20,
+		},
+		Status:     entity.LessonStatusActive,
+		Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceSystem},
+		Author:     "agent:analyst",
+		CreatedAt:  base.Add(time.Minute),
+	}
+	if err := s.WriteLesson(lesson); err != nil {
+		t.Fatal(err)
+	}
+
+	inScope := &entity.Hypothesis{
+		ID: "H-0103", GoalID: g1.ID, Claim: "in-scope unrelated hypothesis",
+		Status: entity.StatusSupported, Author: "agent:analyst", CreatedAt: base.Add(2 * time.Minute),
+		Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+	}
+	outOfScopeLinked := &entity.Hypothesis{
+		ID: "H-0201", GoalID: g2.ID, Claim: "out-of-scope linked hypothesis",
+		InspiredBy: []string{lesson.ID},
+		Status:     entity.StatusOpen, Author: "agent:analyst", CreatedAt: base.Add(2 * time.Minute),
+		Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+	}
+	for _, h := range []*entity.Hypothesis{inScope, outOfScopeLinked} {
+		if err := s.WriteHypothesis(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unrelatedConclusion := &entity.Conclusion{
+		ID:         "C-0103",
+		Hypothesis: inScope.ID,
+		Verdict:    entity.VerdictSupported,
+		Effect:     entity.Effect{Instrument: "host_timing", DeltaFrac: -0.03},
+		Author:     "agent:analyst",
+		CreatedAt:  base.Add(3 * time.Minute),
+	}
+	if err := s.WriteConclusion(unrelatedConclusion); err != nil {
+		t.Fatal(err)
+	}
+
+	return s, goalScope{GoalID: g1.ID}
+}
+
 func TestResolveGoalScope_DefaultsAndAll(t *testing.T) {
 	s, err := store.Create(t.TempDir(), store.Config{
 		Build: store.CommandSpec{Command: "true"},
@@ -313,5 +396,41 @@ func TestCaptureDashboard_DefaultScopeTracksActiveGoal(t *testing.T) {
 	}
 	if got := len(allSnap.RecentLessons); got != 3 {
 		t.Fatalf("all-goal lessons = %d, want 3", got)
+	}
+}
+
+func TestCaptureDashboardScoped_SystemLessonAccuracyUsesGlobalLinks(t *testing.T) {
+	s, scope := scopedSystemLessonAccuracyFixtureStore(t)
+
+	snap, err := captureDashboardScoped(s, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(snap.RecentLessons); got != 1 {
+		t.Fatalf("scoped lessons = %d, want 1 malformed system lesson", got)
+	}
+	if snap.RecentLessons[0].ID != "L-0007" {
+		t.Fatalf("scoped lesson id = %s, want L-0007", snap.RecentLessons[0].ID)
+	}
+	if _, ok := snap.recentLessonAccuracy["L-0007"]; ok {
+		t.Fatalf("dashboard scoped accuracy should ignore unrelated in-scope conclusions when only out-of-scope linked hypotheses exist: %+v", snap.recentLessonAccuracy["L-0007"])
+	}
+}
+
+func TestLessonListViewInit_SystemLessonAccuracyUsesGlobalLinks(t *testing.T) {
+	s, scope := scopedSystemLessonAccuracyFixtureStore(t)
+
+	msg := newLessonListView(scope).init(s)().(lessonListLoadedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if got := len(msg.list); got != 1 {
+		t.Fatalf("lesson list loaded %d lessons, want 1", got)
+	}
+	if msg.list[0].ID != "L-0007" {
+		t.Fatalf("lesson list loaded %s, want L-0007", msg.list[0].ID)
+	}
+	if _, ok := msg.accuracy["L-0007"]; ok {
+		t.Fatalf("lesson list scoped accuracy should ignore unrelated in-scope conclusions when only out-of-scope linked hypotheses exist: %+v", msg.accuracy["L-0007"])
 	}
 }

@@ -146,6 +146,12 @@ If a downgrade reveals a **pattern** — not a one-off mistake — record it:
         --scope system \
         --author agent:gate-reviewer --json
 
+Use `--scope system` only when the pattern should hold across goals
+(toolchain quirk, harness behavior, measurement caveat, target-wide
+invariant). If the finding still depends on one H-/E-/C- chain, do not
+promote it to a system lesson. If unsure, leave it local instead of
+generalizing it.
+
 If a previous lesson is contradicted by new evidence, supersede it:
 
     autoresearch lesson add --claim "<replacement>" --body "..." \

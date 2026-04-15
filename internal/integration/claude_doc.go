@@ -421,6 +421,18 @@ Verbs:
 Scope is inferred from ` + "`--from`" + ` when not explicit: subjects given →
 ` + "`hypothesis`" + `; none → ` + "`system`" + `.
 
+**Choosing lesson scope.**
+
+- Prefer ` + "`scope: hypothesis`" + ` when the claim comes from a specific
+  H-/E-/C- chain, depends on the conditions of that chain, or recommends
+  continuing an optimization direction.
+- Use ` + "`scope: system`" + ` only for facts expected to hold across goals:
+  target-wide invariants, harness behavior, environment quirks, or
+  measurement caveats.
+- If unsure, choose ` + "`scope: hypothesis`" + `. A local lesson misclassified
+  as system leaks into unrelated goals; a system lesson misclassified as
+  hypothesis is safer.
+
 **` + "`--body`" + ` is not optional for agents.** A lesson that is only a
 ` + "`--claim`" + ` is a one-liner the next generator cannot act on; that
 defeats the point of the notebook layer. Every lesson written by an
