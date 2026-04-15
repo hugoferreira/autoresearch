@@ -237,6 +237,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	if err != nil {
 		return nil, err
 	}
+	lessonLinks := buildLessonLinkIndex(hyps)
 	hyps = resolver.filterHypotheses(hyps)
 	roots, children := buildHypothesisForest(hyps)
 	snap.Tree = buildTreeJSON(roots, children)
@@ -354,7 +355,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		if err != nil {
 			return nil, err
 		}
-		_, accuracy, err := computeLessonAccuracy(s, lessons, concls, hyps)
+		_, accuracy, err := computeLessonAccuracy(s, lessons, concls, lessonLinks)
 		if err != nil {
 			return nil, err
 		}

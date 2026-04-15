@@ -69,7 +69,13 @@ Scope is inferred from --from when not set explicitly: if --from has any
 subjects, the lesson defaults to scope=hypothesis; otherwise it defaults
 to scope=system (an incidental finding about the target codebase or the
 research apparatus itself). Explicit --scope system cannot be combined
-with --from.`,
+with --from.
+
+Use scope=system only for facts expected to hold across goals, like
+harness behavior, measurement caveats, environment quirks, or target-wide
+invariants. If the claim comes from a specific H-/E-/C- chain or
+recommends continuing an optimization direction, keep it scope=hypothesis.
+If unsure, prefer scope=hypothesis.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			if strings.TrimSpace(claim) == "" {
@@ -413,7 +419,7 @@ may be exhausted.`,
 			if err != nil {
 				return err
 			}
-			results, _, err := computeLessonAccuracy(s, lessons, concls, hyps)
+			results, _, err := computeLessonAccuracy(s, lessons, concls, buildLessonLinkIndex(hyps))
 			if err != nil {
 				return err
 			}

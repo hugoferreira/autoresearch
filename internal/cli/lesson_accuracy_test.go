@@ -77,7 +77,7 @@ func TestComputeLessonAccuracy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reports, summaries, err := computeLessonAccuracy(s, lessons, concls, hyps)
+			reports, summaries, err := computeLessonAccuracy(s, lessons, concls, buildLessonLinkIndex(hyps))
 			if err != nil {
 				t.Fatal(err)
 			}

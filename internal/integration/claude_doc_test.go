@@ -44,3 +44,26 @@ func TestSharedDocs_MainCheckoutIsolationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedDocs_LessonScopeGuidance(t *testing.T) {
+	claudeDoc := integration.ClaudeDoc("vtest")
+	codexDoc := integration.CodexDoc("vtest")
+
+	for name, doc := range map[string]string{
+		"claude": claudeDoc,
+		"codex":  codexDoc,
+	} {
+		for _, needle := range []string{
+			"Choosing lesson scope",
+			"If unsure, choose `scope: hypothesis`",
+			"target-wide invariants",
+			"measurement caveats",
+			"A local lesson misclassified",
+			"unrelated goals",
+		} {
+			if !strings.Contains(doc, needle) {
+				t.Fatalf("%s doc missing lesson-scope guidance %q", name, needle)
+			}
+		}
+	}
+}

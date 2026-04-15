@@ -43,6 +43,8 @@ type lessonAccuracySummary struct {
 	Undershoot int
 }
 
+type lessonLinkIndex map[string]map[string]bool
+
 func (s lessonAccuracySummary) trend() string {
 	switch {
 	case s.Overshoot > s.Undershoot:
@@ -70,8 +72,8 @@ func collectLessonAccuracyInputs(s *store.Store) ([]*entity.Lesson, []*entity.Co
 	return lessons, concls, hyps, nil
 }
 
-func computeLessonAccuracy(s *store.Store, lessons []*entity.Lesson, concls []*entity.Conclusion, hyps []*entity.Hypothesis) ([]lessonAccuracy, map[string]lessonAccuracySummary, error) {
-	inspiredByLesson := make(map[string]map[string]bool, len(hyps))
+func buildLessonLinkIndex(hyps []*entity.Hypothesis) lessonLinkIndex {
+	inspiredByLesson := make(lessonLinkIndex, len(hyps))
 	for _, h := range hyps {
 		for _, lid := range h.InspiredBy {
 			if inspiredByLesson[lid] == nil {
@@ -80,7 +82,10 @@ func computeLessonAccuracy(s *store.Store, lessons []*entity.Lesson, concls []*e
 			inspiredByLesson[lid][h.ID] = true
 		}
 	}
+	return inspiredByLesson
+}
 
+func computeLessonAccuracy(s *store.Store, lessons []*entity.Lesson, concls []*entity.Conclusion, links lessonLinkIndex) ([]lessonAccuracy, map[string]lessonAccuracySummary, error) {
 	var reports []lessonAccuracy
 	summaries := make(map[string]lessonAccuracySummary)
 
@@ -100,7 +105,7 @@ func computeLessonAccuracy(s *store.Store, lessons []*entity.Lesson, concls []*e
 		}
 		summary := lessonAccuracySummary{}
 
-		linkedHyps := inspiredByLesson[l.ID]
+		linkedHyps := links[l.ID]
 		hasLinked := len(linkedHyps) > 0
 
 		for _, c := range concls {

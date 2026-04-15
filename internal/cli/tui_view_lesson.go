@@ -36,18 +36,16 @@ func (v *lessonListView) title() string { return "Lessons" }
 func (v *lessonListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
 		lessons, concls, hyps, err := collectLessonAccuracyInputs(s)
+		lessonLinks := buildLessonLinkIndex(hyps)
 		if err == nil {
 			resolver := newGoalScopeResolver(s, v.goalScope)
 			lessons, err = resolver.filterLessons(lessons)
 			if err == nil {
 				concls, err = resolver.filterConclusions(concls)
 			}
-			if err == nil {
-				hyps = resolver.filterHypotheses(hyps)
-			}
 		}
 		if err == nil {
-			_, accuracy, err := computeLessonAccuracy(s, lessons, concls, hyps)
+			_, accuracy, err := computeLessonAccuracy(s, lessons, concls, lessonLinks)
 			if err != nil {
 				return lessonListLoadedMsg{err: err}
 			}
