@@ -383,7 +383,7 @@ func (v *dashboardView) renderLessonsPanel(width, height int) string {
 		// Predicted effect arrow (compact indicator before claim)
 		indicator := " "
 		if l.PredictedEffect != nil && !superseded {
-			indicator = predictedEffectArrow(l.PredictedEffect)
+			indicator = lessonAccuracyArrow(snap.recentLessonAccuracy[l.ID])
 		}
 		// At-a-glance: ID, arrow indicator, claim. Everything else is in the detail pane.
 		claimW := max(innerW-11, 20)

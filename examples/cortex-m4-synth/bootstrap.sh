@@ -87,7 +87,7 @@ rm -rf .research
 
 echo "=> initializing git repo"
 git init --initial-branch=main -q
-git add .
+git add . .gitignore
 git -c user.email=bootstrap@autoresearch.local \
     -c user.name=bootstrap \
     -c commit.gpgsign=false \

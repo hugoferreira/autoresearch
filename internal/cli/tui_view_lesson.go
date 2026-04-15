@@ -16,6 +16,7 @@ type lessonListView struct {
 	goalScope goalScope
 	all       []*entity.Lesson
 	filtered  []*entity.Lesson
+	accuracy  map[string]lessonAccuracySummary
 	cursor    int
 	scope     string // "" means all
 	status    string // "" means all
@@ -23,8 +24,9 @@ type lessonListView struct {
 }
 
 type lessonListLoadedMsg struct {
-	list []*entity.Lesson
-	err  error
+	list     []*entity.Lesson
+	accuracy map[string]lessonAccuracySummary
+	err      error
 }
 
 func newLessonListView(scope goalScope) *lessonListView { return &lessonListView{goalScope: scope} }
@@ -33,22 +35,31 @@ func (v *lessonListView) title() string { return "Lessons" }
 
 func (v *lessonListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
-		list, err := s.ListLessons()
+		lessons, concls, hyps, err := collectLessonAccuracyInputs(s)
+		lessonLinks := buildLessonLinkIndex(hyps)
 		if err == nil {
-			list, err = newGoalScopeResolver(s, v.goalScope).filterLessons(list)
+			resolver := newGoalScopeResolver(s, v.goalScope)
+			lessons, err = resolver.filterLessons(lessons)
+			if err == nil {
+				concls, err = resolver.filterConclusions(concls)
+			}
 		}
 		if err == nil {
-			views := make([]*entity.Lesson, 0, len(list))
-			for _, l := range list {
+			_, accuracy, err := computeLessonAccuracy(s, lessons, concls, lessonLinks)
+			if err != nil {
+				return lessonListLoadedMsg{err: err}
+			}
+			views := make([]*entity.Lesson, 0, len(lessons))
+			for _, l := range lessons {
 				view, viewErr := annotateLessonForRead(s, l)
 				if viewErr != nil {
 					return lessonListLoadedMsg{err: viewErr}
 				}
 				views = append(views, view)
 			}
-			list = views
+			return lessonListLoadedMsg{list: views, accuracy: accuracy}
 		}
-		return lessonListLoadedMsg{list: list, err: err}
+		return lessonListLoadedMsg{err: err}
 	}
 }
 
@@ -73,6 +84,7 @@ func (v *lessonListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) 
 	switch msg := msg.(type) {
 	case lessonListLoadedMsg:
 		v.all = msg.list
+		v.accuracy = msg.accuracy
 		v.err = msg.err
 		sort.Slice(v.all, func(i, j int) bool { return v.all[i].ID < v.all[j].ID })
 		v.applyFilter()
@@ -125,7 +137,7 @@ func (v *lessonListView) view(width, height int) string {
 		}
 		pred := tuiDim.Render("     ")
 		if l.PredictedEffect != nil {
-			pred = padRight(formatPredictedEffectCompact(l.PredictedEffect), 5)
+			pred = padRight(formatPredictedEffectCompact(l.PredictedEffect, v.accuracy[l.ID]), 5)
 		}
 		source := "-"
 		if l.Provenance != nil && l.Provenance.SourceChain != "" {

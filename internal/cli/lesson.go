@@ -69,7 +69,13 @@ Scope is inferred from --from when not set explicitly: if --from has any
 subjects, the lesson defaults to scope=hypothesis; otherwise it defaults
 to scope=system (an incidental finding about the target codebase or the
 research apparatus itself). Explicit --scope system cannot be combined
-with --from.`,
+with --from.
+
+Use scope=system only for facts expected to hold across goals, like
+harness behavior, measurement caveats, environment quirks, or target-wide
+invariants. If the claim comes from a specific H-/E-/C- chain or
+recommends continuing an optimization direction, keep it scope=hypothesis.
+If unsure, prefer scope=hypothesis.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			if strings.TrimSpace(claim) == "" {
@@ -409,132 +415,25 @@ may be exhausted.`,
 				return err
 			}
 
-			lessons, err := s.ListLessons()
+			lessons, concls, hyps, err := collectLessonAccuracyInputs(s)
 			if err != nil {
 				return err
 			}
-			concls, err := s.ListConclusions()
+			results, _, err := computeLessonAccuracy(s, lessons, concls, buildLessonLinkIndex(hyps))
 			if err != nil {
 				return err
 			}
-			hyps, err := s.ListHypotheses()
-			if err != nil {
-				return err
-			}
-
-			// Index hypotheses by ID for fast lookup.
-			hypByID := make(map[string]*entity.Hypothesis, len(hyps))
-			for _, h := range hyps {
-				hypByID[h.ID] = h
-			}
-
-			// Build reverse index: lesson ID → set of hypothesis IDs inspired by it.
-			inspiredByLesson := map[string]map[string]bool{}
-			for _, h := range hyps {
-				for _, lid := range h.InspiredBy {
-					if inspiredByLesson[lid] == nil {
-						inspiredByLesson[lid] = map[string]bool{}
-					}
-					inspiredByLesson[lid][h.ID] = true
-				}
-			}
-
-			type accuracyRow struct {
-				LessonID       string  `json:"lesson_id"`
-				ConclusionID   string  `json:"conclusion_id"`
-				HypothesisID   string  `json:"hypothesis_id"`
-				Predicted      string  `json:"predicted"`
-				ActualDelta    float64 `json:"actual_delta_frac"`
-				Classification string  `json:"classification"`
-				Linked         bool    `json:"linked"`
-			}
-			type lessonAccuracy struct {
-				LessonID    string        `json:"lesson_id"`
-				Claim       string        `json:"claim"`
-				Instrument  string        `json:"instrument"`
-				Direction   string        `json:"direction"`
-				MinEffect   float64       `json:"min_effect"`
-				MaxEffect   float64       `json:"max_effect,omitempty"`
-				Comparisons []accuracyRow `json:"comparisons"`
-			}
-
-			var results []lessonAccuracy
 			var totalHit, totalOver, totalUnder int
-
-			for _, l := range lessons {
-				if !lessonIsSteering(s, l) || l.PredictedEffect == nil {
-					continue
-				}
-				pe := l.PredictedEffect
-				la := lessonAccuracy{
-					LessonID:   l.ID,
-					Claim:      l.Claim,
-					Instrument: pe.Instrument,
-					Direction:  pe.Direction,
-					MinEffect:  pe.MinEffect,
-					MaxEffect:  pe.MaxEffect,
-				}
-
-				linkedHyps := inspiredByLesson[l.ID]
-				hasLinked := len(linkedHyps) > 0
-
-				for _, c := range concls {
-					if c.CreatedAt.Before(l.CreatedAt) {
-						continue
-					}
-					if c.Effect.Instrument != pe.Instrument {
-						continue
-					}
-					if c.Verdict != entity.VerdictSupported && c.Verdict != entity.VerdictRefuted {
-						continue
-					}
-
-					// When any hypothesis cites this lesson via inspired_by,
-					// only match conclusions from those hypotheses. Otherwise
-					// fall back to coarse instrument matching.
-					linked := false
-					if hasLinked {
-						if !linkedHyps[c.Hypothesis] {
-							continue
-						}
-						linked = true
-					}
-
-					// Normalize delta so positive = improvement.
-					actual := c.Effect.DeltaFrac
-					if pe.Direction == "decrease" {
-						actual = -actual
-					}
-
-					predicted := fmt.Sprintf("%.4f", pe.MinEffect)
-					if pe.MaxEffect > 0 {
-						predicted = fmt.Sprintf("%.4f–%.4f", pe.MinEffect, pe.MaxEffect)
-					}
-
-					class := "HIT"
-					if actual < pe.MinEffect {
-						class = "OVERSHOOT"
+			for _, la := range results {
+				for _, r := range la.Comparisons {
+					switch r.Classification {
+					case lessonAccuracyOvershoot:
 						totalOver++
-					} else if pe.MaxEffect > 0 && actual > pe.MaxEffect {
-						class = "UNDERSHOOT"
+					case lessonAccuracyUndershoot:
 						totalUnder++
-					} else {
+					default:
 						totalHit++
 					}
-
-					la.Comparisons = append(la.Comparisons, accuracyRow{
-						LessonID:       l.ID,
-						ConclusionID:   c.ID,
-						HypothesisID:   c.Hypothesis,
-						Predicted:      predicted,
-						ActualDelta:    c.Effect.DeltaFrac,
-						Classification: class,
-						Linked:         linked,
-					})
-				}
-
-				if len(la.Comparisons) > 0 {
-					results = append(results, la)
 				}
 			}
 
