@@ -109,7 +109,7 @@ func (v *artifactListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd
 		v.err = msg.err
 		v.applyFilter()
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		if handleListNav(msg, &v.cursor, len(v.filtered)) {
@@ -206,6 +206,13 @@ type artifactView struct {
 	pager     pagerState
 	err       error
 	owners    []string
+
+	// scrollResetPending is set by user-initiated actions that replace
+	// the visible content (Tab cycling head/tail/full, applying a new
+	// grep). The next artifactLoadedMsg consumes the flag and resets
+	// the pager to the top. Background reloads (storeChangedMsg) don't
+	// set it, so user scroll is preserved.
+	scrollResetPending bool
 }
 
 type artifactLoadedMsg struct {
@@ -318,7 +325,10 @@ func (v *artifactView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.fsBytes = msg.bytes
 		v.owners = msg.owners
 		v.pager.setContent(strings.Join(v.lines, "\n"))
-		v.pager.gotoTop()
+		if v.scrollResetPending {
+			v.pager.gotoTop()
+			v.scrollResetPending = false
+		}
 		return v, nil
 	case artifactDiffReadyMsg:
 		return v, tuiPush(msg.view)
@@ -341,6 +351,7 @@ func (v *artifactView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 					} else {
 						v.mode = artifactModeGrep
 					}
+					v.scrollResetPending = true
 					return v, v.init(s)
 				case "diff":
 					if value == "" {
@@ -372,6 +383,7 @@ func (v *artifactView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 			return v, nil
 		case "tab":
 			v.mode = (v.mode + 1) % 3 // cycle head/tail/full, skip grep
+			v.scrollResetPending = true
 			return v, v.init(s)
 		}
 		return v, v.pager.handleKey(msg)

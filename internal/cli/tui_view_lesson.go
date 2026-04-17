@@ -89,7 +89,7 @@ func (v *lessonListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) 
 		sort.Slice(v.all, func(i, j int) bool { return v.all[i].ID < v.all[j].ID })
 		v.applyFilter()
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		if handleListNav(msg, &v.cursor, len(v.filtered)) {
@@ -197,10 +197,15 @@ func (v *lessonDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd
 		v.renderedWidth = -1
 		if v.pager.ready {
 			v.pager.setContent(v.ensureRendered(v.pager.vp.Width))
-			v.pager.gotoTop()
+			// Deliberately do NOT reset scroll. The pager keeps whatever
+			// offset the user last navigated to so background reloads
+			// (triggered only when events.jsonl shows this lesson
+			// actually changed) don't rubber-band the view back to the
+			// top. First-time render starts at 0 naturally via the
+			// fresh viewport constructed by ensureSize().
 		}
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		return v, v.pager.handleKey(msg)

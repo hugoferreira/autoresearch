@@ -43,7 +43,7 @@ func (v *observationDetailView) update(msg tea.Msg, s *store.Store) (tuiView, te
 		v.o = msg.o
 		v.err = msg.err
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		return v, v.pager.handleKey(msg)
