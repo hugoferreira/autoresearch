@@ -50,8 +50,53 @@ load-bearing.
    and the recommended action is `ask_human` or `stop`, do not start
    another cycle. If `stalled_for` is climbing, diversify.
 8. `autoresearch instrument list --json` — what you can measure.
-9. Enough of the codebase (via Read / Grep / Glob) to understand what's
-   being optimized. Focus on `goal.objective.target`.
+9. Critic feedback from previous cycles — see the subsection below.
+10. Enough of the codebase (via Read / Grep / Glob) to understand what's
+    being optimized. Focus on `goal.objective.target`.
+
+### Read the critic feedback before proposing the next hypothesis
+
+Some conclusions from earlier cycles may have been downgraded by the
+gate reviewer. You are invoked fresh each cycle, so you will not
+remember them — read them back every time:
+
+    autoresearch conclusion list --json | \
+        jq '[.[] | select(.strict.downgraded_from != null and .reviewed_by != null)]'
+
+For each downgraded conclusion, the `strict.reasons` array holds the
+critic's specific objection(s). Classify before picking a hypothesis:
+
+- **Measurement-contract gaps** — reasons like "mechanism claim not
+  backed by instrument data", "no artifact persists the referenced
+  counter", "Goodharting on a static proxy", "referenced subpass
+  output never instrumented". These point at the measurement
+  infrastructure, not at your experiment design. **Do not route
+  around them by picking a different hypothesis.** Pause and yield:
+
+      autoresearch pause \
+          --reason "C-NNNN downgrade cites measurement gap: <short excerpt of strict.reasons>. Need decision on instrumentation before next cycle."
+
+  The pause surfaces the reason on the dashboard / status / event log
+  where the main session is already looking. The human decides whether
+  to register a new instrument, narrow the goal, or accept the blind
+  spot. The decision is not yours to make from inside this role.
+
+- **Statistical / sampling issues** — "CI fragility", "bimodal
+  distribution", "outlier-dominated", "more samples needed". Design a
+  replication experiment with larger N or a cleaner sampling regime.
+  These are translator-scoped problems; do not pause.
+
+- **Mechanism mismatch** — "interpretation claims X but the diff does
+  Y". The code didn't implement what the prose said. Pick a different
+  hypothesis (the same one, resubmitted, will be downgraded again).
+  Cite the downgraded C-id in the next `--rationale` so the trail
+  stays legible.
+
+If you cannot cleanly classify a downgrade reason, pause. Measurement-
+contract gaps are silent: routing around them just preserves the blind
+spot so the next cycle hits it too, and the critic downgrades again
+for the same structural reason. The orchestrator's job is to translate
+that signal upward, not to patch around it.
 
 Do not spend early turns rediscovering routine syntax with a burst of
 `--help`. `.claude/autoresearch.md` already contains the canonical flag
@@ -435,3 +480,9 @@ if none exists.
 - **Propose feature-delivery hypotheses.** If the goal reads like
   "implement X" rather than "make X faster / smaller / more accurate",
   stop and tell the main session.
+- **Route around critic feedback by picking a fresh hypothesis when the
+  downgrade cites a measurement-contract gap.** Unaudited mechanism
+  claims, missing instruments, and un-persisted counters are
+  infrastructure problems, not experiment-design problems. Pause and
+  yield. The next cycle will hit the same blind spot otherwise, and the
+  reviewer will downgrade again for the same reason.
