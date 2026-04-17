@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
+	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
 )
 
@@ -449,6 +451,193 @@ func TestAssessLessonSourceChain(t *testing.T) {
 		}
 		if got != entity.LessonSourceInconclusive {
 			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceInconclusive)
+		}
+	})
+}
+
+func TestCheckBudgetForNewExperiment(t *testing.T) {
+	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
+
+	t.Run("zero budgets pass", func(t *testing.T) {
+		st := &store.State{Counters: map[string]int{"E": 42}}
+		cfg := &store.Config{}
+		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
+			t.Fatalf("zero budgets should be ok, got %+v", breach)
+		}
+	})
+
+	t.Run("max_experiments under limit passes", func(t *testing.T) {
+		st := &store.State{Counters: map[string]int{"E": 4}}
+		cfg := &store.Config{Budgets: store.Budgets{MaxExperiments: 5}}
+		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
+			t.Fatalf("under-limit should be ok, got %+v", breach)
+		}
+	})
+
+	t.Run("max_experiments at limit breaches", func(t *testing.T) {
+		st := &store.State{Counters: map[string]int{"E": 5}}
+		cfg := &store.Config{Budgets: store.Budgets{MaxExperiments: 5}}
+		breach := firewall.CheckBudgetForNewExperiment(st, cfg, now)
+		if breach.Ok() {
+			t.Fatal("at-limit should breach")
+		}
+		if breach.Rule != "max_experiments" {
+			t.Errorf("rule = %q, want max_experiments", breach.Rule)
+		}
+		if !strings.Contains(breach.Message, "max_experiments=5") {
+			t.Errorf("message missing limit detail: %q", breach.Message)
+		}
+	})
+
+	t.Run("max_wall_time_h with nil ResearchStartedAt passes", func(t *testing.T) {
+		st := &store.State{Counters: map[string]int{"E": 0}}
+		cfg := &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}
+		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
+			t.Fatalf("nil start time should be ok, got %+v", breach)
+		}
+	})
+
+	t.Run("max_wall_time_h under limit passes", func(t *testing.T) {
+		start := now.Add(-6 * time.Hour)
+		st := &store.State{Counters: map[string]int{"E": 0}, ResearchStartedAt: &start}
+		cfg := &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}
+		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
+			t.Fatalf("6h of 24h should be ok, got %+v", breach)
+		}
+	})
+
+	t.Run("max_wall_time_h past limit breaches", func(t *testing.T) {
+		start := now.Add(-25 * time.Hour)
+		st := &store.State{Counters: map[string]int{"E": 0}, ResearchStartedAt: &start}
+		cfg := &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}
+		breach := firewall.CheckBudgetForNewExperiment(st, cfg, now)
+		if breach.Ok() {
+			t.Fatal("past limit should breach")
+		}
+		if breach.Rule != "max_wall_time_h" {
+			t.Errorf("rule = %q, want max_wall_time_h", breach.Rule)
+		}
+		if !strings.Contains(breach.Message, "max_wall_time_h=24") {
+			t.Errorf("message missing limit detail: %q", breach.Message)
+		}
+	})
+
+	t.Run("max_experiments triggers before max_wall_time_h", func(t *testing.T) {
+		start := now.Add(-30 * time.Hour) // also over MaxWallTimeH=24
+		st := &store.State{Counters: map[string]int{"E": 5}, ResearchStartedAt: &start}
+		cfg := &store.Config{Budgets: store.Budgets{MaxExperiments: 5, MaxWallTimeH: 24}}
+		breach := firewall.CheckBudgetForNewExperiment(st, cfg, now)
+		if breach.Rule != "max_experiments" {
+			t.Errorf("experiments should check first, got %q", breach.Rule)
+		}
+	})
+}
+
+func TestCheckStrictVerdict(t *testing.T) {
+	hyp := func(direction string, minEffect float64) *entity.Hypothesis {
+		return &entity.Hypothesis{Predicts: entity.Predicts{Direction: direction, MinEffect: minEffect}}
+	}
+	cmp := func(n int, deltaFrac, ciLow, ciHigh float64) *stats.Comparison {
+		return &stats.Comparison{
+			NBaseline:  n,
+			NCandidate: n,
+			DeltaFrac:  deltaFrac,
+			CILowFrac:  ciLow,
+			CIHighFrac: ciHigh,
+		}
+	}
+
+	t.Run("supported with insufficient samples downgrades", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), cmp(1, -0.2, -0.3, -0.1))
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade, got %+v", d)
+		}
+		if d.FinalVerdict != entity.VerdictInconclusive {
+			t.Errorf("verdict = %q, want inconclusive", d.FinalVerdict)
+		}
+	})
+
+	t.Run("supported with nil comparison downgrades", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), nil)
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade, got %+v", d)
+		}
+	})
+
+	t.Run("supported increase with CI crossing zero downgrades", func(t *testing.T) {
+		// direction=increase, predicts positive delta; CILowFrac <= 0 should flag
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("increase", 0.05), cmp(10, 0.15, -0.02, 0.30))
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade when CI crosses zero, got %+v", d)
+		}
+		joined := strings.Join(d.Reasons, " ")
+		if !strings.Contains(joined, "crosses zero") {
+			t.Errorf("reasons missing CI-crosses-zero message: %v", d.Reasons)
+		}
+	})
+
+	t.Run("supported decrease with CI crossing zero downgrades", func(t *testing.T) {
+		// direction=decrease, expects negative delta; CIHighFrac >= 0 should flag
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), cmp(10, -0.15, -0.30, 0.02))
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade when CI crosses zero, got %+v", d)
+		}
+	})
+
+	t.Run("supported with effect below min_effect downgrades", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.20), cmp(10, -0.05, -0.08, -0.02))
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade for too-small effect, got %+v", d)
+		}
+		joined := strings.Join(d.Reasons, " ")
+		if !strings.Contains(joined, "min_effect") {
+			t.Errorf("reasons missing min_effect message: %v", d.Reasons)
+		}
+	})
+
+	t.Run("supported passing cleanly", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
+		if !d.Passed || d.Downgraded {
+			t.Fatalf("expected clean pass, got %+v", d)
+		}
+		if d.FinalVerdict != entity.VerdictSupported {
+			t.Errorf("verdict = %q, want supported", d.FinalVerdict)
+		}
+	})
+
+	t.Run("refuted with structural evidence notes reason", func(t *testing.T) {
+		// predicts decrease but CI lies entirely on the increase side
+		d := firewall.CheckStrictVerdict(entity.VerdictRefuted, hyp("decrease", 0.05), cmp(10, 0.20, 0.10, 0.30))
+		if !d.Passed {
+			t.Fatalf("refuted should still pass, got %+v", d)
+		}
+		if len(d.Reasons) == 0 {
+			t.Errorf("expected structural-refutation reason, got none")
+		}
+	})
+
+	t.Run("refuted passing cleanly has no reasons", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict(entity.VerdictRefuted, hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
+		if !d.Passed {
+			t.Fatalf("refuted should pass, got %+v", d)
+		}
+	})
+
+	t.Run("inconclusive always passes", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict(entity.VerdictInconclusive, hyp("decrease", 0.05), nil)
+		if !d.Passed || d.Downgraded {
+			t.Fatalf("inconclusive should pass cleanly, got %+v", d)
+		}
+	})
+
+	t.Run("unknown verdict fails", func(t *testing.T) {
+		d := firewall.CheckStrictVerdict("uncertain", hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
+		if d.Passed {
+			t.Fatal("unknown verdict should not pass")
+		}
+		joined := strings.Join(d.Reasons, " ")
+		if !strings.Contains(joined, "unknown verdict") {
+			t.Errorf("expected unknown-verdict reason, got: %v", d.Reasons)
 		}
 	})
 }
