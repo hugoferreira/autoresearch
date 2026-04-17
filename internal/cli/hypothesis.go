@@ -3,13 +3,13 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/store"
+	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -516,7 +516,7 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if base == "" {
 				base = exp.Baseline.Ref
 			}
-			diff, err := gitDiff(globalProjectDir, base, exp.Branch)
+			diff, err := worktree.Diff(globalProjectDir, base, exp.Branch)
 			if err != nil {
 				return err
 			}
@@ -595,9 +595,9 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			}
 			var out string
 			if merge {
-				out, err = gitMerge(globalProjectDir, exp.Branch)
+				out, err = worktree.Merge(globalProjectDir, exp.Branch)
 			} else {
-				out, err = gitCherryPick(globalProjectDir, exp.Baseline.SHA, exp.Branch)
+				out, err = worktree.CherryPick(globalProjectDir, exp.Baseline.SHA, exp.Branch)
 			}
 			if err != nil {
 				return err
@@ -618,33 +618,6 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 	c.Flags().StringVar(&conclusionID, "conclusion", "", "use a specific conclusion instead of the best supported one")
 	c.Flags().BoolVar(&merge, "merge", false, "merge instead of cherry-pick (preserves experiment branch history)")
 	return c
-}
-
-func gitDiff(projectDir, base, branch string) (string, error) {
-	cmd := exec.Command("git", "-C", projectDir, "diff", base+".."+branch)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git diff: %v\n%s", err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
-}
-
-func gitCherryPick(projectDir, baseSHA, branch string) (string, error) {
-	cmd := exec.Command("git", "-C", projectDir, "cherry-pick", baseSHA+".."+branch)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git cherry-pick: %v\n%s", err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func gitMerge(projectDir, branch string) (string, error) {
-	cmd := exec.Command("git", "-C", projectDir, "merge", branch, "--no-edit")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git merge: %v\n%s", err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func truncate(s string, n int) string {

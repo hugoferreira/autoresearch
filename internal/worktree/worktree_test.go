@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/bytter/autoresearch/internal/worktree"
@@ -75,6 +76,95 @@ func TestAddAndRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		t.Errorf("worktree should be gone: %v", err)
+	}
+}
+
+func gitCommit(t *testing.T, dir, file, body, msg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"add", file},
+		{"commit", "-m", msg},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestDiff(t *testing.T) {
+	dir := gitInit(t)
+	baseSHA, err := worktree.ResolveRef(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("git", "-C", dir, "checkout", "-b", "feature")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b: %v\n%s", err, out)
+	}
+	gitCommit(t, dir, "feature.txt", "feature\n", "add feature")
+
+	diff, err := worktree.Diff(dir, baseSHA, "feature")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !strings.Contains(diff, "feature.txt") {
+		t.Errorf("diff should mention feature.txt, got: %q", diff)
+	}
+	if !strings.Contains(diff, "+feature") {
+		t.Errorf("diff should contain the new line, got: %q", diff)
+	}
+}
+
+func TestCherryPick(t *testing.T) {
+	dir := gitInit(t)
+
+	cmd := exec.Command("git", "-C", dir, "checkout", "-b", "feature")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b feature: %v\n%s", err, out)
+	}
+	featureBaseSHA, err := worktree.ResolveRef(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommit(t, dir, "feature.txt", "feature\n", "add feature")
+
+	cmd = exec.Command("git", "-C", dir, "checkout", "main")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main: %v\n%s", err, out)
+	}
+
+	if _, err := worktree.CherryPick(dir, featureBaseSHA, "feature"); err != nil {
+		t.Fatalf("CherryPick: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); err != nil {
+		t.Errorf("cherry-pick should have created feature.txt: %v", err)
+	}
+}
+
+func TestMerge(t *testing.T) {
+	dir := gitInit(t)
+
+	cmd := exec.Command("git", "-C", dir, "checkout", "-b", "feature")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b feature: %v\n%s", err, out)
+	}
+	gitCommit(t, dir, "feature.txt", "feature\n", "add feature")
+
+	cmd = exec.Command("git", "-C", dir, "checkout", "main")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main: %v\n%s", err, out)
+	}
+
+	if _, err := worktree.Merge(dir, "feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); err != nil {
+		t.Errorf("merge should have brought in feature.txt: %v", err)
 	}
 }
 

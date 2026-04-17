@@ -92,6 +92,27 @@ func List(projectDir string) ([]string, error) {
 	return paths, nil
 }
 
+// Diff returns the unified diff between base and branch. Output is not
+// trimmed so the caller can print it verbatim.
+func Diff(projectDir, base, branch string) (string, error) {
+	cmd := exec.Command("git", "-C", projectDir, "diff", base+".."+branch)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git diff: %v\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+// CherryPick applies the commits in baseSHA..branch onto the current HEAD.
+func CherryPick(projectDir, baseSHA, branch string) (string, error) {
+	return run(projectDir, "cherry-pick", baseSHA+".."+branch)
+}
+
+// Merge merges branch into the current HEAD with --no-edit.
+func Merge(projectDir, branch string) (string, error) {
+	return run(projectDir, "merge", branch, "--no-edit")
+}
+
 // DirtyPaths returns relative paths in the main checkout that differ from
 // HEAD, including untracked files. The list is sorted and deduplicated. If the
 // directory is not a git repo, it returns an empty list.
