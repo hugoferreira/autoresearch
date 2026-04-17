@@ -124,7 +124,7 @@ func instrumentRegisterCmd() *cobra.Command {
 			)
 		},
 	}
-	c.Flags().StringSliceVar(&cmdStr, "cmd", nil, "shell argv of the instrument (comma-separated)")
+	c.Flags().StringArrayVar(&cmdStr, "cmd", nil, "shell argv element; repeat once per element (e.g. --cmd make --cmd -f --cmd Makefile). Commas in a value are preserved, so pipelines like `awk '{gsub(/ /,\"\",x)}'` pass through as a single element.")
 	c.Flags().StringVar(&parser, "parser", "", "parser name (builtin:passfail | builtin:timing | builtin:size | builtin:scalar)")
 	c.Flags().StringVar(&pattern, "pattern", "", "regex with exactly one capture group (required for builtin:scalar)")
 	c.Flags().StringVar(&unit, "unit", "", "unit of measurement (e.g. cycles, bytes, seconds, instructions)")

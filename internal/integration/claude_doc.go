@@ -298,7 +298,7 @@ Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provision
 
 ### Instruments
     autoresearch instrument register <name> \
-        --cmd a,b,c \
+        --cmd a --cmd b --cmd c \                      # repeat --cmd once per argv element; commas in a value are preserved
         --parser builtin:{passfail|timing|size|scalar} \
         [--pattern 'regex with one capture group']  # required for builtin:scalar
         --unit U [--requires inst=pass,...] [--min-samples N]
@@ -323,21 +323,28 @@ Examples of ` + "`builtin:scalar`" + ` instruments (the name is your choice):
 
     # Cycles reported by semihosting from firmware running under qemu:
     autoresearch instrument register qemu_cycles \
-        --cmd qemu-system-arm,-machine,mps2-an386,-kernel,firmware.elf,-icount,shift=0,-nographic,-semihosting-config,enable=on,target=native \
+        --cmd qemu-system-arm --cmd -machine --cmd mps2-an386 \
+        --cmd -kernel --cmd firmware.elf \
+        --cmd -icount --cmd shift=0 \
+        --cmd -nographic \
+        --cmd -semihosting-config --cmd enable=on,target=native \
         --parser builtin:scalar \
         --pattern 'cycles:\s*(\d+)' \
         --unit cycles --requires test=pass --min-samples 3
 
-    # Retired instructions from perf stat on host:
+    # Retired instructions from perf stat on host (shell pipeline as one argv element):
     autoresearch instrument register perf_instructions \
-        --cmd sh,-c,"perf stat -e instructions ./build/main 2>&1" \
+        --cmd sh --cmd -c \
+        --cmd 'perf stat -e instructions ./build/main 2>&1' \
         --parser builtin:scalar \
         --pattern '([0-9,]+)\s+instructions' \
         --unit instructions --min-samples 5
 
-    # Cyclomatic complexity reported by lizard:
+    # Cyclomatic complexity reported by lizard. The pipeline uses an awk
+    # expression with commas; put it in a committed helper so the quoting
+    # stays sane and experiment worktrees can reach it:
     autoresearch instrument register ccn_avg_x100 \
-        --cmd sh,-c,"lizard -C 0 src/ | awk '/Avg.CCN/ {printf \"avg_ccn_x100: %d\\n\", $1*100}'" \
+        --cmd tools/autoresearch/ccn_avg.sh \
         --parser builtin:scalar \
         --pattern 'avg_ccn_x100:\s*(\d+)' \
         --unit ccn_x100
