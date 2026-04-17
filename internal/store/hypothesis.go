@@ -18,13 +18,18 @@ func (s *Store) hypothesisPath(id string) string {
 }
 
 func (s *Store) ReadHypothesis(id string) (*entity.Hypothesis, error) {
-	data, err := os.ReadFile(s.hypothesisPath(id))
+	path := s.hypothesisPath(id)
+	h, err := s.hypCache.getOrLoad(path, func(p string) (*entity.Hypothesis, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read hypothesis: %w", err)
+		}
+		return entity.ParseHypothesis(data)
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrHypothesisNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("read hypothesis: %w", err)
 	}
-	return entity.ParseHypothesis(data)
+	return h, err
 }
 
 func (s *Store) WriteHypothesis(h *entity.Hypothesis) error {
@@ -32,7 +37,12 @@ func (s *Store) WriteHypothesis(h *entity.Hypothesis) error {
 	if err != nil {
 		return fmt.Errorf("encode hypothesis: %w", err)
 	}
-	return atomicWrite(s.hypothesisPath(h.ID), data)
+	path := s.hypothesisPath(h.ID)
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.hypCache.drop(path)
+	return nil
 }
 
 func (s *Store) HypothesisExists(id string) (bool, error) {

@@ -55,15 +55,31 @@ type Budgets struct {
 }
 
 func (s *Store) Config() (*Config, error) {
-	data, err := os.ReadFile(s.ConfigPath())
+	path := s.ConfigPath()
+	cached, err := s.configCache.getOrLoad(path, func(p string) (*Config, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read config: %w", err)
+		}
+		var cfg Config
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, fmt.Errorf("parse config: %w", err)
+		}
+		return &cfg, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+		return nil, err
 	}
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	// Defensive shallow copy: callers sometimes mutate Instruments in-place
+	// via RegisterInstrument. Deep-copy the Instruments map too.
+	out := *cached
+	if cached.Instruments != nil {
+		out.Instruments = make(map[string]Instrument, len(cached.Instruments))
+		for k, v := range cached.Instruments {
+			out.Instruments[k] = v
+		}
 	}
-	return &cfg, nil
+	return &out, nil
 }
 
 // UpdateConfig reads, mutates via fn, and writes config.yaml back.
@@ -90,5 +106,10 @@ func (s *Store) writeConfig(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	return atomicWrite(s.ConfigPath(), data)
+	path := s.ConfigPath()
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.configCache.drop(path)
+	return nil
 }

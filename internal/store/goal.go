@@ -23,13 +23,18 @@ func (s *Store) goalPath(id string) string {
 
 // ReadGoal reads a goal by id from .research/goals/<id>.md.
 func (s *Store) ReadGoal(id string) (*entity.Goal, error) {
-	data, err := os.ReadFile(s.goalPath(id))
+	path := s.goalPath(id)
+	g, err := s.goalCache.getOrLoad(path, func(p string) (*entity.Goal, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read goal %s: %w", id, err)
+		}
+		return entity.ParseGoal(data)
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrGoalNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("read goal %s: %w", id, err)
 	}
-	return entity.ParseGoal(data)
+	return g, err
 }
 
 // WriteGoal persists a goal to .research/goals/<id>.md. The goal must have
@@ -45,7 +50,12 @@ func (s *Store) WriteGoal(g *entity.Goal) error {
 	if err := os.MkdirAll(s.GoalsDir(), 0o755); err != nil {
 		return fmt.Errorf("create goals dir: %w", err)
 	}
-	return atomicWrite(s.goalPath(g.ID), data)
+	path := s.goalPath(g.ID)
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.goalCache.drop(path)
+	return nil
 }
 
 func (s *Store) GoalExists(id string) (bool, error) {

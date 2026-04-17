@@ -19,13 +19,18 @@ func (s *Store) lessonPath(id string) string {
 }
 
 func (s *Store) ReadLesson(id string) (*entity.Lesson, error) {
-	data, err := os.ReadFile(s.lessonPath(id))
+	path := s.lessonPath(id)
+	l, err := s.lessonCache.getOrLoad(path, func(p string) (*entity.Lesson, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read lesson: %w", err)
+		}
+		return entity.ParseLesson(data)
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrLessonNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("read lesson: %w", err)
 	}
-	return entity.ParseLesson(data)
+	return l, err
 }
 
 // WriteLesson atomically writes a lesson file. The lessons/ directory is
@@ -38,7 +43,12 @@ func (s *Store) WriteLesson(l *entity.Lesson) error {
 	if err != nil {
 		return fmt.Errorf("encode lesson: %w", err)
 	}
-	return atomicWrite(s.lessonPath(l.ID), data)
+	path := s.lessonPath(l.ID)
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.lessonCache.drop(path)
+	return nil
 }
 
 func (s *Store) LessonExists(id string) (bool, error) {

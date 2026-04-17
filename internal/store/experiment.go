@@ -18,13 +18,18 @@ func (s *Store) experimentPath(id string) string {
 }
 
 func (s *Store) ReadExperiment(id string) (*entity.Experiment, error) {
-	data, err := os.ReadFile(s.experimentPath(id))
+	path := s.experimentPath(id)
+	e, err := s.expCache.getOrLoad(path, func(p string) (*entity.Experiment, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read experiment: %w", err)
+		}
+		return entity.ParseExperiment(data)
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrExperimentNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("read experiment: %w", err)
 	}
-	return entity.ParseExperiment(data)
+	return e, err
 }
 
 func (s *Store) WriteExperiment(e *entity.Experiment) error {
@@ -32,7 +37,12 @@ func (s *Store) WriteExperiment(e *entity.Experiment) error {
 	if err != nil {
 		return fmt.Errorf("encode experiment: %w", err)
 	}
-	return atomicWrite(s.experimentPath(e.ID), data)
+	path := s.experimentPath(e.ID)
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.expCache.drop(path)
+	return nil
 }
 
 func (s *Store) ExperimentExists(id string) (bool, error) {

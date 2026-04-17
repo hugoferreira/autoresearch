@@ -24,18 +24,33 @@ type State struct {
 }
 
 func (s *Store) State() (*State, error) {
-	data, err := os.ReadFile(s.StatePath())
+	path := s.StatePath()
+	cached, err := s.stateCache.getOrLoad(path, func(p string) (*State, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read state: %w", err)
+		}
+		var st State
+		if err := json.Unmarshal(data, &st); err != nil {
+			return nil, fmt.Errorf("parse state: %w", err)
+		}
+		if st.Counters == nil {
+			st.Counters = map[string]int{}
+		}
+		return &st, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read state: %w", err)
+		return nil, err
 	}
-	var st State
-	if err := json.Unmarshal(data, &st); err != nil {
-		return nil, fmt.Errorf("parse state: %w", err)
+	// Return a copy so callers can mutate freely without poisoning the
+	// cache. State is tiny (a handful of fields + a small map), so the
+	// copy is cheap.
+	out := *cached
+	out.Counters = make(map[string]int, len(cached.Counters))
+	for k, v := range cached.Counters {
+		out.Counters[k] = v
 	}
-	if st.Counters == nil {
-		st.Counters = map[string]int{}
-	}
-	return &st, nil
+	return &out, nil
 }
 
 func (s *Store) writeState(st State) error {
@@ -50,7 +65,12 @@ func (s *Store) writeState(st State) error {
 		return fmt.Errorf("encode state: %w", err)
 	}
 	data = append(data, '\n')
-	return atomicWrite(s.StatePath(), data)
+	path := s.StatePath()
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.stateCache.drop(path)
+	return nil
 }
 
 // UpdateState reads, mutates via fn, and writes state back.

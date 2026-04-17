@@ -18,13 +18,18 @@ func (s *Store) conclusionPath(id string) string {
 }
 
 func (s *Store) ReadConclusion(id string) (*entity.Conclusion, error) {
-	data, err := os.ReadFile(s.conclusionPath(id))
+	path := s.conclusionPath(id)
+	c, err := s.conclCache.getOrLoad(path, func(p string) (*entity.Conclusion, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read conclusion: %w", err)
+		}
+		return entity.ParseConclusion(data)
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrConclusionNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("read conclusion: %w", err)
 	}
-	return entity.ParseConclusion(data)
+	return c, err
 }
 
 func (s *Store) WriteConclusion(c *entity.Conclusion) error {
@@ -32,7 +37,12 @@ func (s *Store) WriteConclusion(c *entity.Conclusion) error {
 	if err != nil {
 		return fmt.Errorf("encode conclusion: %w", err)
 	}
-	return atomicWrite(s.conclusionPath(c.ID), data)
+	path := s.conclusionPath(c.ID)
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.conclCache.drop(path)
+	return nil
 }
 
 func (s *Store) ListConclusions() ([]*entity.Conclusion, error) {

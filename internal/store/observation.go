@@ -18,13 +18,18 @@ func (s *Store) observationPath(id string) string {
 }
 
 func (s *Store) ReadObservation(id string) (*entity.Observation, error) {
-	data, err := os.ReadFile(s.observationPath(id))
+	path := s.observationPath(id)
+	o, err := s.obsCache.getOrLoad(path, func(p string) (*entity.Observation, error) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read observation: %w", err)
+		}
+		return entity.ParseObservation(data)
+	})
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrObservationNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("read observation: %w", err)
 	}
-	return entity.ParseObservation(data)
+	return o, err
 }
 
 func (s *Store) WriteObservation(o *entity.Observation) error {
@@ -32,7 +37,12 @@ func (s *Store) WriteObservation(o *entity.Observation) error {
 	if err != nil {
 		return fmt.Errorf("encode observation: %w", err)
 	}
-	return atomicWrite(s.observationPath(o.ID), data)
+	path := s.observationPath(o.ID)
+	if err := atomicWrite(path, data); err != nil {
+		return err
+	}
+	s.obsCache.drop(path)
+	return nil
 }
 
 func (s *Store) ListObservations() ([]*entity.Observation, error) {

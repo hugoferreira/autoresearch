@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/bytter/autoresearch/internal/entity"
 )
 
 const (
@@ -32,6 +34,31 @@ var (
 
 type Store struct {
 	root string
+
+	// mtime-indexed caches over the parsed entity files; see cache.go.
+	// Populated lazily on first Read; invalidated by Write<Entity>.
+	hypCache    *entryCache[*entity.Hypothesis]
+	expCache    *entryCache[*entity.Experiment]
+	obsCache    *entryCache[*entity.Observation]
+	conclCache  *entryCache[*entity.Conclusion]
+	lessonCache *entryCache[*entity.Lesson]
+	goalCache   *entryCache[*entity.Goal]
+	stateCache  *entryCache[*State]
+	configCache *entryCache[*Config]
+}
+
+func newStore(root string) *Store {
+	return &Store{
+		root:        root,
+		hypCache:    newEntryCache[*entity.Hypothesis](),
+		expCache:    newEntryCache[*entity.Experiment](),
+		obsCache:    newEntryCache[*entity.Observation](),
+		conclCache:  newEntryCache[*entity.Conclusion](),
+		lessonCache: newEntryCache[*entity.Lesson](),
+		goalCache:   newEntryCache[*entity.Goal](),
+		stateCache:  newEntryCache[*State](),
+		configCache: newEntryCache[*Config](),
+	}
 }
 
 // Open finds a .research/ store by walking up from projectDir toward the
@@ -51,7 +78,7 @@ func Open(projectDir string) (*Store, error) {
 		candidate := filepath.Join(dir, Dir)
 		info, err := os.Stat(candidate)
 		if err == nil && info.IsDir() {
-			s := &Store{root: dir}
+			s := newStore(dir)
 			if err := s.maybeMigrate(); err != nil {
 				return nil, err
 			}
@@ -73,7 +100,7 @@ func Create(projectDir string, cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{root: abs}
+	s := newStore(abs)
 	if _, err := os.Stat(s.DirPath()); err == nil {
 		return nil, ErrAlreadyInitialized
 	} else if !errors.Is(err, os.ErrNotExist) {
