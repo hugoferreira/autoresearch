@@ -14,4 +14,12 @@ var (
 	// max_wall_time_h on experiment design). Orchestrators treat exit code
 	// 4 as "budget exhausted" and stop the loop cleanly.
 	ErrBudgetExhausted = errors.New("budget exhausted")
+
+	// ErrDryRun is the sentinel dryRun() returns after emitting the
+	// "[dry-run] would ..." preview. RunE handlers treat it as a
+	// short-circuit (return err); main() maps it to exit 0 with no
+	// additional error text, since the preview has already been printed.
+	// It is NOT a failure — it signals that the verb stopped intentionally
+	// before mutating state.
+	ErrDryRun = errors.New("dry-run")
 )

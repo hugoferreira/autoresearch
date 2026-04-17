@@ -10,7 +10,7 @@ import (
 
 // Exit codes:
 //
-//   0 — success
+//   0 — success (including --dry-run, which short-circuits before mutating)
 //   1 — generic error
 //   2 — cobra usage error (set by cobra on bad flags; we don't override)
 //   3 — autoresearch is paused (cli.ErrPaused)
@@ -20,6 +20,12 @@ import (
 // versus fail loudly.
 func main() {
 	if err := cli.Root().Execute(); err != nil {
+		// ErrDryRun means the verb printed its "[dry-run] would ..."
+		// preview and short-circuited before mutating state. That is
+		// success, not failure — exit 0 with no additional output.
+		if errors.Is(err, cli.ErrDryRun) {
+			return
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		switch {
 		case errors.Is(err, cli.ErrPaused):
