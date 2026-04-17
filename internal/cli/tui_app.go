@@ -14,8 +14,30 @@ import (
 
 // ---- messages ----
 
+// tuiTickMsg is internal to the root update loop: it schedules a poll of
+// the event log and reschedules itself. Views no longer observe ticks
+// directly — they react to storeChangedMsg when the poll surfaces new
+// events that actually changed something in .research/.
 type tuiTickMsg time.Time
 type tuiErrMsg struct{ err error }
+
+// storeChangedMsg is dispatched to the top view whenever the poll loop
+// sees new events in events.jsonl. Views decide whether to reload based
+// on what changed — most list and aggregate views just reload on any
+// change; detail views can narrow to events with a matching subject.
+// Quiet ticks produce no storeChangedMsg at all, so scroll and cursor
+// state are preserved whenever .research/ hasn't changed.
+type storeChangedMsg struct {
+	events []store.Event
+	newOff int64
+}
+
+// eventOffsetPrimedMsg carries the initial byte offset into events.jsonl
+// at TUI startup. We prime to current EOF so the first poll after startup
+// sees only events appended *during* the TUI session, not the entire
+// research history (which is already reflected in the entity files that
+// view.init() loaded).
+type eventOffsetPrimedMsg struct{ offset int64 }
 
 // pushMsg tells the root model to push a new view onto the stack.
 type tuiPushMsg struct{ v tuiView }
@@ -73,6 +95,11 @@ type tuiModel struct {
 	err      error
 
 	chrome chromeLoadedMsg
+
+	// eventOffset is the byte offset into events.jsonl up to which the
+	// poll loop has already observed events. Primed at startup by
+	// primeEventOffset(); advanced by every storeChangedMsg.
+	eventOffset int64
 }
 
 func newTuiModel(s *store.Store, scope goalScope, refresh time.Duration) tuiModel {
@@ -88,6 +115,7 @@ func (m tuiModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.top().init(m.store),
 		fetchChrome(m.store, m.scope),
+		primeEventOffset(m.store),
 		tuiTick(m.refresh),
 	)
 }
@@ -97,6 +125,45 @@ func tuiTick(d time.Duration) tea.Cmd {
 		return nil
 	}
 	return tea.Tick(d, func(t time.Time) tea.Msg { return tuiTickMsg(t) })
+}
+
+// primeEventOffset reads the current EOF of events.jsonl and returns it
+// as the starting offset for the poll loop. This guarantees the TUI only
+// reacts to events appended *during* the session — historical events are
+// already reflected in the entity files that view.init() loads.
+func primeEventOffset(s *store.Store) tea.Cmd {
+	if s == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_, off, err := s.EventsSince(0)
+		if err != nil {
+			// Non-fatal: fall back to offset 0 and let the first poll
+			// dispatch historical events once. Better than a crashed
+			// refresh loop.
+			return eventOffsetPrimedMsg{offset: 0}
+		}
+		return eventOffsetPrimedMsg{offset: off}
+	}
+}
+
+// pollEvents reads any events appended to events.jsonl since offset and
+// returns them as a storeChangedMsg. Quiet polls (no new events) still
+// emit a storeChangedMsg with an empty slice so the root handler can
+// advance its offset, but the root filters empty batches out before
+// dispatching to the top view — so views that haven't hooked into the
+// refresh cycle see nothing, and their scroll/cursor state is preserved.
+func pollEvents(s *store.Store, offset int64) tea.Cmd {
+	if s == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		events, newOff, err := s.EventsSince(offset)
+		if err != nil {
+			return storeChangedMsg{newOff: offset}
+		}
+		return storeChangedMsg{events: events, newOff: newOff}
+	}
 }
 
 // fetchChrome reads the cheap state+config+counts summary used by the header
@@ -206,11 +273,35 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiTickMsg:
-		// Refresh the top view + chrome summary, then reschedule.
+		// Ticks drive the poll loop, not the view refresh. We fire a
+		// single pollEvents against the known byte offset and reschedule
+		// ourselves. Views only react if the poll surfaces new events,
+		// so a quiet tick costs one os.Stat and zero view churn.
+		return m, tea.Batch(pollEvents(m.store, m.eventOffset), tuiTick(m.refresh))
+
+	case eventOffsetPrimedMsg:
+		m.eventOffset = msg.offset
+		return m, nil
+
+	case storeChangedMsg:
+		m.eventOffset = msg.newOff
+		if len(msg.events) == 0 {
+			// Quiet poll — no changes to react to, no view churn, no
+			// chrome reload. Cursor and pager scroll stay where the
+			// user left them.
+			return m, nil
+		}
+		// Drop cache entries for any subjects these events mention, so
+		// the next read picks up the change even if filesystem mtime
+		// resolution would otherwise mask it (see
+		// store.InvalidateFromEvents).
+		m.store.InvalidateFromEvents(msg.events)
+		// Dispatch to the top view; each view's case storeChangedMsg
+		// decides whether to reload.
 		top := m.top()
 		nv, cmd := top.update(msg, m.store)
 		m.setTop(nv)
-		return m, tea.Batch(cmd, fetchChrome(m.store, m.scope), tuiTick(m.refresh))
+		return m, tea.Batch(cmd, fetchChrome(m.store, m.scope))
 
 	case chromeLoadedMsg:
 		m.chrome = msg

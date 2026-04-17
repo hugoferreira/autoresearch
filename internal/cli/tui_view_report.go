@@ -60,7 +60,9 @@ func (v *reportView) update(msg tea.Msg, _ *store.Store) (tuiView, tea.Cmd) {
 		v.renderedWidth = -1 // invalidate glamour cache
 		if v.pager.ready {
 			v.pager.setContent(v.ensureRendered(v.pager.vp.Width))
-			v.pager.gotoTop()
+			// Preserve scroll offset across reloads — see lesson
+			// detail view for the rationale. First render starts at
+			// 0 naturally.
 		}
 		return v, nil
 	case tea.KeyMsg:

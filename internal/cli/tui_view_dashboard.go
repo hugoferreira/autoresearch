@@ -98,7 +98,7 @@ func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.eventsAllLoaded = msg.allLoaded
 		v.restoreEventCursor(selected)
 		return v, v.maybeLoadMoreEvents(s)
-	case tuiTickMsg:
+	case storeChangedMsg:
 		// Refresh both the dashboard and any open right-column overlay so
 		// drilled-down details stay live.
 		cmds := []tea.Cmd{loadDashboardSnapshotCmd(s, v.scope)}

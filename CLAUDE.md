@@ -247,6 +247,32 @@ When adding a new TUI view: pick `list`/`detail`/`pager` shape, add a
 `tui_helpers.go` / `tui_pager.go` instead of hand-rolling cursor or
 scroll logic.
 
+**Refresh model.** The TUI is event-driven, not tick-driven. A single
+poll loop in `tui_app.go` calls `Store.EventsSince(offset)` every
+`--refresh` seconds; when new events arrive, the root emits a
+`storeChangedMsg{events, newOff}` and dispatches it to the top view.
+Quiet polls produce no view churn at all — cursor, scroll, filter,
+and pager offset are preserved whenever `.research/` hasn't changed.
+
+Per-view contract:
+
+- List and aggregate views (`hypothesis list`, `dashboard`, `tree`,
+  `frontier`, …) handle `case storeChangedMsg` by calling
+  `v.init(s)`. That's the current default; narrower relevance filters
+  can be added later (e.g. a hypothesis list only reloading when
+  `events[].Subject` starts with `H-`).
+- Detail views do the same — reload their single entity. The entity
+  cache makes the reload O(stat) when unchanged.
+- Pager-backed views (lesson detail, report, artifact) must NOT call
+  `pager.gotoTop()` on a reload. Reloads fire only when the entity
+  actually changed; scroll belongs to the user, not the document.
+  Explicit content-replacement actions (artifact Tab cycling, grep
+  applied) set `scrollResetPending` on the view and the load handler
+  consumes it.
+
+Do not handle `tuiTickMsg` in views — it's internal to the root model's
+poll loop. Views exclusively handle `storeChangedMsg`.
+
 ## When making changes
 
 - **New verb.** Add to the matching `internal/cli/<group>.go`, validate via

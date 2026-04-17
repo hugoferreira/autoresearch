@@ -45,7 +45,7 @@ func (v *instrumentListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.C
 		}
 		sort.Strings(v.names)
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	}
 	return v, nil
@@ -123,7 +123,7 @@ func (v *treeView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 			v.cursor = 0
 		}
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -244,7 +244,7 @@ func (v *frontierView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.stalled = msg.stalled
 		v.err = msg.err
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -370,7 +370,7 @@ func (v *goalListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		}
 		v.cursor = clampCursor(v.cursor, len(v.all))
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		if handleListNav(msg, &v.cursor, len(v.all)) {
@@ -455,7 +455,7 @@ func (v *goalDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) 
 		v.g = msg.g
 		v.err = msg.err
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -541,7 +541,7 @@ func (v *statusView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.snap = msg.snap
 		v.err = msg.err
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	}
 	return v, nil

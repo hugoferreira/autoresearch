@@ -100,7 +100,7 @@ func (v *eventListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		}
 		v.applyFilter()
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		// Event list's cursor interacts with follow-mode, so it handles

@@ -76,7 +76,7 @@ func (v *hypothesisListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.C
 		sort.Slice(v.all, func(i, j int) bool { return v.all[i].ID < v.all[j].ID })
 		v.applyFilter()
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		if handleListNav(msg, &v.cursor, len(v.filtered)) {
@@ -186,7 +186,7 @@ func (v *hypothesisDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea
 		v.obs = msg.obs
 		v.err = msg.err
 		return v, nil
-	case tuiTickMsg:
+	case storeChangedMsg:
 		return v, v.init(s)
 	case tea.KeyMsg:
 		switch msg.String() {
