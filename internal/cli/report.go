@@ -249,6 +249,8 @@ func renderReportMarkdown(r *reportData) string {
 			heading := c.Verdict
 			if c.Strict.RescuedBy != "" {
 				heading = fmt.Sprintf("%s (rescued by `%s`)", c.Verdict, c.Strict.RescuedBy)
+			} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
+				heading = fmt.Sprintf("%s (directional)", c.Verdict)
 			}
 			fmt.Fprintf(&sb, "### %s — %s\n\n", c.ID, heading)
 			if c.Strict.RequestedFrom != "" {
@@ -263,6 +265,8 @@ func renderReportMarkdown(r *reportData) string {
 					fmt.Fprintf(&sb, "> - %s\n", r)
 				}
 				sb.WriteString("\n")
+			} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
+				sb.WriteString("> **Directional** — the hypothesis predicted direction only (`min_effect: 0`); any clean-CI effect in the predicted direction counts as supported. Follow-up hypotheses should refine this into a quantitative claim once the magnitude is known.\n\n")
 			}
 			fmt.Fprintf(&sb, "- **Candidate experiment**: %s\n", c.CandidateExp)
 			if c.BaselineExp != "" {

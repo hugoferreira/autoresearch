@@ -230,6 +230,62 @@ func TestValidateHypothesis_Happy(t *testing.T) {
 	}
 }
 
+func TestValidateHypothesis_DirectionalAccepted(t *testing.T) {
+	// min_effect=0 is the directional opt-in; no magnitude commitment.
+	h := &entity.Hypothesis{
+		Claim: "unrolling the hot loop will reduce cycles",
+		Predicts: entity.Predicts{
+			Instrument: "qemu_cycles", Target: "dsp_fir_bench", Direction: "decrease", MinEffect: 0,
+		},
+		KillIf: []string{"ci upper bound >= 0"},
+	}
+	if err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles")); err != nil {
+		t.Errorf("directional hypothesis (min_effect=0) should validate, got %v", err)
+	}
+}
+
+func TestValidateHypothesis_NegativeMinEffectRejected(t *testing.T) {
+	h := &entity.Hypothesis{
+		Claim: "x",
+		Predicts: entity.Predicts{
+			Instrument: "qemu_cycles", Target: "y", Direction: "decrease", MinEffect: -0.01,
+		},
+		KillIf: []string{"..."},
+	}
+	err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles"))
+	if err == nil || !strings.Contains(err.Error(), ">= 0") {
+		t.Errorf("negative min_effect should be rejected, got %v", err)
+	}
+}
+
+func TestCheckStrictVerdict_Directional(t *testing.T) {
+	// min_effect=0: only the CI-clean-side gate applies. A tiny but
+	// cleanly-signed effect that would fail the magnitude gate with a
+	// positive min_effect should pass cleanly here.
+	h := &entity.Hypothesis{Predicts: entity.Predicts{
+		Direction: "decrease", MinEffect: 0,
+	}}
+	tiny := &stats.Comparison{
+		NBaseline: 10, NCandidate: 10,
+		DeltaFrac: -0.003, CILowFrac: -0.005, CIHighFrac: -0.001,
+	}
+	d := firewall.CheckStrictVerdict(entity.VerdictSupported, h, tiny)
+	if !d.Passed || d.Downgraded {
+		t.Fatalf("directional hypothesis with clean CI should pass, got %+v", d)
+	}
+
+	// CI still must be clean: a directional hypothesis with CI straddling
+	// zero still downgrades. The scientific discipline survives.
+	neutral := &stats.Comparison{
+		NBaseline: 10, NCandidate: 10,
+		DeltaFrac: -0.003, CILowFrac: -0.010, CIHighFrac: 0.005,
+	}
+	d = firewall.CheckStrictVerdict(entity.VerdictSupported, h, neutral)
+	if d.Passed || !d.Downgraded {
+		t.Fatalf("directional with CI straddling zero should still downgrade, got %+v", d)
+	}
+}
+
 func TestCheckHypothesisInstrumentWithinGoal(t *testing.T) {
 	max := 65536.0
 	goal := &entity.Goal{
@@ -831,6 +887,25 @@ func TestValidateGoalRescuers(t *testing.T) {
 		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02}}
 		if err := firewall.ValidateGoal(g, cfg); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("directional rescuer (min_effect=0) is accepted", func(t *testing.T) {
+		g := baseGoal()
+		g.NeutralBandFrac = 0.02
+		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0}}
+		if err := firewall.ValidateGoal(g, cfg); err != nil {
+			t.Fatalf("directional rescuer should validate, got %v", err)
+		}
+	})
+
+	t.Run("negative rescuer min_effect rejected", func(t *testing.T) {
+		g := baseGoal()
+		g.NeutralBandFrac = 0.02
+		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: -0.01}}
+		err := firewall.ValidateGoal(g, cfg)
+		if err == nil || !strings.Contains(err.Error(), ">= 0") {
+			t.Fatalf("negative rescuer min_effect should be rejected, got %v", err)
 		}
 	})
 }

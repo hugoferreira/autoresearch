@@ -71,7 +71,12 @@ type Strict struct {
 	Passed        bool     `yaml:"passed"                    json:"passed"`
 	RequestedFrom string   `yaml:"downgraded_from,omitempty" json:"downgraded_from,omitempty"`
 	RescuedBy     string   `yaml:"rescued_by,omitempty"      json:"rescued_by,omitempty"`
-	Reasons       []string `yaml:"reasons,omitempty"         json:"reasons,omitempty"`
+	// Directional is true when the hypothesis predicted a direction
+	// with MinEffect == 0 (no magnitude commitment). A directional
+	// "supported" verdict must be rendered distinctly so readers don't
+	// mistake a tiny clean win for a quantitative result.
+	Directional bool     `yaml:"directional,omitempty"     json:"directional,omitempty"`
+	Reasons     []string `yaml:"reasons,omitempty"         json:"reasons,omitempty"`
 }
 
 func ParseConclusion(data []byte) (*Conclusion, error) {

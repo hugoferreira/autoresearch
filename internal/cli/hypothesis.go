@@ -157,7 +157,7 @@ func hypothesisAddCmd() *cobra.Command {
 	c.Flags().StringVar(&predInstrument, "predicts-instrument", "", "instrument that will measure the predicted effect (required; must be the active goal objective or a goal-constraint instrument)")
 	c.Flags().StringVar(&predTarget, "predicts-target", "", "target measured by the instrument (required)")
 	c.Flags().StringVar(&predDirection, "predicts-direction", "", "predicted direction: increase | decrease (required)")
-	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum fractional effect required to call it supported (required)")
+	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum |delta_frac| required to call it supported; pass 0 for a directional hypothesis (direction only, no magnitude commitment — prefer this when no prior evidence grounds a specific number)")
 	c.Flags().StringArrayVar(&killIf, "kill-if", nil, "kill criterion; may be repeated (at least one required)")
 	c.Flags().StringSliceVar(&inspiredBy, "inspired-by", nil, "lesson IDs this hypothesis draws on (L-NNNN; reviewed lessons only; comma-separated or repeated)")
 	addAuthorFlag(c, &author, "")

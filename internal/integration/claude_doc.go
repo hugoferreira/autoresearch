@@ -380,6 +380,15 @@ fix the input instead.
   ` + "`inconclusive`" + ` if:
     - the 95% CI on the fractional effect crosses zero in the wrong direction, OR
     - ` + "`|delta_frac| < hypothesis.predicts.min_effect`" + `.
+  A hypothesis with ` + "`predicts.min_effect == 0`" + ` is **directional**: the
+  magnitude gate is skipped and any clean-CI effect in the predicted
+  direction counts as supported. Directional is the right choice when
+  no prior evidence (lesson, literature, back-of-envelope) grounds a
+  quantitative threshold; a directional supported is weaker evidence
+  than a quantitative one and a follow-up hypothesis should refine it
+  into a quantitative claim once the magnitude is known. Directional
+  conclusions carry ` + "`strict.directional: true`" + ` and render as
+  ` + "`supported (directional)`" + ` in list / show / TUI / report.
   Every downgrade is recorded in the conclusion's ` + "`strict_check`" + ` block and
   in ` + "`events.jsonl`" + ` as a ` + "`conclusion.downgrade`" + ` event. The conclusion still
   persists; the hypothesis moves to ` + "`inconclusive`" + `.
