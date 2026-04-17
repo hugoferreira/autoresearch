@@ -303,6 +303,11 @@ Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provision
         [--pattern 'regex with one capture group']  # required for builtin:scalar
         --unit U [--requires inst=pass,...] [--min-samples N]
     autoresearch instrument list
+    autoresearch instrument delete <name> [--reason "..."] [--force]
+        # delete refuses while the instrument is referenced by the active
+        # goal's objective/constraints, any hypothesis prediction, or any
+        # observation. --force overrides the check EXCEPT for goal-
+        # objective references (those leave the goal unmeasurable).
 
 Built-in parsers:
 

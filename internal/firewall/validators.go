@@ -296,6 +296,101 @@ func CheckInstrumentDependencies(instName string, cfg *store.Config, observation
 	return nil
 }
 
+// InstrumentUsage enumerates where a named instrument is still referenced
+// by goals, hypotheses, or observations. An empty usage means the
+// instrument can be removed without orphaning anything.
+type InstrumentUsage struct {
+	// Goals whose objective.instrument == name. Deleting one of these
+	// would leave the goal unmeasurable; this is never bypassable.
+	GoalObjectives []string
+	// Goals whose constraints[].instrument == name. Deleting is a
+	// weakening of the goal's definition but does not strand it.
+	GoalConstraints []string
+	// Hypothesis IDs whose predicts.instrument == name. Deleting
+	// invalidates their predictions.
+	Hypotheses []string
+	// Observation IDs recorded with instrument == name. Deleting
+	// orphans the recorded data from the instrument definition.
+	Observations []string
+}
+
+func (u InstrumentUsage) Ok() bool {
+	return len(u.GoalObjectives) == 0 &&
+		len(u.GoalConstraints) == 0 &&
+		len(u.Hypotheses) == 0 &&
+		len(u.Observations) == 0
+}
+
+// BlocksEvenWithForce is true when usage contains a reference that must
+// never be bypassed — currently, a goal objective pointing at the
+// instrument. Losing the objective instrument leaves the goal
+// structurally broken, so `instrument delete --force` refuses too.
+func (u InstrumentUsage) BlocksEvenWithForce() bool {
+	return len(u.GoalObjectives) > 0
+}
+
+// Summary formats the usage as a human-readable, multi-line explanation
+// suitable for an error message or event payload. Empty usage returns "".
+func (u InstrumentUsage) Summary() string {
+	if u.Ok() {
+		return ""
+	}
+	var parts []string
+	if len(u.GoalObjectives) > 0 {
+		parts = append(parts, "goal objective: "+strings.Join(u.GoalObjectives, ", "))
+	}
+	if len(u.GoalConstraints) > 0 {
+		parts = append(parts, "goal constraint: "+strings.Join(u.GoalConstraints, ", "))
+	}
+	if len(u.Hypotheses) > 0 {
+		parts = append(parts, "hypothesis predictions: "+strings.Join(u.Hypotheses, ", "))
+	}
+	if len(u.Observations) > 0 {
+		parts = append(parts, "observations: "+strings.Join(u.Observations, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// CheckInstrumentSafeToDelete scans the supplied entities for references
+// to the named instrument and returns the usage. Callers interpret the
+// result: a non-empty Ok()==false usage should block deletion by default,
+// but `--force` may accept usage.BlocksEvenWithForce()==false. Existence
+// of the instrument itself is checked by the store (ErrInstrumentNotFound).
+func CheckInstrumentSafeToDelete(name string, goals []*entity.Goal, hyps []*entity.Hypothesis, obs []*entity.Observation) InstrumentUsage {
+	var u InstrumentUsage
+	for _, g := range goals {
+		if g == nil || g.Status != entity.GoalStatusActive {
+			continue
+		}
+		if g.Objective.Instrument == name {
+			u.GoalObjectives = append(u.GoalObjectives, g.ID)
+		}
+		for _, c := range g.Constraints {
+			if c.Instrument == name {
+				u.GoalConstraints = append(u.GoalConstraints, g.ID)
+				break
+			}
+		}
+	}
+	for _, h := range hyps {
+		if h == nil {
+			continue
+		}
+		if h.Predicts.Instrument == name {
+			u.Hypotheses = append(u.Hypotheses, h.ID)
+		}
+	}
+	for _, o := range obs {
+		if o == nil {
+			continue
+		}
+		if o.Instrument == name {
+			u.Observations = append(u.Observations, o.ID)
+		}
+	}
+	return u
+}
+
 // ValidateLesson checks the structural rules of a lesson: non-empty claim,
 // valid scope, required Subjects for scope=hypothesis, and well-formed ID
 // prefixes on Subjects and SupersedesID. Existence of referenced entities is

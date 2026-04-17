@@ -712,3 +712,104 @@ func TestCheckInspiredByLessonsReviewed(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckInstrumentSafeToDelete(t *testing.T) {
+	goal := func(id string, status string, obj string, constraints ...string) *entity.Goal {
+		g := &entity.Goal{ID: id, Status: status, Objective: entity.Objective{Instrument: obj, Direction: "decrease"}}
+		for _, c := range constraints {
+			g.Constraints = append(g.Constraints, entity.Constraint{Instrument: c})
+		}
+		return g
+	}
+	hyp := func(id, inst string) *entity.Hypothesis {
+		return &entity.Hypothesis{ID: id, Predicts: entity.Predicts{Instrument: inst, Direction: "decrease"}}
+	}
+	obs := func(id, inst string) *entity.Observation {
+		return &entity.Observation{ID: id, Instrument: inst}
+	}
+
+	t.Run("unreferenced instrument is safe", func(t *testing.T) {
+		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing")}
+		hyps := []*entity.Hypothesis{hyp("H-0001", "timing")}
+		os := []*entity.Observation{obs("O-0001", "timing")}
+		u := firewall.CheckInstrumentSafeToDelete("binary_size", goals, hyps, os)
+		if !u.Ok() {
+			t.Errorf("unreferenced should be Ok, got %+v", u)
+		}
+	})
+
+	t.Run("goal objective reference blocks even with --force", func(t *testing.T) {
+		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing")}
+		u := firewall.CheckInstrumentSafeToDelete("timing", goals, nil, nil)
+		if u.Ok() {
+			t.Fatal("goal-objective reference should block")
+		}
+		if !u.BlocksEvenWithForce() {
+			t.Errorf("goal-objective reference should block --force, got %+v", u)
+		}
+		if len(u.GoalObjectives) != 1 || u.GoalObjectives[0] != "G-0001" {
+			t.Errorf("expected [G-0001] objective ref, got %v", u.GoalObjectives)
+		}
+	})
+
+	t.Run("goal constraint reference blocks by default", func(t *testing.T) {
+		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing", "binary_size")}
+		u := firewall.CheckInstrumentSafeToDelete("binary_size", goals, nil, nil)
+		if u.Ok() {
+			t.Fatal("goal-constraint reference should block by default")
+		}
+		if u.BlocksEvenWithForce() {
+			t.Errorf("goal-constraint reference should be force-overridable, got %+v", u)
+		}
+	})
+
+	t.Run("inactive goal references do not block", func(t *testing.T) {
+		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusConcluded, "timing", "binary_size")}
+		u := firewall.CheckInstrumentSafeToDelete("timing", goals, nil, nil)
+		if !u.Ok() {
+			t.Errorf("concluded-goal references should not block, got %+v", u)
+		}
+	})
+
+	t.Run("hypothesis prediction blocks by default", func(t *testing.T) {
+		hyps := []*entity.Hypothesis{hyp("H-0001", "binary_size"), hyp("H-0002", "timing")}
+		u := firewall.CheckInstrumentSafeToDelete("binary_size", nil, hyps, nil)
+		if u.Ok() || u.BlocksEvenWithForce() {
+			t.Fatalf("hypothesis ref should be blocking-but-forceable, got %+v", u)
+		}
+		if len(u.Hypotheses) != 1 || u.Hypotheses[0] != "H-0001" {
+			t.Errorf("expected [H-0001], got %v", u.Hypotheses)
+		}
+	})
+
+	t.Run("observation blocks by default", func(t *testing.T) {
+		os := []*entity.Observation{obs("O-0001", "binary_size")}
+		u := firewall.CheckInstrumentSafeToDelete("binary_size", nil, nil, os)
+		if u.Ok() || u.BlocksEvenWithForce() {
+			t.Fatalf("observation ref should be blocking-but-forceable, got %+v", u)
+		}
+		if len(u.Observations) != 1 {
+			t.Errorf("expected 1 observation ref, got %v", u.Observations)
+		}
+	})
+
+	t.Run("summary lists every reference class", func(t *testing.T) {
+		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing", "binary_size")}
+		hyps := []*entity.Hypothesis{hyp("H-0001", "binary_size")}
+		os := []*entity.Observation{obs("O-0001", "binary_size")}
+		u := firewall.CheckInstrumentSafeToDelete("binary_size", goals, hyps, os)
+		s := u.Summary()
+		for _, want := range []string{"G-0001", "H-0001", "O-0001"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("summary missing %q: %s", want, s)
+			}
+		}
+	})
+
+	t.Run("empty summary when safe", func(t *testing.T) {
+		u := firewall.CheckInstrumentSafeToDelete("x", nil, nil, nil)
+		if u.Summary() != "" {
+			t.Errorf("safe usage should have empty summary, got %q", u.Summary())
+		}
+	})
+}
