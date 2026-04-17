@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"math"
 	"sort"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -185,7 +186,11 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 			if i == 0 {
 				marker = "* "
 			}
-			w.Textf("%s%s  %s  %s=%.6g\n", marker, r.Conclusion, r.Hypothesis, f.Goal.Objective.Instrument, r.Value)
+			w.Textf("%s%s  %s  %s=%.6g", marker, r.Conclusion, r.Hypothesis, f.Goal.Objective.Instrument, r.Value)
+			if r.RescuedBy != "" {
+				w.Textf("  [rescued by %s]", r.RescuedBy)
+			}
+			w.Textln("")
 		}
 		w.Textln("")
 	}
@@ -217,6 +222,17 @@ type frontierRow struct {
 	Candidate  string  `json:"candidate_experiment"`
 	Value      float64 `json:"value"`
 	DeltaFrac  float64 `json:"delta_frac"`
+	// RescuedBy is non-empty when the backing conclusion was supported via
+	// a goal rescuer rather than a clean primary win. Renderers display a
+	// "rescued by <instrument>" annotation so the reader cannot mistake a
+	// rescued row for a clean primary-metric improvement.
+	RescuedBy string `json:"rescued_by,omitempty"`
+	// TiebreakValues holds one candidate value per goal.Rescuers clause, in
+	// declared order. Used when two rows are within goal.NeutralBandFrac on
+	// primary — the sort then picks the row that wins on the first rescuer
+	// whose value differs. Absent rescuer data is represented as NaN so the
+	// tiebreak skips cleanly over it.
+	TiebreakValues []float64 `json:"-"`
 }
 
 type frontierGoalAssessment struct {
@@ -249,15 +265,17 @@ func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 			continue
 		}
 		rows = append(rows, frontierRow{
-			Conclusion: c.ID,
-			Hypothesis: c.Hypothesis,
-			Candidate:  c.CandidateExp,
-			Value:      val,
-			DeltaFrac:  c.Effect.DeltaFrac,
+			Conclusion:     c.ID,
+			Hypothesis:     c.Hypothesis,
+			Candidate:      c.CandidateExp,
+			Value:          val,
+			DeltaFrac:      c.Effect.DeltaFrac,
+			RescuedBy:      c.Strict.RescuedBy,
+			TiebreakValues: rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		return betterFrontierValue(goal.Objective.Direction, rows[i].Value, rows[j].Value)
+		return frontierRowBetter(goal, rows[i], rows[j])
 	})
 
 	sortedByTime := make([]*entity.Conclusion, len(concls))
@@ -265,7 +283,7 @@ func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 	sort.Slice(sortedByTime, func(i, j int) bool { return sortedByTime[i].CreatedAt.Before(sortedByTime[j].CreatedAt) })
 
 	hasBest := false
-	var bestValue float64
+	var bestRow frontierRow
 	for _, c := range sortedByTime {
 		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
 		if !ok {
@@ -274,20 +292,84 @@ func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 			}
 			continue
 		}
+		cur := frontierRow{
+			Value:          val,
+			TiebreakValues: rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
+		}
 		if !hasBest {
 			hasBest = true
-			bestValue = val
+			bestRow = cur
 			stalledFor = 0
 			continue
 		}
-		if betterFrontierValue(goal.Objective.Direction, val, bestValue) {
-			bestValue = val
+		if frontierRowBetter(goal, cur, bestRow) {
+			bestRow = cur
 			stalledFor = 0
 		} else {
 			stalledFor++
 		}
 	}
 	return rows, stalledFor
+}
+
+// rescuerTiebreakValues extracts one candidate value per goal rescuer, in
+// declared order. Missing observations (the candidate wasn't measured on a
+// rescuer instrument) are represented as NaN so the tiebreak comparator can
+// skip them cleanly.
+func rescuerTiebreakValues(goal *entity.Goal, obs []*entity.Observation) []float64 {
+	if goal == nil || len(goal.Rescuers) == 0 {
+		return nil
+	}
+	out := make([]float64, len(goal.Rescuers))
+	for i, r := range goal.Rescuers {
+		v, ok := candidateObjectiveValue(obs, r.Instrument)
+		if !ok {
+			out[i] = math.NaN()
+			continue
+		}
+		out[i] = v
+	}
+	return out
+}
+
+// frontierRowBetter reports whether a is strictly better than b on the goal.
+// When the primary values are within goal.NeutralBandFrac of each other, the
+// comparison falls through to rescuers in goal-declared order; the first
+// rescuer whose value differs decides. This is a limited Pareto-tiebreak,
+// not a full multi-objective frontier.
+func frontierRowBetter(goal *entity.Goal, a, b frontierRow) bool {
+	if goal == nil {
+		return false
+	}
+	if !withinPrimaryNeutralBand(goal, a.Value, b.Value) {
+		return betterFrontierValue(goal.Objective.Direction, a.Value, b.Value)
+	}
+	for i, r := range goal.Rescuers {
+		if i >= len(a.TiebreakValues) || i >= len(b.TiebreakValues) {
+			continue
+		}
+		av, bv := a.TiebreakValues[i], b.TiebreakValues[i]
+		if math.IsNaN(av) || math.IsNaN(bv) {
+			continue
+		}
+		if av == bv {
+			continue
+		}
+		return betterFrontierValue(r.Direction, av, bv)
+	}
+	return false
+}
+
+// withinPrimaryNeutralBand reports whether two primary values are close
+// enough (relative to the larger magnitude) that the goal considers them
+// "tied" on the primary metric. Returns false whenever the goal doesn't
+// declare a neutral band, preserving v3-goal behaviour exactly.
+func withinPrimaryNeutralBand(goal *entity.Goal, a, b float64) bool {
+	if goal == nil || goal.NeutralBandFrac <= 0 {
+		return false
+	}
+	denom := math.Max(math.Max(math.Abs(a), math.Abs(b)), 1e-9)
+	return math.Abs(a-b)/denom <= goal.NeutralBandFrac
 }
 
 func frontierRequireConstraints(goal *entity.Goal) map[string]string {

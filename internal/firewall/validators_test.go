@@ -642,6 +642,199 @@ func TestCheckStrictVerdict(t *testing.T) {
 	})
 }
 
+func TestCheckStrictVerdictRescue(t *testing.T) {
+	// Primary hypothesis: decrease ns_per_eval by at least 5%.
+	hyp := &entity.Hypothesis{Predicts: entity.Predicts{
+		Instrument: "ns_per_eval",
+		Direction:  "decrease",
+		MinEffect:  0.05,
+	}}
+	// Goal declares size as a rescuer with a 2% min_effect and a 2%
+	// neutral band on the primary.
+	goal := &entity.Goal{
+		Objective:       entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
+		NeutralBandFrac: 0.02,
+		Rescuers: []entity.Rescuer{{
+			Instrument: "sim_total_bytes",
+			Direction:  "decrease",
+			MinEffect:  0.02,
+		}},
+	}
+	mkCmp := func(deltaFrac, ciLow, ciHigh float64) *stats.Comparison {
+		return &stats.Comparison{
+			NBaseline: 10, NCandidate: 10,
+			DeltaFrac: deltaFrac, CILowFrac: ciLow, CIHighFrac: ciHigh,
+		}
+	}
+
+	t.Run("primary clean win does not consult rescuers", func(t *testing.T) {
+		ctx := firewall.StrictContext{
+			Goal: goal,
+			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+				t.Fatalf("rescuer should not be consulted when primary passes")
+				return nil, ""
+			},
+		}
+		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp,
+			mkCmp(-0.20, -0.30, -0.10), ctx)
+		if !d.Passed || d.Downgraded || d.RescuedBy != "" {
+			t.Fatalf("expected clean primary win, got %+v", d)
+		}
+	})
+
+	t.Run("primary neutral and rescuer wins rescues verdict", func(t *testing.T) {
+		// Primary delta is within the 2% band and CI crosses zero.
+		prim := mkCmp(0.005, -0.01, 0.02)
+		// Rescuer cleanly beats its own strict check.
+		resc := mkCmp(-0.10, -0.15, -0.05)
+		ctx := firewall.StrictContext{
+			Goal: goal,
+			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+				if instrument != "sim_total_bytes" {
+					t.Fatalf("unexpected rescuer instrument %q", instrument)
+				}
+				return resc, ""
+			},
+		}
+		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
+		if !d.Passed || d.Downgraded {
+			t.Fatalf("expected rescue, got %+v", d)
+		}
+		if d.RescuedBy != "sim_total_bytes" {
+			t.Errorf("rescued_by = %q, want sim_total_bytes", d.RescuedBy)
+		}
+		if d.FinalVerdict != entity.VerdictSupported {
+			t.Errorf("final verdict = %q, want supported", d.FinalVerdict)
+		}
+		if len(d.ClauseChecks) != 1 || !d.ClauseChecks[0].Passed {
+			t.Errorf("expected one passing clause check, got %+v", d.ClauseChecks)
+		}
+	})
+
+	t.Run("primary neutral but no rescuer passes yields inconclusive", func(t *testing.T) {
+		prim := mkCmp(0.005, -0.01, 0.02)
+		// Rescuer trend is in the right direction but CI crosses zero.
+		resc := mkCmp(-0.10, -0.20, 0.01)
+		ctx := firewall.StrictContext{
+			Goal: goal,
+			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+				return resc, ""
+			},
+		}
+		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade (no rescuer passed), got %+v", d)
+		}
+		if d.RescuedBy != "" {
+			t.Errorf("rescued_by should be empty when no rescuer passes, got %q", d.RescuedBy)
+		}
+	})
+
+	t.Run("primary structurally regresses — rescue does not fire", func(t *testing.T) {
+		// Primary delta 5% above the neutral band; direction=decrease so this
+		// is a real regression. Rescue must not save it.
+		prim := mkCmp(0.05, 0.03, 0.08)
+		// Rescuer would pass cleanly if consulted.
+		resc := mkCmp(-0.10, -0.15, -0.05)
+		ctx := firewall.StrictContext{
+			Goal: goal,
+			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+				return resc, ""
+			},
+		}
+		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade despite passing rescuer (primary regressed), got %+v", d)
+		}
+		if d.RescuedBy != "" {
+			t.Errorf("rescued_by should be empty when primary regresses, got %q", d.RescuedBy)
+		}
+	})
+
+	t.Run("rescuer missing observations — clause check records no_data reason", func(t *testing.T) {
+		prim := mkCmp(0.005, -0.01, 0.02)
+		ctx := firewall.StrictContext{
+			Goal: goal,
+			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+				return nil, "no observations on \"sim_total_bytes\" for candidate E-0001"
+			},
+		}
+		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("expected downgrade when rescuer has no data, got %+v", d)
+		}
+		if d.RescuedBy != "" {
+			t.Errorf("rescued_by should be empty, got %q", d.RescuedBy)
+		}
+	})
+
+	t.Run("plain CheckStrictVerdict without context never rescues", func(t *testing.T) {
+		prim := mkCmp(0.005, -0.01, 0.02)
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp, prim)
+		if d.Passed || !d.Downgraded {
+			t.Fatalf("plain form should downgrade, got %+v", d)
+		}
+	})
+}
+
+func TestValidateGoalRescuers(t *testing.T) {
+	cfg := &store.Config{Instruments: map[string]store.Instrument{
+		"ns_per_eval":     {},
+		"sim_total_bytes": {},
+		"host_test":       {},
+	}}
+	baseGoal := func() *entity.Goal {
+		return &entity.Goal{
+			Objective:   entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
+			Constraints: []entity.Constraint{{Instrument: "host_test", Require: "pass"}},
+		}
+	}
+
+	t.Run("no rescuers is fine", func(t *testing.T) {
+		if err := firewall.ValidateGoal(baseGoal(), cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rescuers without neutral_band_frac rejected", func(t *testing.T) {
+		g := baseGoal()
+		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02}}
+		err := firewall.ValidateGoal(g, cfg)
+		if err == nil || !strings.Contains(err.Error(), "neutral_band_frac") {
+			t.Fatalf("expected neutral_band_frac error, got %v", err)
+		}
+	})
+
+	t.Run("rescuer pointing at objective rejected", func(t *testing.T) {
+		g := baseGoal()
+		g.NeutralBandFrac = 0.02
+		g.Rescuers = []entity.Rescuer{{Instrument: "ns_per_eval", Direction: "decrease", MinEffect: 0.02}}
+		err := firewall.ValidateGoal(g, cfg)
+		if err == nil || !strings.Contains(err.Error(), "equals the goal objective") {
+			t.Fatalf("expected self-rescue error, got %v", err)
+		}
+	})
+
+	t.Run("unregistered rescuer instrument rejected", func(t *testing.T) {
+		g := baseGoal()
+		g.NeutralBandFrac = 0.02
+		g.Rescuers = []entity.Rescuer{{Instrument: "unregistered", Direction: "decrease", MinEffect: 0.02}}
+		err := firewall.ValidateGoal(g, cfg)
+		if err == nil || !strings.Contains(err.Error(), "not registered") {
+			t.Fatalf("expected not-registered error, got %v", err)
+		}
+	})
+
+	t.Run("well-formed rescuer passes", func(t *testing.T) {
+		g := baseGoal()
+		g.NeutralBandFrac = 0.02
+		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02}}
+		if err := firewall.ValidateGoal(g, cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestCheckInspiredByLessonsReviewed(t *testing.T) {
 	t.Run("allows active reviewed hypothesis chain", func(t *testing.T) {
 		reader := fakeInspiredByReader{

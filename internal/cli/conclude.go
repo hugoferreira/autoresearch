@@ -135,8 +135,8 @@ downgraded since there is no comparator).`,
 			if err != nil {
 				return err
 			}
-			goal, err := s.ActiveGoal()
-			if err == nil {
+			goal, goalErr := s.ActiveGoal()
+			if goalErr == nil {
 				concls, _ := s.ListConclusions()
 				frontierRows, _ := computeFrontier(s, goal, concls)
 				if len(frontierRows) > 0 {
@@ -176,34 +176,63 @@ downgraded since there is no comparator).`,
 				}
 			}
 
-			// Apply strict firewall (always against absolute baseline).
-			decision := firewall.CheckStrictVerdict(verdict, hyp, cmp)
+			// Apply strict firewall (always against absolute baseline). When an
+			// active goal declares rescuers, build a callback that lets the
+			// firewall compute the same-baseline comparison on any rescuer
+			// instrument; the firewall uses it to decide whether a failing
+			// primary can be rescued by a goal-level secondary.
+			strictCtx := firewall.StrictContext{}
+			if goal != nil && len(goal.Rescuers) > 0 && goal.NeutralBandFrac > 0 {
+				candAll, _ := s.ListObservationsForExperiment(candExp)
+				var baseAll []*entity.Observation
+				if baselineExp != "" {
+					baseAll, _ = s.ListObservationsForExperiment(baselineExp)
+				}
+				strictCtx = firewall.StrictContext{
+					Goal: goal,
+					RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+						cs := samplesForInstrument(candAll, instrument)
+						if len(cs) == 0 {
+							return nil, fmt.Sprintf("no observations on %q for candidate %s", instrument, candExp)
+						}
+						bs := samplesForInstrument(baseAll, instrument)
+						if len(bs) == 0 {
+							return nil, fmt.Sprintf("no observations on %q for baseline %s", instrument, baselineExp)
+						}
+						v := stats.CompareSamples(cs, bs, iters, 0)
+						return &v, ""
+					},
+				}
+			}
+			decision := firewall.CheckStrictVerdictWithContext(verdict, hyp, cmp, strictCtx)
 
 			// Build conclusion record.
 			effect := buildEffect(hyp.Predicts.Instrument, cSamples, bSamples, cmp)
 
 			strictRec := entity.Strict{
-				Passed:  decision.Passed,
-				Reasons: decision.Reasons,
+				Passed:    decision.Passed,
+				RescuedBy: decision.RescuedBy,
+				Reasons:   decision.Reasons,
 			}
 			if decision.Downgraded {
 				strictRec.RequestedFrom = verdict
 			}
 
 			concl := &entity.Conclusion{
-				Hypothesis:     hypID,
-				Verdict:        decision.FinalVerdict,
-				Observations:   obsList,
-				CandidateExp:   candExp,
-				BaselineExp:    baselineExp,
-				Effect:         effect,
-				IncrementalExp: incrementalExp,
-				StatTest:       "mann_whitney_u",
-				Strict:         strictRec,
-				Author:         or(author, "agent:analyst"),
-				ReviewedBy:     reviewedBy,
-				CreatedAt:      nowUTC(),
-				Body:           interpretationBody(interpretation, verdict, decision),
+				Hypothesis:      hypID,
+				Verdict:         decision.FinalVerdict,
+				Observations:    obsList,
+				CandidateExp:    candExp,
+				BaselineExp:     baselineExp,
+				Effect:          effect,
+				IncrementalExp:  incrementalExp,
+				SecondaryChecks: decision.ClauseChecks,
+				StatTest:        "mann_whitney_u",
+				Strict:          strictRec,
+				Author:          or(author, "agent:analyst"),
+				ReviewedBy:      reviewedBy,
+				CreatedAt:       nowUTC(),
+				Body:            interpretationBody(interpretation, verdict, decision),
 			}
 			if incrCmp != nil {
 				incrEffect := buildEffect(hyp.Predicts.Instrument, cSamples, flattenSamples(incrObs), incrCmp)
@@ -277,6 +306,9 @@ downgraded since there is no comparator).`,
 					eventData["incremental_delta_frac"] = concl.IncrementalEffect.DeltaFrac
 				}
 			}
+			if decision.RescuedBy != "" {
+				eventData["rescued_by"] = decision.RescuedBy
+			}
 			kind := "conclusion.write"
 			if decision.Downgraded {
 				kind = "conclusion.downgrade"
@@ -296,6 +328,12 @@ downgraded since there is no comparator).`,
 			}
 			if decision.Downgraded {
 				w.Textf("⚠ DOWNGRADED: requested %q → %q\n", verdict, decision.FinalVerdict)
+				for _, r := range decision.Reasons {
+					w.Textf("  - %s\n", r)
+				}
+				w.Textln("")
+			} else if decision.RescuedBy != "" {
+				w.Textf("⚕ RESCUED: primary was neutral; verdict supported by %s\n", decision.RescuedBy)
 				for _, r := range decision.Reasons {
 					w.Textf("  - %s\n", r)
 				}
@@ -360,7 +398,26 @@ func downgradeLabel(d firewall.VerdictDecision) string {
 	if d.Downgraded {
 		return "(downgraded) "
 	}
+	if d.RescuedBy != "" {
+		return "(rescued) "
+	}
 	return ""
+}
+
+// samplesForInstrument flattens every per-sample slice across observations
+// on the given instrument into a single float slice. Used to assemble the
+// candidate/baseline sample pair for a goal rescuer at conclude time.
+func samplesForInstrument(obs []*entity.Observation, instrument string) []float64 {
+	var filtered []*entity.Observation
+	for _, o := range obs {
+		if o.Instrument == instrument {
+			filtered = append(filtered, o)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return flattenSamples(filtered)
 }
 
 // buildEffect constructs an Effect from samples and an optional comparison.

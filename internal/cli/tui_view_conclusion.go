@@ -100,6 +100,8 @@ func (v *conclusionListView) view(width, height int) string {
 		extras := ""
 		if c.Strict.RequestedFrom != "" {
 			extras = tuiDim.Render("  ↓from " + c.Strict.RequestedFrom)
+		} else if c.Strict.RescuedBy != "" {
+			extras = tuiYellow.Render("  ⚕rescued:" + c.Strict.RescuedBy)
 		}
 		review := " "
 		if c.ReviewedBy != "" {
@@ -178,6 +180,31 @@ func (v *conclusionDetailView) view(width, height int) string {
 		lines = append(lines, tuiBoldYellow.Render("⚠ downgraded from "+c.Strict.RequestedFrom))
 		for _, r := range c.Strict.Reasons {
 			lines = append(lines, "  · "+r)
+		}
+	} else if c.Strict.RescuedBy != "" {
+		lines = append(lines, "")
+		lines = append(lines, tuiBoldYellow.Render("⚕ rescued by "+c.Strict.RescuedBy+" — primary was neutral"))
+		for _, r := range c.Strict.Reasons {
+			lines = append(lines, "  · "+r)
+		}
+	}
+	if len(c.SecondaryChecks) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, tuiBold.Render("Secondary checks:"))
+		for _, cc := range c.SecondaryChecks {
+			status := tuiRed.Render("fail")
+			if cc.Passed {
+				status = tuiGreen.Render("pass")
+			}
+			header := fmt.Sprintf("  %s (%s) %s", cc.Instrument, cc.Role, status)
+			if cc.Effect != nil {
+				header += fmt.Sprintf("  Δfrac=%+.4f  CI[%+.4f,%+.4f]",
+					cc.Effect.DeltaFrac, cc.Effect.CILowFrac, cc.Effect.CIHighFrac)
+			}
+			lines = append(lines, header)
+			for _, r := range cc.Reasons {
+				lines = append(lines, "    · "+r)
+			}
 		}
 	}
 	lines = append(lines, "")

@@ -322,6 +322,8 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 			extras := ""
 			if c.Strict.RequestedFrom != "" {
 				extras = tuiDim.Render("  (downgraded from " + c.Strict.RequestedFrom + ")")
+			} else if c.Strict.RescuedBy != "" {
+				extras = tuiYellow.Render("  (rescued by " + c.Strict.RescuedBy + ")")
 			}
 			lines = append(lines, fmt.Sprintf("  %s  %s  delta_frac=%.4f  p=%.4g%s",
 				c.ID, tuiVerdictBadge(c.Verdict), c.Effect.DeltaFrac, c.Effect.PValue, extras))

@@ -83,6 +83,54 @@ func ValidateGoal(g *entity.Goal, cfg *store.Config) error {
 			return fmt.Errorf("constraint[%d] must set at least one of max, min, or require", i)
 		}
 	}
+	if err := validateGoalRescuers(g, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateGoalRescuers checks that rescuer clauses on a goal are
+// well-formed. A rescuer is optional, but when present must name a
+// registered instrument, declare a direction, and carry a positive
+// min_effect (rescue is still a scientific claim). Rescuers may overlap
+// with constraints — declaring a max cap on size AND marking size as a
+// rescuer is a valid pattern — but cannot equal the goal's objective
+// instrument (that would make the objective self-rescue, which is
+// nonsense). A goal with rescuers must also declare a positive
+// neutral_band_frac; rescue only fires when the primary is within that
+// band, so leaving it zero silently disables rescue.
+func validateGoalRescuers(g *entity.Goal, cfg *store.Config) error {
+	if g == nil || len(g.Rescuers) == 0 {
+		return nil
+	}
+	if g.NeutralBandFrac <= 0 {
+		return errors.New("goal declares rescuers but neutral_band_frac is unset (rescue only fires when |delta_frac| on the primary is within neutral_band_frac — set it explicitly)")
+	}
+	seen := map[string]struct{}{}
+	for i, r := range g.Rescuers {
+		inst := strings.TrimSpace(r.Instrument)
+		if inst == "" {
+			return fmt.Errorf("rescuer[%d] has no `instrument` field", i)
+		}
+		if inst == strings.TrimSpace(g.Objective.Instrument) {
+			return fmt.Errorf("rescuer[%d] instrument %q equals the goal objective — the primary cannot rescue itself", i, inst)
+		}
+		if _, ok := cfg.Instruments[inst]; !ok {
+			return fmt.Errorf("rescuer[%d] instrument %q is not registered in config.yaml", i, inst)
+		}
+		if _, dup := seen[inst]; dup {
+			return fmt.Errorf("rescuer[%d] instrument %q is declared more than once", i, inst)
+		}
+		seen[inst] = struct{}{}
+		switch r.Direction {
+		case "increase", "decrease":
+		default:
+			return fmt.Errorf("rescuer[%d] direction must be 'increase' or 'decrease', got %q", i, r.Direction)
+		}
+		if r.MinEffect <= 0 {
+			return fmt.Errorf("rescuer[%d] min_effect must be > 0 (rescue is still a scientific claim and needs a quantitative threshold)", i)
+		}
+	}
 	return nil
 }
 
@@ -112,6 +160,27 @@ type VerdictDecision struct {
 	Passed       bool
 	Downgraded   bool
 	Reasons      []string
+	// RescuedBy names the goal rescuer instrument whose strict check saved
+	// the verdict. Empty for the clean primary-wins path.
+	RescuedBy string
+	// ClauseChecks is the audit trail for any goal rescuers consulted. One
+	// entry per rescuer evaluated, whether it passed, failed, or was skipped
+	// for missing data. Empty when rescue was not consulted.
+	ClauseChecks []entity.ClauseCheck
+}
+
+// StrictContext carries the extra inputs the firewall needs to consider
+// goal-level rescuers on a failed primary check. It is optional: a
+// zero-value StrictContext makes CheckStrictVerdictWithContext behave
+// exactly like CheckStrictVerdict.
+type StrictContext struct {
+	Goal *entity.Goal
+	// RescuerComparison returns a stats.Comparison for the given rescuer
+	// instrument, computed against the same candidate/baseline pair used
+	// for the primary check. Returns (nil, "<reason>") when no comparison
+	// is possible (e.g. no observations on that instrument on either side).
+	// The reason is recorded in the rescuer's ClauseCheck.
+	RescuerComparison func(instrument string) (*stats.Comparison, string)
 }
 
 // CheckStrictVerdict applies the strict-mode firewall to a requested verdict
@@ -127,7 +196,20 @@ type VerdictDecision struct {
 //
 // When "supported" is requested and the evidence doesn't justify it, the
 // verdict is downgraded to "inconclusive" and the reasons are recorded.
+//
+// This form takes no goal-level context and therefore never rescues. Callers
+// that want goal-rescuer support should use CheckStrictVerdictWithContext.
 func CheckStrictVerdict(requested string, h *entity.Hypothesis, c *stats.Comparison) VerdictDecision {
+	return CheckStrictVerdictWithContext(requested, h, c, StrictContext{})
+}
+
+// CheckStrictVerdictWithContext is the rescuer-aware form of the strict
+// firewall. If the primary "supported" check fails AND |delta_frac| is within
+// goal.NeutralBandFrac AND ctx.Goal has rescuers AND ctx.RescuerComparison is
+// non-nil, each rescuer runs its own strict check on the same sample pair.
+// The first rescuer to pass rescues the verdict; d.RescuedBy names the
+// winner and d.ClauseChecks audits every rescuer considered.
+func CheckStrictVerdictWithContext(requested string, h *entity.Hypothesis, c *stats.Comparison, ctx StrictContext) VerdictDecision {
 	d := VerdictDecision{FinalVerdict: requested, Passed: true}
 	switch requested {
 	case entity.VerdictSupported:
@@ -152,6 +234,10 @@ func CheckStrictVerdict(requested string, h *entity.Hypothesis, c *stats.Compari
 			d.Reasons = append(d.Reasons, fmt.Sprintf("|delta_frac| %.4f < min_effect %.4f — effect too small to call supported", math.Abs(c.DeltaFrac), h.Predicts.MinEffect))
 		}
 		if len(d.Reasons) > 0 {
+			// Primary failed. Try rescue before finalizing the downgrade.
+			if rescued := tryRescue(h, c, ctx, d.Reasons); rescued != nil {
+				return *rescued
+			}
 			d.Passed = false
 			d.Downgraded = true
 			d.FinalVerdict = entity.VerdictInconclusive
@@ -181,6 +267,119 @@ func CheckStrictVerdict(requested string, h *entity.Hypothesis, c *stats.Compari
 		d.Reasons = append(d.Reasons, fmt.Sprintf("unknown verdict %q (want supported|refuted|inconclusive)", requested))
 	}
 	return d
+}
+
+// tryRescue attempts to salvage a failed "supported" primary check by
+// consulting goal-level rescuers. Returns a decision pointer when a rescuer
+// passes; nil otherwise (caller should finalize the downgrade). The primary
+// Reasons are preserved and annotated with the rescue citation so the audit
+// trail tells the full story.
+func tryRescue(_ *entity.Hypothesis, c *stats.Comparison, ctx StrictContext, primaryReasons []string) *VerdictDecision {
+	if ctx.Goal == nil || len(ctx.Goal.Rescuers) == 0 || ctx.RescuerComparison == nil {
+		return nil
+	}
+	if ctx.Goal.NeutralBandFrac <= 0 {
+		return nil
+	}
+	if c == nil {
+		return nil
+	}
+	if math.Abs(c.DeltaFrac) > ctx.Goal.NeutralBandFrac {
+		// Primary moved outside the user-declared neutral band — this is a
+		// real regression (or a real win that already failed some other gate).
+		// Rescue only saves neutrals, not losses.
+		return nil
+	}
+
+	var clauseChecks []entity.ClauseCheck
+	var winner *entity.ClauseCheck
+	for i := range ctx.Goal.Rescuers {
+		r := ctx.Goal.Rescuers[i]
+		clauseChecks = append(clauseChecks, evaluateRescuer(r, ctx))
+		if winner == nil && clauseChecks[len(clauseChecks)-1].Passed {
+			winner = &clauseChecks[len(clauseChecks)-1]
+		}
+	}
+	if winner == nil {
+		return nil
+	}
+
+	d := VerdictDecision{
+		FinalVerdict: entity.VerdictSupported,
+		Passed:       true,
+		Downgraded:   false,
+		RescuedBy:    winner.Instrument,
+		ClauseChecks: clauseChecks,
+	}
+	// Preserve the primary reasons so readers see why rescue was needed.
+	d.Reasons = append(d.Reasons, primaryReasons...)
+	d.Reasons = append(d.Reasons, fmt.Sprintf("rescued by %s: |delta_frac| %.4f <= neutral_band_frac %.4f on primary, and rescuer met its own strict check",
+		winner.Instrument, math.Abs(c.DeltaFrac), ctx.Goal.NeutralBandFrac))
+	return &d
+}
+
+// evaluateRescuer runs the same strict-check logic as the primary path on
+// a single rescuer clause, returning a ClauseCheck. Missing data or an
+// unrecognised direction yields a non-passing entry with an explanatory
+// reason so the audit trail is self-describing.
+func evaluateRescuer(r entity.Rescuer, ctx StrictContext) entity.ClauseCheck {
+	cc := entity.ClauseCheck{
+		Role:       "rescuer",
+		Instrument: r.Instrument,
+		Direction:  r.Direction,
+		MinEffect:  r.MinEffect,
+	}
+	cmp, missingReason := ctx.RescuerComparison(r.Instrument)
+	if cmp == nil {
+		if strings.TrimSpace(missingReason) == "" {
+			missingReason = "no comparison available for rescuer"
+		}
+		cc.Reasons = []string{missingReason}
+		return cc
+	}
+
+	effect := buildEffectFromComparison(r.Instrument, cmp)
+	cc.Effect = &effect
+
+	if cmp.NBaseline < 2 || cmp.NCandidate < 2 {
+		cc.Reasons = append(cc.Reasons, "no comparison available (baseline or candidate has fewer than 2 samples)")
+		return cc
+	}
+	switch r.Direction {
+	case "decrease":
+		if cmp.CIHighFrac >= 0 {
+			cc.Reasons = append(cc.Reasons, fmt.Sprintf("95%% CI upper bound on delta_frac is %+.4f — crosses zero (not a clean decrease)", cmp.CIHighFrac))
+		}
+	case "increase":
+		if cmp.CILowFrac <= 0 {
+			cc.Reasons = append(cc.Reasons, fmt.Sprintf("95%% CI lower bound on delta_frac is %+.4f — crosses zero (not a clean increase)", cmp.CILowFrac))
+		}
+	default:
+		cc.Reasons = append(cc.Reasons, fmt.Sprintf("unknown rescuer direction %q", r.Direction))
+	}
+	if math.Abs(cmp.DeltaFrac) < r.MinEffect {
+		cc.Reasons = append(cc.Reasons, fmt.Sprintf("|delta_frac| %.4f < min_effect %.4f — rescuer effect too small", math.Abs(cmp.DeltaFrac), r.MinEffect))
+	}
+	cc.Passed = len(cc.Reasons) == 0
+	return cc
+}
+
+// buildEffectFromComparison mirrors cli.buildEffect but stays inside the
+// firewall package so the firewall doesn't take a dependency on cli.
+func buildEffectFromComparison(instrument string, cmp *stats.Comparison) entity.Effect {
+	return entity.Effect{
+		Instrument: instrument,
+		DeltaAbs:   cmp.DeltaAbs,
+		DeltaFrac:  cmp.DeltaFrac,
+		CILowAbs:   cmp.CILowAbs,
+		CIHighAbs:  cmp.CIHighAbs,
+		CILowFrac:  cmp.CILowFrac,
+		CIHighFrac: cmp.CIHighFrac,
+		PValue:     cmp.PValue,
+		CIMethod:   cmp.CIMethod,
+		NCandidate: cmp.NCandidate,
+		NBaseline:  cmp.NBaseline,
+	}
 }
 
 // BudgetBreach describes which budget rule a would-be mutation violates.
@@ -680,6 +879,9 @@ func allowedHypothesisInstruments(goal *entity.Goal) []string {
 	add(goal.Objective.Instrument)
 	for _, c := range goal.Constraints {
 		add(c.Instrument)
+	}
+	for _, r := range goal.Rescuers {
+		add(r.Instrument)
 	}
 	return out
 }

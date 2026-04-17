@@ -26,14 +26,31 @@ type Conclusion struct {
 	// "how much did this improve over the current best?" as opposed to
 	// the absolute baseline which answers "how much did this improve
 	// over the original unoptimized code?"
-	IncrementalExp    string  `yaml:"incremental_experiment,omitempty" json:"incremental_experiment,omitempty"`
-	IncrementalEffect *Effect `yaml:"incremental_effect,omitempty"     json:"incremental_effect,omitempty"`
-	StatTest          string  `yaml:"stat_test"                     json:"stat_test"`
-	Strict            Strict  `yaml:"strict_check"                  json:"strict_check"`
-	Author            string  `yaml:"author"                        json:"author"`
-	ReviewedBy        string  `yaml:"reviewed_by,omitempty"         json:"reviewed_by,omitempty"`
-	CreatedAt         time.Time `yaml:"created_at"                    json:"created_at"`
-	Body              string    `yaml:"-"                             json:"body,omitempty"`
+	IncrementalExp    string        `yaml:"incremental_experiment,omitempty" json:"incremental_experiment,omitempty"`
+	IncrementalEffect *Effect       `yaml:"incremental_effect,omitempty"     json:"incremental_effect,omitempty"`
+	SecondaryChecks   []ClauseCheck `yaml:"secondary_checks,omitempty"       json:"secondary_checks,omitempty"`
+	StatTest          string        `yaml:"stat_test"                        json:"stat_test"`
+	Strict            Strict        `yaml:"strict_check"                     json:"strict_check"`
+	Author            string        `yaml:"author"                           json:"author"`
+	ReviewedBy        string        `yaml:"reviewed_by,omitempty"            json:"reviewed_by,omitempty"`
+	CreatedAt         time.Time     `yaml:"created_at"                       json:"created_at"`
+	Body              string        `yaml:"-"                                json:"body,omitempty"`
+}
+
+// ClauseCheck is the audit trail for a single non-primary prediction clause
+// (today: a goal rescuer) evaluated during conclude. It records which
+// instrument was checked, the effect relative to the same baseline used for
+// the primary check, whether the strict check passed, and any reasons —
+// notably "no_data" when observations for the clause's instrument are
+// missing on the candidate or baseline.
+type ClauseCheck struct {
+	Role       string   `yaml:"role"                json:"role"`
+	Instrument string   `yaml:"instrument"          json:"instrument"`
+	Direction  string   `yaml:"direction,omitempty" json:"direction,omitempty"`
+	MinEffect  float64  `yaml:"min_effect,omitempty" json:"min_effect,omitempty"`
+	Effect     *Effect  `yaml:"effect,omitempty"    json:"effect,omitempty"`
+	Passed     bool     `yaml:"passed"              json:"passed"`
+	Reasons    []string `yaml:"reasons,omitempty"   json:"reasons,omitempty"`
 }
 
 type Effect struct {
@@ -53,6 +70,7 @@ type Effect struct {
 type Strict struct {
 	Passed        bool     `yaml:"passed"                    json:"passed"`
 	RequestedFrom string   `yaml:"downgraded_from,omitempty" json:"downgraded_from,omitempty"`
+	RescuedBy     string   `yaml:"rescued_by,omitempty"      json:"rescued_by,omitempty"`
 	Reasons       []string `yaml:"reasons,omitempty"         json:"reasons,omitempty"`
 }
 

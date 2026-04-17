@@ -104,6 +104,80 @@ focus on the hot inner loop
 	}
 }
 
+func TestGoalRescuersRoundTrip(t *testing.T) {
+	flash := 131072.0
+	g := &entity.Goal{
+		SchemaVersion: entity.GoalSchemaVersion,
+		Objective: entity.Objective{
+			Instrument: "ns_per_eval",
+			Direction:  "decrease",
+		},
+		Constraints: []entity.Constraint{
+			{Instrument: "size_flash", Max: &flash},
+			{Instrument: "host_test", Require: "pass"},
+		},
+		Rescuers: []entity.Rescuer{
+			{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02},
+		},
+		NeutralBandFrac: 0.02,
+	}
+	data, err := g.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := entity.ParseGoal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Rescuers) != 1 {
+		t.Fatalf("rescuers round-trip: got %d, want 1", len(back.Rescuers))
+	}
+	r := back.Rescuers[0]
+	if r.Instrument != "sim_total_bytes" || r.Direction != "decrease" || r.MinEffect != 0.02 {
+		t.Errorf("rescuer mismatch: %+v", r)
+	}
+	if back.NeutralBandFrac != 0.02 {
+		t.Errorf("neutral_band_frac: got %g, want 0.02", back.NeutralBandFrac)
+	}
+	if back.SchemaVersion != entity.GoalSchemaVersion {
+		t.Errorf("schema_version round-trip: got %d, want %d", back.SchemaVersion, entity.GoalSchemaVersion)
+	}
+}
+
+func TestGoalLegacyV3ParsesAndUpgrades(t *testing.T) {
+	// A goal on disk before rescuers were a concept. schema_version=3, no
+	// rescuers or neutral_band_frac. It must parse cleanly and upgrade to
+	// the current schema version on read without losing any fields.
+	data := []byte(`---
+schema_version: 3
+objective:
+  instrument: ns_per_eval
+  target: bench
+  direction: decrease
+constraints:
+  - instrument: host_test
+    require: pass
+---
+
+# Steering
+
+focus on the hot inner loop
+`)
+	g, err := entity.ParseGoal(data)
+	if err != nil {
+		t.Fatalf("ParseGoal: %v", err)
+	}
+	if len(g.Rescuers) != 0 {
+		t.Errorf("v3 goal should parse with empty rescuers, got %+v", g.Rescuers)
+	}
+	if g.NeutralBandFrac != 0 {
+		t.Errorf("v3 goal should have zero neutral_band_frac, got %g", g.NeutralBandFrac)
+	}
+	if g.SchemaVersion != 3 {
+		t.Errorf("ParseGoal should preserve on-disk schema version; got %d, want 3", g.SchemaVersion)
+	}
+}
+
 func TestGoalDefaultsThresholdPolicyWhenOmitted(t *testing.T) {
 	data := []byte(`---
 objective:

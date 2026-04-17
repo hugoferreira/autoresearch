@@ -60,6 +60,8 @@ type goalFlags struct {
 	constraintMax    []string
 	constraintMin    []string
 	constraintReq    []string
+	rescuers         []string
+	neutralBandFrac  float64
 	steeringText     string
 }
 
@@ -73,6 +75,8 @@ func addGoalBodyFlags(c *cobra.Command, f *goalFlags) {
 	c.Flags().StringArrayVar(&f.constraintMax, "constraint-max", nil, "max constraint as 'instrument=value' (repeatable)")
 	c.Flags().StringArrayVar(&f.constraintMin, "constraint-min", nil, "min constraint as 'instrument=value' (repeatable)")
 	c.Flags().StringArrayVar(&f.constraintReq, "constraint-require", nil, "require constraint as 'instrument=value' (repeatable, e.g. 'host_test=pass')")
+	c.Flags().StringArrayVar(&f.rescuers, "rescuer", nil, "goal rescuer as 'instrument:direction:min_effect' (repeatable, e.g. 'sim_total_bytes:decrease:0.02'); requires --neutral-band-frac")
+	c.Flags().Float64Var(&f.neutralBandFrac, "neutral-band-frac", 0, "|delta_frac| within this band on the primary counts as \"neutral\" for rescue purposes (required when --rescuer is set)")
 	c.Flags().StringVar(&f.steeringText, "steering", "", "initial steering note to place in the # Steering section")
 }
 
@@ -82,7 +86,8 @@ func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
 	fileMode := f.file != ""
 	flagMode := f.objInstrument != "" || f.objDirection != "" ||
 		f.successThreshold != 0 || f.onSuccess != "" ||
-		len(f.constraintMax) > 0 || len(f.constraintMin) > 0 || len(f.constraintReq) > 0
+		len(f.constraintMax) > 0 || len(f.constraintMin) > 0 || len(f.constraintReq) > 0 ||
+		len(f.rescuers) > 0 || f.neutralBandFrac != 0
 	if fileMode && flagMode {
 		return nil, errors.New("--file and goal-construction flags are mutually exclusive")
 	}
@@ -97,7 +102,7 @@ func loadGoalFromFlags(f *goalFlags) (*entity.Goal, error) {
 		return entity.ParseGoal(data)
 	}
 	return buildGoalFromFlags(f.objInstrument, f.objTarget, f.objDirection, f.successThreshold, f.onSuccess,
-		f.constraintMax, f.constraintMin, f.constraintReq, f.steeringText)
+		f.constraintMax, f.constraintMin, f.constraintReq, f.rescuers, f.neutralBandFrac, f.steeringText)
 }
 
 func goalSetCmd() *cobra.Command {
@@ -411,7 +416,8 @@ func buildGoalFromFlags(
 	instrument, target, direction string,
 	successThreshold float64,
 	onSuccess string,
-	maxSpecs, minSpecs, reqSpecs []string,
+	maxSpecs, minSpecs, reqSpecs, rescuerSpecs []string,
+	neutralBandFrac float64,
 	steering string,
 ) (*entity.Goal, error) {
 	if successThreshold < 0 {
@@ -467,6 +473,20 @@ func buildGoalFromFlags(
 	if len(g.Constraints) == 0 {
 		return nil, errors.New("at least one --constraint-max / --constraint-min / --constraint-require is required")
 	}
+	for _, spec := range rescuerSpecs {
+		r, err := parseRescuerSpec(spec)
+		if err != nil {
+			return nil, err
+		}
+		g.Rescuers = append(g.Rescuers, r)
+	}
+	if len(g.Rescuers) > 0 && neutralBandFrac <= 0 {
+		return nil, errors.New("--neutral-band-frac must be > 0 when --rescuer is set")
+	}
+	if len(g.Rescuers) == 0 && neutralBandFrac > 0 {
+		return nil, errors.New("--neutral-band-frac is only meaningful with at least one --rescuer")
+	}
+	g.NeutralBandFrac = neutralBandFrac
 	body := "# Steering\n\n"
 	if strings.TrimSpace(steering) != "" {
 		body += "- " + strings.TrimSpace(steering) + "\n"
@@ -475,6 +495,34 @@ func buildGoalFromFlags(
 	}
 	g.Body = body
 	return g, nil
+}
+
+// parseRescuerSpec parses "instrument:direction:min_effect" into a Rescuer.
+// Example: "sim_total_bytes:decrease:0.02". Direction must be
+// increase|decrease; min_effect must be a positive float.
+func parseRescuerSpec(spec string) (entity.Rescuer, error) {
+	spec = strings.TrimSpace(spec)
+	parts := strings.Split(spec, ":")
+	if len(parts) != 3 {
+		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: expected 'instrument:direction:min_effect'", spec)
+	}
+	inst := strings.TrimSpace(parts[0])
+	dir := strings.TrimSpace(parts[1])
+	minStr := strings.TrimSpace(parts[2])
+	if inst == "" {
+		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: instrument is empty", spec)
+	}
+	if dir != "increase" && dir != "decrease" {
+		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: direction must be 'increase' or 'decrease', got %q", spec, dir)
+	}
+	min, err := strconv.ParseFloat(minStr, 64)
+	if err != nil {
+		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: min_effect %q is not a float: %w", spec, minStr, err)
+	}
+	if min <= 0 {
+		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: min_effect must be > 0", spec)
+	}
+	return entity.Rescuer{Instrument: inst, Direction: dir, MinEffect: min}, nil
 }
 
 func parseConstraintKV(spec, op string) (entity.Constraint, error) {

@@ -12,7 +12,7 @@ const (
 	GoalStatusActive    = "active"
 	GoalStatusConcluded = "concluded"
 	GoalStatusAbandoned = "abandoned"
-	GoalSchemaVersion   = 3
+	GoalSchemaVersion   = 4
 
 	GoalOnThresholdAskHuman               = "ask_human"
 	GoalOnThresholdStop                   = "stop"
@@ -21,18 +21,32 @@ const (
 )
 
 type Goal struct {
-	SchemaVersion int          `yaml:"schema_version,omitempty" json:"schema_version,omitempty"`
-	ID            string       `yaml:"id,omitempty"             json:"id,omitempty"`
-	Status        string       `yaml:"status,omitempty"         json:"status,omitempty"`
-	DerivedFrom   string       `yaml:"derived_from,omitempty"   json:"derived_from,omitempty"`
-	Trigger       string       `yaml:"trigger,omitempty"        json:"trigger,omitempty"`
-	CreatedAt     *time.Time   `yaml:"created_at,omitempty"     json:"created_at,omitempty"`
-	ClosedAt      *time.Time   `yaml:"closed_at,omitempty"      json:"closed_at,omitempty"`
-	ClosureReason string       `yaml:"closure_reason,omitempty" json:"closure_reason,omitempty"`
-	Objective     Objective    `yaml:"objective"                json:"objective"`
-	Completion    *Completion  `yaml:"completion,omitempty"     json:"completion,omitempty"`
-	Constraints   []Constraint `yaml:"constraints"              json:"constraints"`
-	Body          string       `yaml:"-"                        json:"body,omitempty"`
+	SchemaVersion   int          `yaml:"schema_version,omitempty"    json:"schema_version,omitempty"`
+	ID              string       `yaml:"id,omitempty"                json:"id,omitempty"`
+	Status          string       `yaml:"status,omitempty"            json:"status,omitempty"`
+	DerivedFrom     string       `yaml:"derived_from,omitempty"      json:"derived_from,omitempty"`
+	Trigger         string       `yaml:"trigger,omitempty"           json:"trigger,omitempty"`
+	CreatedAt       *time.Time   `yaml:"created_at,omitempty"        json:"created_at,omitempty"`
+	ClosedAt        *time.Time   `yaml:"closed_at,omitempty"         json:"closed_at,omitempty"`
+	ClosureReason   string       `yaml:"closure_reason,omitempty"    json:"closure_reason,omitempty"`
+	Objective       Objective    `yaml:"objective"                   json:"objective"`
+	Completion      *Completion  `yaml:"completion,omitempty"        json:"completion,omitempty"`
+	Constraints     []Constraint `yaml:"constraints"                 json:"constraints"`
+	Rescuers        []Rescuer    `yaml:"rescuers,omitempty"          json:"rescuers,omitempty"`
+	NeutralBandFrac float64      `yaml:"neutral_band_frac,omitempty" json:"neutral_band_frac,omitempty"`
+	Body            string       `yaml:"-"                           json:"body,omitempty"`
+}
+
+// Rescuer is a secondary-objective clause on a Goal. When the primary
+// objective's strict check would fail *only* because |delta_frac| is within
+// goal.NeutralBandFrac (i.e. "didn't lose" on the primary), the firewall
+// consults each rescuer's own strict check on the same candidate/baseline
+// pair. If any rescuer passes, the verdict is kept as "supported" with
+// strict.rescued_by naming the winning rescuer.
+type Rescuer struct {
+	Instrument string  `yaml:"instrument"          json:"instrument"`
+	Direction  string  `yaml:"direction"           json:"direction"`
+	MinEffect  float64 `yaml:"min_effect"          json:"min_effect"`
 }
 
 type Objective struct {
@@ -66,17 +80,19 @@ func ParseGoal(data []byte) (*Goal, error) {
 		DeprecatedTargetEffect *float64 `yaml:"target_effect,omitempty"`
 	}
 	type rawGoal struct {
-		SchemaVersion int          `yaml:"schema_version,omitempty"`
-		ID            string       `yaml:"id,omitempty"`
-		Status        string       `yaml:"status,omitempty"`
-		DerivedFrom   string       `yaml:"derived_from,omitempty"`
-		Trigger       string       `yaml:"trigger,omitempty"`
-		CreatedAt     *time.Time   `yaml:"created_at,omitempty"`
-		ClosedAt      *time.Time   `yaml:"closed_at,omitempty"`
-		ClosureReason string       `yaml:"closure_reason,omitempty"`
-		Objective     rawObjective `yaml:"objective"`
-		Completion    *Completion  `yaml:"completion,omitempty"`
-		Constraints   []Constraint `yaml:"constraints"`
+		SchemaVersion   int          `yaml:"schema_version,omitempty"`
+		ID              string       `yaml:"id,omitempty"`
+		Status          string       `yaml:"status,omitempty"`
+		DerivedFrom     string       `yaml:"derived_from,omitempty"`
+		Trigger         string       `yaml:"trigger,omitempty"`
+		CreatedAt       *time.Time   `yaml:"created_at,omitempty"`
+		ClosedAt        *time.Time   `yaml:"closed_at,omitempty"`
+		ClosureReason   string       `yaml:"closure_reason,omitempty"`
+		Objective       rawObjective `yaml:"objective"`
+		Completion      *Completion  `yaml:"completion,omitempty"`
+		Constraints     []Constraint `yaml:"constraints"`
+		Rescuers        []Rescuer    `yaml:"rescuers,omitempty"`
+		NeutralBandFrac float64      `yaml:"neutral_band_frac,omitempty"`
 	}
 
 	var raw rawGoal
@@ -110,8 +126,10 @@ func ParseGoal(data []byte) (*Goal, error) {
 			Target:     raw.Objective.Target,
 			Direction:  raw.Objective.Direction,
 		},
-		Completion:  raw.Completion,
-		Constraints: raw.Constraints,
+		Completion:      raw.Completion,
+		Constraints:     raw.Constraints,
+		Rescuers:        raw.Rescuers,
+		NeutralBandFrac: raw.NeutralBandFrac,
 	}
 	g.Body = string(body)
 	if g.SchemaVersion == 0 {

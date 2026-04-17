@@ -16,6 +16,8 @@ func TestBuildGoalFromFlags_DefaultsThresholdPolicy(t *testing.T) {
 		[]string{"size_flash=131072"},
 		nil,
 		nil,
+		nil,
+		0,
 		"",
 	)
 	if err != nil {
@@ -39,6 +41,8 @@ func TestBuildGoalFromFlags_RejectsOnSuccessWithoutThreshold(t *testing.T) {
 		[]string{"size_flash=131072"},
 		nil,
 		nil,
+		nil,
+		0,
 		"",
 	)
 	if err == nil {
@@ -56,10 +60,85 @@ func TestBuildGoalFromFlags_RejectsNegativeThreshold(t *testing.T) {
 		[]string{"size_flash=131072"},
 		nil,
 		nil,
+		nil,
+		0,
 		"",
 	)
 	if err == nil {
 		t.Fatal("expected negative threshold to be rejected")
+	}
+}
+
+func TestBuildGoalFromFlags_RescuersRequireNeutralBand(t *testing.T) {
+	_, err := buildGoalFromFlags(
+		"host_timing", "dsp_fir", "decrease",
+		0, "",
+		[]string{"size_flash=131072"}, nil, nil,
+		[]string{"sim_total_bytes:decrease:0.02"},
+		0,
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected rescuer without --neutral-band-frac to be rejected")
+	}
+}
+
+func TestBuildGoalFromFlags_NeutralBandWithoutRescuerRejected(t *testing.T) {
+	_, err := buildGoalFromFlags(
+		"host_timing", "dsp_fir", "decrease",
+		0, "",
+		[]string{"size_flash=131072"}, nil, nil,
+		nil,
+		0.02,
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected --neutral-band-frac without rescuer to be rejected")
+	}
+}
+
+func TestBuildGoalFromFlags_RescuerAccepted(t *testing.T) {
+	g, err := buildGoalFromFlags(
+		"host_timing", "dsp_fir", "decrease",
+		0, "",
+		[]string{"size_flash=131072"}, nil, nil,
+		[]string{"sim_total_bytes:decrease:0.02"},
+		0.02,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("buildGoalFromFlags: %v", err)
+	}
+	if len(g.Rescuers) != 1 || g.Rescuers[0].Instrument != "sim_total_bytes" || g.Rescuers[0].Direction != "decrease" || g.Rescuers[0].MinEffect != 0.02 {
+		t.Errorf("rescuer populated incorrectly: %+v", g.Rescuers)
+	}
+	if g.NeutralBandFrac != 0.02 {
+		t.Errorf("neutral_band_frac = %g, want 0.02", g.NeutralBandFrac)
+	}
+}
+
+func TestFrontierRowBetter_RescuerTiebreak(t *testing.T) {
+	goal := &entity.Goal{
+		Objective:       entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
+		NeutralBandFrac: 0.02,
+		Rescuers: []entity.Rescuer{
+			{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02},
+		},
+	}
+	// Same primary value, but a has smaller size → a should win.
+	a := frontierRow{Value: 100.0, TiebreakValues: []float64{512}}
+	b := frontierRow{Value: 100.5, TiebreakValues: []float64{600}} // within 1% band
+	if !frontierRowBetter(goal, a, b) {
+		t.Errorf("a should beat b via rescuer tiebreak")
+	}
+	if frontierRowBetter(goal, b, a) {
+		t.Errorf("b should not beat a")
+	}
+	// If primary gap exceeds neutral band, primary wins regardless of size.
+	c := frontierRow{Value: 80.0, TiebreakValues: []float64{9999}}
+	d := frontierRow{Value: 100.0, TiebreakValues: []float64{10}}
+	if !frontierRowBetter(goal, c, d) {
+		t.Errorf("primary-dominant candidate should win over size-dominant one when outside the neutral band")
 	}
 }
 
