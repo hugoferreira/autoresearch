@@ -67,7 +67,7 @@ goal at a time; the rest are `concluded` or `abandoned`.
 
 | Field | Type | YAML key | Notes |
 | ----- | ---- | -------- | ----- |
-| `SchemaVersion` | `int` | `schema_version` | Current version is `3` (`GoalSchemaVersion`). |
+| `SchemaVersion` | `int` | `schema_version` | Current version is `4` (`GoalSchemaVersion`). |
 | `ID` | `string` | `id` | `G-NNNN`. |
 | `Status` | `string` | `status` | `active` / `concluded` / `abandoned`. |
 | `DerivedFrom` | `string` | `derived_from` | Parent goal ID for derived goals. |
@@ -78,6 +78,8 @@ goal at a time; the rest are `concluded` or `abandoned`.
 | `Objective` | `Objective` | `objective` | The single metric being optimized. |
 | `Completion` | `*Completion` | `completion` | Optional stopping condition. |
 | `Constraints` | `[]Constraint` | `constraints` | At least one required. |
+| `Rescuers` | `[]Rescuer` | `rescuers` | Optional secondary-objective clauses that can rescue a "supported" verdict when the primary is neutral. See [Rescuer verdict dynamics](#conclusion). |
+| `NeutralBandFrac` | `float64` | `neutral_band_frac` | `\|delta_frac\|` on the primary within this band counts as "neutral" for rescue purposes. Required `> 0` when `Rescuers` is set; rejected otherwise. |
 | `Body` | `string` | — (Markdown body) | Steering notes extracted via `Steering()` = `ExtractSection(body, "Steering")`. |
 
 **Sub-structs**:
@@ -99,6 +101,12 @@ goal at a time; the rest are `concluded` or `abandoned`.
 | `Max` | `*float64` | At least one of `Max`, `Min`, `Require` is required per constraint. |
 | `Min` | `*float64` | |
 | `Require` | `string` | e.g. `pass` — pairs with `Instrument.Requires`. |
+
+| `Rescuer` field | Type | Notes |
+| --- | --- | --- |
+| `Instrument` | `string` | Must be registered; must not equal `Objective.Instrument`. Implicitly in-goal for hypotheses (`CheckHypothesisInstrumentWithinGoal`). |
+| `Direction` | `string` | `increase` or `decrease`. |
+| `MinEffect` | `float64` | Required `>= 0`. `0` means the rescuer is directional — any clean-CI effect in `Direction` rescues; `> 0` adds a quantitative threshold (same strict check as a primary prediction). |
 
 **Lifecycle** (status values in `internal/entity/goal.go:11-14`):
 
@@ -141,10 +149,10 @@ goal and names the instrument that will measure its predicted effect.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `Instrument` | `string` | Must be the goal's objective or one of its constraint instruments (`CheckHypothesisInstrumentWithinGoal`). |
+| `Instrument` | `string` | Must be the goal's objective, one of its constraint instruments, or one of its rescuer instruments (`CheckHypothesisInstrumentWithinGoal`). |
 | `Target` | `string` | |
 | `Direction` | `string` | `increase` or `decrease`. |
-| `MinEffect` | `float64` | Required `> 0`. Strict mode enforces `|delta_frac| >= min_effect` at conclude time. |
+| `MinEffect` | `float64` | Required `>= 0`. `> 0` is a quantitative prediction — strict mode enforces `\|delta_frac\| >= min_effect` at conclude time. `== 0` marks the hypothesis as **directional**: the CI-clean-side gate still runs, but the magnitude check is skipped. Use directional when no prior evidence grounds a specific threshold. |
 
 **Lifecycle** (constants in `internal/entity/hypothesis.go:10-17`):
 
@@ -277,6 +285,7 @@ experiment, and the statistical comparison of their observations.
 | `Effect` | `Effect` | `effect` | Absolute baseline comparison. |
 | `IncrementalExp` | `string` | `incremental_experiment` | Frontier-best experiment at conclude time. |
 | `IncrementalEffect` | `*Effect` | `incremental_effect` | Delta vs. `IncrementalExp`. |
+| `SecondaryChecks` | `[]ClauseCheck` | `secondary_checks` | Audit trail: one entry per goal rescuer consulted during conclude. Empty when rescue wasn't needed (primary passed) or when the goal has no rescuers. |
 | `StatTest` | `string` | `stat_test` | e.g. `mann-whitney-u`. |
 | `Strict` | `Strict` | `strict_check` | Firewall decision. |
 | `Author` | `string` | `author` | |
@@ -299,17 +308,47 @@ experiment, and the statistical comparison of their observations.
 | --- | --- | --- | --- |
 | `Passed` | `bool` | `passed` | Whether the firewall accepted the requested verdict. |
 | `RequestedFrom` | `string` | `downgraded_from` | Original verdict before a strict downgrade. |
-| `Reasons` | `[]string` | `reasons` | Why the firewall downgraded (insufficient samples, CI crosses zero, effect below `min_effect`, …). |
+| `RescuedBy` | `string` | `rescued_by` | Instrument name of the goal rescuer whose clause check saved the verdict. Empty when the primary passed directly or when the downgrade wasn't rescued. |
+| `Directional` | `bool` | `directional` | True when the hypothesis predicted with `MinEffect == 0` (direction-only). A rendering hint so a clean-CI but tiny effect is never mistaken for a quantitative win. |
+| `Reasons` | `[]string` | `reasons` | Why the firewall downgraded or (on rescue) what the primary looked like before rescue fired. |
+
+| `ClauseCheck` field | Type | YAML key | Notes |
+| --- | --- | --- | --- |
+| `Role` | `string` | `role` | `rescuer` today; reserved for future roles (e.g. `guardrail`). |
+| `Instrument` | `string` | `instrument` | The rescuer's instrument. |
+| `Direction` | `string` | `direction` | `increase` or `decrease` — copied from the goal's `Rescuer`. |
+| `MinEffect` | `float64` | `min_effect` | Copied from the goal's `Rescuer`. `0` means a directional rescuer. |
+| `Effect` | `*Effect` | `effect` | Computed against the same candidate/baseline pair as the primary check. `nil` when observations are missing. |
+| `Passed` | `bool` | `passed` | Whether the rescuer's own strict check passed. |
+| `Reasons` | `[]string` | `reasons` | Why the rescuer failed (CI crosses zero, below min_effect, no data, …). |
 
 **Verdict dynamics**: the verdict is set by `conclude` based on the
 statistical comparison. In strict mode (`Config.Mode == "strict"`), the
 `CheckStrictVerdict` firewall in `internal/firewall/validators.go` can
 forcibly downgrade `supported` → `inconclusive` if the CI on `delta_frac`
 crosses zero in the wrong direction, if sample counts are insufficient, or
-if `|delta_frac| < Hypothesis.Predicts.MinEffect`. A critic can also call
-`conclusion downgrade` to flip a decisive verdict to `inconclusive` with a
-reason. `conclusion appeal` reverses a downgrade and moves the hypothesis
-back to `unreviewed`.
+if `|delta_frac| < Hypothesis.Predicts.MinEffect`. A directional
+hypothesis (`MinEffect == 0`) skips the magnitude gate; the CI-clean-side
+check still applies. A critic can also call `conclusion downgrade` to flip
+a decisive verdict to `inconclusive` with a reason. `conclusion appeal`
+reverses a downgrade and moves the hypothesis back to `unreviewed`.
+
+**Rescue path**: when the goal declares `Rescuers` and a positive
+`NeutralBandFrac`, a failing `supported` check can be salvaged.
+`CheckStrictVerdictWithContext` checks whether the primary's
+`|delta_frac|` is within the band ("didn't lose"); if so, each rescuer
+runs its own strict check on the same candidate/baseline pair using the
+callback the conclude pipeline provides. The first rescuer to pass keeps
+the verdict as `supported` with `strict.rescued_by` naming it and
+`secondary_checks[]` auditing every rescuer considered. Rescue never
+fires when the primary's `|delta_frac|` exceeds the band — rescue only
+saves neutrals, not losses. Downstream (frontier, renderers) treat a
+rescued conclusion as a first-class `supported`, but annotate it
+distinctly (`supported (rescued by X)`) so readers never mistake it for
+a clean primary win. The frontier's sort uses rescuers as a bounded
+tiebreak when primary values are within `NeutralBandFrac`: a rescued
+candidate whose rescuer wins displaces the prior best at the same
+primary tier.
 
 ---
 
@@ -560,6 +599,7 @@ validator, check whether it introduces a new edge.
 | ------------- | ------------------------------- | -------------------------------- |
 | Goal          | `Objective.Instrument`          | `Config.Instruments` (by name)   |
 | Goal          | `Constraints[].Instrument`      | `Config.Instruments` (by name)   |
+| Goal          | `Rescuers[].Instrument`         | `Config.Instruments` (by name)   |
 | Goal          | `DerivedFrom`                   | Goal                             |
 | Hypothesis    | `GoalID`                        | Goal                             |
 | Hypothesis    | `Parent`                        | Hypothesis                       |
@@ -575,6 +615,8 @@ validator, check whether it introduces a new edge.
 | Conclusion    | `Hypothesis`                    | Hypothesis                       |
 | Conclusion    | `Observations[]`                | Observation                      |
 | Conclusion    | `CandidateExp` / `BaselineExp` / `IncrementalExp` | Experiment     |
+| Conclusion    | `SecondaryChecks[].Instrument`  | `Config.Instruments`             |
+| Conclusion    | `Strict.RescuedBy`              | `Goal.Rescuers[].Instrument`     |
 | Lesson        | `Subjects[]`                    | Hypothesis / Experiment / Conclusion |
 | Lesson        | `SupersedesID` / `SupersededByID` | Lesson                          |
 | Lesson        | `PredictedEffect.Instrument`    | `Config.Instruments`             |
@@ -592,7 +634,10 @@ parent reviewed, inspired-by lessons active-and-reviewed, etc.).
 - `State.SchemaVersion` — current **2**. `v1` was a single-goal store with
   `.research/goal.md`; `v2` is multi-goal with `.research/goals/G-NNNN.md`
   and `State.CurrentGoalID`.
-- `Goal.SchemaVersion` — current **3** (`GoalSchemaVersion`).
+- `Goal.SchemaVersion` — current **4** (`GoalSchemaVersion`). `v4` added
+  `Rescuers` and `NeutralBandFrac` — pure additive. Legacy `v3` goals
+  parse cleanly with empty rescuers and zero band; no forced rewrite,
+  no migration event.
 - `Config.SchemaVersion` — current **1** (implicit default).
 
 One migration runs today: `internal/store/migrate.go:migrateV1ToV2`. It
