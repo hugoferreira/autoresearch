@@ -64,12 +64,19 @@ func emitEvent(s *store.Store, kind, actor, subject string, data any) error {
 	})
 }
 
-// dryRun checks globalDryRun and, if set, emits a "[dry-run] would ..."
-// message and returns a non-nil sentinel. Callers use it as a guard:
+// dryRun checks globalDryRun and, if set, emits the "[dry-run] would ..."
+// preview and returns ErrDryRun. Callers use it as a guard:
 //
 //	if err := dryRun(w, "add hypothesis", payload); err != nil { return err }
 //
-// When globalDryRun is false it returns nil and the caller continues.
+// main() recognizes ErrDryRun and exits 0 silently (the preview has
+// already been emitted). When globalDryRun is false it returns nil and
+// the caller continues to the mutation path.
+//
+// Returning a real sentinel here — rather than just nil after the Emit —
+// is load-bearing. Previously the function returned w.Emit(...), which
+// is nil on success, so every caller's `if err := dryRun(...); err != nil`
+// guard fell straight through and the mutation ran anyway.
 func dryRun(w *output.Writer, action string, payload map[string]any) error {
 	if !globalDryRun {
 		return nil
@@ -78,7 +85,10 @@ func dryRun(w *output.Writer, action string, payload map[string]any) error {
 		payload = map[string]any{}
 	}
 	payload["status"] = "dry-run"
-	return w.Emit(fmt.Sprintf("[dry-run] would %s", action), payload)
+	if err := w.Emit(fmt.Sprintf("[dry-run] would %s", action), payload); err != nil {
+		return err
+	}
+	return ErrDryRun
 }
 
 func jsonRaw(v any) json.RawMessage {
