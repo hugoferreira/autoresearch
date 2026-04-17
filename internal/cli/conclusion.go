@@ -63,6 +63,8 @@ func conclusionListCmd() *cobra.Command {
 				dg := ""
 				if c.Strict.RequestedFrom != "" {
 					dg = fmt.Sprintf("  [downgraded from %s]", c.Strict.RequestedFrom)
+				} else if c.Strict.RescuedBy != "" {
+					dg = fmt.Sprintf("  [rescued by %s]", c.Strict.RescuedBy)
 				}
 				w.Textf("  %-8s  %-12s  hyp=%-8s  delta_frac=%+.4f  p=%.4g%s\n",
 					c.ID, c.Verdict, c.Hypothesis, c.Effect.DeltaFrac, c.Effect.PValue, dg)
@@ -101,6 +103,29 @@ func conclusionShowCmd() *cobra.Command {
 				w.Textf("downgraded:   from %q with reasons:\n", c.Strict.RequestedFrom)
 				for _, r := range c.Strict.Reasons {
 					w.Textf("  - %s\n", r)
+				}
+			} else if c.Strict.RescuedBy != "" {
+				w.Textf("rescued_by:   %s  (primary was neutral; rescuer carried the verdict)\n", c.Strict.RescuedBy)
+				for _, r := range c.Strict.Reasons {
+					w.Textf("  - %s\n", r)
+				}
+			}
+			if len(c.SecondaryChecks) > 0 {
+				w.Textln("secondary_checks:")
+				for _, cc := range c.SecondaryChecks {
+					status := "fail"
+					if cc.Passed {
+						status = "pass"
+					}
+					if cc.Effect != nil {
+						w.Textf("  - %s (%s) %s: delta_frac=%+.4f  CI [%+.4f, %+.4f]\n",
+							cc.Instrument, cc.Role, status, cc.Effect.DeltaFrac, cc.Effect.CILowFrac, cc.Effect.CIHighFrac)
+					} else {
+						w.Textf("  - %s (%s) %s\n", cc.Instrument, cc.Role, status)
+					}
+					for _, r := range cc.Reasons {
+						w.Textf("      %s\n", r)
+					}
 				}
 			}
 			w.Textf("candidate:    %s  (n=%d)\n", c.CandidateExp, c.Effect.NCandidate)

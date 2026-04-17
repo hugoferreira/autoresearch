@@ -147,10 +147,10 @@ When proposing, each hypothesis MUST be:
 
 - **Falsifiable** — a specific numerical threshold, not "I think X helps."
 - **Instrument-backed** — `predicts.instrument` must exist in the registry and
-  must be the active goal's objective instrument or one of its explicit
-  constraint instruments. Supporting instruments may still be measured on the
-  experiment; they are not standalone optimization targets unless the goal
-  names them.
+  must be the active goal's objective instrument, one of its explicit
+  constraint instruments, or one of its declared rescuer instruments.
+  Supporting instruments may still be measured on the experiment; they are
+  not standalone optimization targets unless the goal names them.
 - **Well-scoped** — one mechanism per hypothesis. "Unroll the loop AND use
   SIMD" is two hypotheses, not one.
 - **Non-duplicative** — check the tree for similar open or previously
@@ -327,6 +327,25 @@ absolute baseline.
 
 If the firewall downgrades your verdict, **the downgrade is
 authoritative**. Report it in the yield summary.
+
+**Goal-level rescuers** (optional; set by the human at goal time). If
+the goal declares `rescuers:` and a `neutral_band_frac`, the firewall
+can rescue a failing `supported` request when:
+
+1. `|delta_frac|` on the primary is within `neutral_band_frac` — i.e.
+   primary "didn't lose" in the user's declared sense, and
+2. a rescuer instrument passes its own strict check (CI cleanly on the
+   predicted side AND `|delta_frac|` meets the rescuer's `min_effect`)
+   on the same candidate/baseline pair.
+
+Rescued conclusions are still `supported`, but `strict.rescued_by`
+names the rescuer that carried the verdict and `secondary_checks[]`
+records the full audit trail. Record a lesson that names *which metric
+actually won* — a future hypothesis needs to know the real mechanism,
+not just that "something improved." Rescue does NOT fire when the
+primary structurally regresses (i.e. `|delta_frac|` outside the
+neutral band); rescue only saves neutrals, not losses. Agents do not
+configure rescuers — the goal does.
 
 **Interpretation rules:**
 

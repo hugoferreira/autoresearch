@@ -246,9 +246,19 @@ func renderReportMarkdown(r *reportData) string {
 	} else {
 		sb.WriteString("## Conclusions\n\n")
 		for _, c := range r.Conclusions {
-			fmt.Fprintf(&sb, "### %s — %s\n\n", c.ID, c.Verdict)
+			heading := c.Verdict
+			if c.Strict.RescuedBy != "" {
+				heading = fmt.Sprintf("%s (rescued by `%s`)", c.Verdict, c.Strict.RescuedBy)
+			}
+			fmt.Fprintf(&sb, "### %s — %s\n\n", c.ID, heading)
 			if c.Strict.RequestedFrom != "" {
 				fmt.Fprintf(&sb, "> **Downgraded** from `%s` — strict firewall rejected the requested verdict:\n", c.Strict.RequestedFrom)
+				for _, r := range c.Strict.Reasons {
+					fmt.Fprintf(&sb, "> - %s\n", r)
+				}
+				sb.WriteString("\n")
+			} else if c.Strict.RescuedBy != "" {
+				fmt.Fprintf(&sb, "> **Rescued** — primary was neutral (within the goal's `neutral_band_frac`); verdict carried by rescuer `%s`:\n", c.Strict.RescuedBy)
 				for _, r := range c.Strict.Reasons {
 					fmt.Fprintf(&sb, "> - %s\n", r)
 				}

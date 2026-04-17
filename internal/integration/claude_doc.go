@@ -383,6 +383,14 @@ fix the input instead.
   Every downgrade is recorded in the conclusion's ` + "`strict_check`" + ` block and
   in ` + "`events.jsonl`" + ` as a ` + "`conclusion.downgrade`" + ` event. The conclusion still
   persists; the hypothesis moves to ` + "`inconclusive`" + `.
+  If the active goal declares ` + "`rescuers`" + ` and a ` + "`neutral_band_frac`" + `, a
+  failing primary check can instead be **rescued**: when
+  ` + "`|delta_frac|`" + ` on the primary is within ` + "`neutral_band_frac`" + ` (primary
+  "didn't lose") and a rescuer instrument passes its own strict check on
+  the same candidate/baseline pair, the verdict is kept as ` + "`supported`" + `
+  with ` + "`strict.rescued_by`" + ` naming the rescuer. ` + "`secondary_checks[]`" + `
+  on the conclusion records every rescuer considered. Rescue never fires
+  when the primary structurally regresses (outside the band).
 
 ## The notebook layer
 
