@@ -395,11 +395,9 @@ func (v *artifactView) loadDiff(s *store.Store, shaB string) tea.Cmd {
 		if err != nil {
 			return tuiErrMsg{err: fmt.Errorf("diff binary not found in PATH")}
 		}
-		cmd := exec.Command(diffBin, "-U3", absA, absB)
-		out, _ := cmd.CombinedOutput()
-		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-		if len(lines) == 1 && lines[0] == "" {
-			lines = nil
+		lines, err := runDiff(diffBin, absA, absB, 3)
+		if err != nil {
+			return tuiErrMsg{err: err}
 		}
 		return artifactDiffReadyMsg{
 			view: newArtifactDiffView(shaA, relA, shaB, relB, lines),

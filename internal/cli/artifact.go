@@ -621,11 +621,9 @@ func artifactDiffCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("diff binary not found in PATH")
 			}
-			cmdExec := exec.Command(diffBin, fmt.Sprintf("-U%d", contextN), absA, absB)
-			out, _ := cmdExec.CombinedOutput()
-			lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-			if len(lines) == 1 && lines[0] == "" {
-				lines = nil
+			lines, err := runDiff(diffBin, absA, absB, contextN)
+			if err != nil {
+				return err
 			}
 			totalLines := len(lines)
 			truncated := false
