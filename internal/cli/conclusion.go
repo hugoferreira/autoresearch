@@ -65,6 +65,8 @@ func conclusionListCmd() *cobra.Command {
 					dg = fmt.Sprintf("  [downgraded from %s]", c.Strict.RequestedFrom)
 				} else if c.Strict.RescuedBy != "" {
 					dg = fmt.Sprintf("  [rescued by %s]", c.Strict.RescuedBy)
+				} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
+					dg = "  [directional]"
 				}
 				w.Textf("  %-8s  %-12s  hyp=%-8s  delta_frac=%+.4f  p=%.4g%s\n",
 					c.ID, c.Verdict, c.Hypothesis, c.Effect.DeltaFrac, c.Effect.PValue, dg)
@@ -109,6 +111,8 @@ func conclusionShowCmd() *cobra.Command {
 				for _, r := range c.Strict.Reasons {
 					w.Textf("  - %s\n", r)
 				}
+			} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
+				w.Textln("directional: yes  (hypothesis predicted direction only; no magnitude commitment)")
 			}
 			if len(c.SecondaryChecks) > 0 {
 				w.Textln("secondary_checks:")

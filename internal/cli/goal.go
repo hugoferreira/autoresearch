@@ -519,8 +519,8 @@ func parseRescuerSpec(spec string) (entity.Rescuer, error) {
 	if err != nil {
 		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: min_effect %q is not a float: %w", spec, minStr, err)
 	}
-	if min <= 0 {
-		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: min_effect must be > 0", spec)
+	if min < 0 {
+		return entity.Rescuer{}, fmt.Errorf("--rescuer %q: min_effect must be >= 0 (0 means directional — any clean-CI effect in the predicted direction passes)", spec)
 	}
 	return entity.Rescuer{Instrument: inst, Direction: dir, MinEffect: min}, nil
 }

@@ -127,8 +127,8 @@ func validateGoalRescuers(g *entity.Goal, cfg *store.Config) error {
 		default:
 			return fmt.Errorf("rescuer[%d] direction must be 'increase' or 'decrease', got %q", i, r.Direction)
 		}
-		if r.MinEffect <= 0 {
-			return fmt.Errorf("rescuer[%d] min_effect must be > 0 (rescue is still a scientific claim and needs a quantitative threshold)", i)
+		if r.MinEffect < 0 {
+			return fmt.Errorf("rescuer[%d] min_effect must be >= 0 (use 0 for a directional rescuer — any clean-CI effect in the predicted direction rescues; use a positive value when you have prior evidence for a quantitative threshold)", i)
 		}
 	}
 	return nil
@@ -904,8 +904,8 @@ func ValidateHypothesis(h *entity.Hypothesis, cfg *store.Config) error {
 	default:
 		return fmt.Errorf("predicts direction must be 'increase' or 'decrease', got %q", h.Predicts.Direction)
 	}
-	if h.Predicts.MinEffect <= 0 {
-		return errors.New("predicts min_effect must be > 0 (a falsifiable hypothesis needs a quantitative threshold)")
+	if h.Predicts.MinEffect < 0 {
+		return errors.New("predicts min_effect must be >= 0 (use 0 for a directional hypothesis — predicts direction only, with no minimum magnitude; use a positive value when you have prior evidence to ground a quantitative threshold)")
 	}
 	for i, lid := range h.InspiredBy {
 		if !strings.HasPrefix(lid, "L-") {

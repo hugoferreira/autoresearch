@@ -102,6 +102,8 @@ func (v *conclusionListView) view(width, height int) string {
 			extras = tuiDim.Render("  ↓from " + c.Strict.RequestedFrom)
 		} else if c.Strict.RescuedBy != "" {
 			extras = tuiYellow.Render("  ⚕rescued:" + c.Strict.RescuedBy)
+		} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
+			extras = tuiDim.Render("  ↕directional")
 		}
 		review := " "
 		if c.ReviewedBy != "" {
@@ -187,6 +189,9 @@ func (v *conclusionDetailView) view(width, height int) string {
 		for _, r := range c.Strict.Reasons {
 			lines = append(lines, "  · "+r)
 		}
+	} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
+		lines = append(lines, "")
+		lines = append(lines, tuiDim.Render("↕ directional — hypothesis predicted direction only; no magnitude commitment"))
 	}
 	if len(c.SecondaryChecks) > 0 {
 		lines = append(lines, "")

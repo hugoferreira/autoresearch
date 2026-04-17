@@ -210,9 +210,10 @@ downgraded since there is no comparator).`,
 			effect := buildEffect(hyp.Predicts.Instrument, cSamples, bSamples, cmp)
 
 			strictRec := entity.Strict{
-				Passed:    decision.Passed,
-				RescuedBy: decision.RescuedBy,
-				Reasons:   decision.Reasons,
+				Passed:      decision.Passed,
+				RescuedBy:   decision.RescuedBy,
+				Directional: hyp.Predicts.MinEffect == 0,
+				Reasons:     decision.Reasons,
 			}
 			if decision.Downgraded {
 				strictRec.RequestedFrom = verdict
@@ -308,6 +309,9 @@ downgraded since there is no comparator).`,
 			}
 			if decision.RescuedBy != "" {
 				eventData["rescued_by"] = decision.RescuedBy
+			}
+			if strictRec.Directional {
+				eventData["directional"] = true
 			}
 			kind := "conclusion.write"
 			if decision.Downgraded {

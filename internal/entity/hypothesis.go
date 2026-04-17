@@ -32,6 +32,17 @@ type Hypothesis struct {
 	Body       string    `yaml:"-"                     json:"body,omitempty"`
 }
 
+// Predicts is what a hypothesis claims will happen to one instrument.
+// A positive MinEffect commits to a magnitude: "supported" requires the
+// 95% CI to be clean on the predicted side AND |delta_frac| >= MinEffect.
+// A zero MinEffect marks the hypothesis as *directional*: the agent
+// claims only that the instrument will move in Direction, with no
+// magnitude commitment. The CI-clean-side check still runs — a neutral
+// result still downgrades — but any clean-CI effect in the predicted
+// direction is "supported." Use directional when no prior evidence
+// (lesson, literature, back-of-envelope calc) grounds a specific
+// threshold; follow up with a quantitative hypothesis once the first
+// measurement gives you one.
 type Predicts struct {
 	Instrument string  `yaml:"instrument" json:"instrument"`
 	Target     string  `yaml:"target"     json:"target"`

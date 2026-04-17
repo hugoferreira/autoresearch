@@ -145,7 +145,16 @@ Choose whether to:
 
 When proposing, each hypothesis MUST be:
 
-- **Falsifiable** — a specific numerical threshold, not "I think X helps."
+- **Falsifiable** — a clean CI on the predicted side is the minimum bar.
+  You can predict either a **magnitude** (`--predicts-min-effect 0.05` —
+  "decreases by at least 5%") or a **direction only**
+  (`--predicts-min-effect 0` — "decreases, by some amount").  Do NOT
+  fabricate a magnitude when you have no evidence for it: if you don't
+  have a lesson, a literature number, or a back-of-envelope calculation,
+  propose a directional hypothesis. A directional supported is weaker
+  evidence than a quantitative one, and downstream hypotheses should
+  refine it into a quantitative claim once the first measurement gives
+  you a grounded magnitude.
 - **Instrument-backed** — `predicts.instrument` must exist in the registry and
   must be the active goal's objective instrument, one of its explicit
   constraint instruments, or one of its declared rescuer instruments.
@@ -305,8 +314,10 @@ Read the `comparison` object: `delta_frac`, `ci_low_frac`,
 `ci_high_frac`, `p_value`. Then decide:
 
 - **supported** — CI sits entirely on the predicted side AND
-  `|delta_frac| >= min_effect`. If either is missing, don't request
-  supported — the firewall will downgrade you.
+  `|delta_frac| >= min_effect`. For a directional hypothesis
+  (`min_effect == 0`), any clean-CI effect in the predicted direction
+  counts — the magnitude gate is skipped. If either bar is missed,
+  don't request supported — the firewall will downgrade you.
 - **refuted** — a `kill_if` clause is clearly satisfied, or the CI is
   cleanly on the wrong side.
 - **inconclusive** — everything else.
