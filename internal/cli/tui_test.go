@@ -329,7 +329,7 @@ func TestTUI_EventListAndDetail(t *testing.T) {
 		{Ts: time.Now().UTC(), Kind: "experiment.implement", Actor: "agent:impl", Subject: "E-0007",
 			Data: []byte(`{"worktree":"/tmp/wt","branch":"autoresearch/E-0007","samples":5,"pass":true}`)},
 	}
-	nv, _ := v.update(eventListLoadedMsg{list: es}, nil)
+	nv, _ := v.update(eventListLoadedMsg{events: es, replace: true}, nil)
 	out := stripANSI(nv.view(120, 20))
 	for _, want := range []string{"1 events", "experiment.implement", "E-0007"} {
 		if !strings.Contains(out, want) {
@@ -735,7 +735,7 @@ func TestTUI_EventListKeysDoNotConflictWithRootShortcuts(t *testing.T) {
 		{Ts: time.Now().UTC(), Kind: "init", Subject: "A"},
 		{Ts: time.Now().UTC(), Kind: "hypothesis.add", Subject: "B"},
 	}
-	nv, _ := v.update(eventListLoadedMsg{list: es}, nil)
+	nv, _ := v.update(eventListLoadedMsg{events: es, replace: true}, nil)
 	ev := nv.(*eventListView)
 	ev.cursor = 0
 	ev.follow = false

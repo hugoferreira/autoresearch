@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -188,13 +187,12 @@ func newFollowEventFilter(s *store.Store, scope goalScope, keep func(store.Event
 	}
 }
 
-// followEvents is the tail loop. It polls events.jsonl by byte offset every
-// 200 ms. When the file grows, reads from the last offset to EOF, parses each
-// line, filters via keep(), and emits to stdout (JSONL if jsonMode else text).
-// Stops cleanly on SIGINT/SIGTERM.
+// followEvents is the tail loop. It polls events.jsonl every 200 ms via
+// Store.EventsSince, emits new matching events, and stops cleanly on
+// SIGINT/SIGTERM.
 func followEvents(s *store.Store, keep func(store.Event) bool, jsonMode bool) error {
-	path := s.EventsPath()
-	info, err := os.Stat(path)
+	// Start at EOF: a follower sees events going forward, not history.
+	info, err := os.Stat(s.EventsPath())
 	if err != nil {
 		return fmt.Errorf("stat events.jsonl: %w", err)
 	}
@@ -220,32 +218,12 @@ func followEvents(s *store.Store, keep func(store.Event) bool, jsonMode bool) er
 			return nil
 		case <-ticker.C:
 		}
-		info, err := os.Stat(path)
+		events, newOff, err := s.EventsSince(offset)
 		if err != nil {
 			continue
 		}
-		if info.Size() <= offset {
-			continue
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		if _, err := f.Seek(offset, io.SeekStart); err != nil {
-			f.Close()
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-			var e store.Event
-			if err := json.Unmarshal(line, &e); err != nil {
-				continue
-			}
+		offset = newOff
+		for _, e := range events {
 			if !keep(e) {
 				continue
 			}
@@ -255,7 +233,5 @@ func followEvents(s *store.Store, keep func(store.Event) bool, jsonMode bool) er
 				writeEventLine(os.Stdout, e)
 			}
 		}
-		offset = info.Size()
-		f.Close()
 	}
 }

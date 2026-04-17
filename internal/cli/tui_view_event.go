@@ -18,26 +18,46 @@ type eventListView struct {
 	kindFilter string // filter token ("" = all)
 	follow     bool
 	err        error
+
+	// lastOffset is the byte offset into events.jsonl up to which we've
+	// already streamed events into `all`. Each tick pulls only the new
+	// tail via Store.EventsSince — see the Event log rule in CLAUDE.md.
+	lastOffset int64
+	// eventCap bounds `all` so a very-long-running session doesn't grow
+	// unboundedly. Oldest-first eviction.
+	eventCap int
 }
 
 type eventListLoadedMsg struct {
-	list []store.Event
-	err  error
+	events []store.Event
+	newOff int64
+	// replace is true for the initial load (no prior state); false for
+	// incremental updates appended to `all`.
+	replace bool
+	err     error
 }
 
+const defaultEventListCap = 2000
+
 func newEventListView(scope goalScope) *eventListView {
-	return &eventListView{scope: scope, follow: true}
+	return &eventListView{scope: scope, follow: true, eventCap: defaultEventListCap}
 }
 
 func (v *eventListView) title() string { return "Event log" }
 
 func (v *eventListView) init(s *store.Store) tea.Cmd {
+	off := v.lastOffset
+	scope := v.scope
+	replace := off == 0
 	return func() tea.Msg {
-		list, err := s.Events(0)
-		if err == nil {
-			list, err = newGoalScopeResolver(s, v.scope).filterEvents(list)
+		events, newOff, err := s.EventsSince(off)
+		if err == nil && events != nil {
+			// Advisory cache invalidation — see CLAUDE.md Event payload
+			// rule. Entity reads will pick up these subjects on next miss.
+			s.InvalidateFromEvents(events)
+			events, err = newGoalScopeResolver(s, scope).filterEvents(events)
 		}
-		return eventListLoadedMsg{list: list, err: err}
+		return eventListLoadedMsg{events: events, newOff: newOff, replace: replace, err: err}
 	}
 }
 
@@ -68,8 +88,16 @@ func (v *eventListView) applyFilter() {
 func (v *eventListView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case eventListLoadedMsg:
-		v.all = msg.list
 		v.err = msg.err
+		v.lastOffset = msg.newOff
+		if msg.replace {
+			v.all = msg.events
+		} else if len(msg.events) > 0 {
+			v.all = append(v.all, msg.events...)
+			if v.eventCap > 0 && len(v.all) > v.eventCap {
+				v.all = v.all[len(v.all)-v.eventCap:]
+			}
+		}
 		v.applyFilter()
 		return v, nil
 	case tuiTickMsg:

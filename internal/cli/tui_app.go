@@ -115,6 +115,21 @@ func fetchChrome(s *store.Store, scope goalScope) tea.Cmd {
 		if cfg, err := s.Config(); err == nil {
 			msg.mode = cfg.Mode
 		}
+		// Unscoped chrome: Counts() is an O(ReadDir) summary per entity
+		// directory — avoids re-parsing every entity file just to compute
+		// len(). Scoped chrome still pays the full read today; once the
+		// store cache lands it'll be cheap for both paths.
+		if scope.All || scope.GoalID == "" {
+			if counts, err := s.Counts(); err == nil {
+				msg.counts = map[string]int{
+					"hypotheses":   counts["hypotheses"],
+					"experiments":  counts["experiments"],
+					"observations": counts["observations"],
+					"conclusions":  counts["conclusions"],
+				}
+			}
+			return msg
+		}
 		resolver := newGoalScopeResolver(s, scope)
 		hyps, herr := s.ListHypotheses()
 		exps, eerr := s.ListExperiments()
