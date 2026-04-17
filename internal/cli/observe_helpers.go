@@ -102,14 +102,27 @@ func runAndRecordObservation(
 	for _, a := range obsArts {
 		artShas = append(artShas, a.SHA)
 	}
-	if err := emitEvent(s, "observation.record", or(author, "agent:observer"), id, map[string]any{
+	eventData := map[string]any{
 		"experiment":    exp.ID,
 		"instrument":    instName,
 		"value":         result.Value,
 		"unit":          unit,
 		"samples":       result.SamplesN,
 		"artifact_shas": artShas,
-	}); err != nil {
+	}
+	if result.Pass != nil {
+		eventData["pass"] = *result.Pass
+	}
+	if result.CILow != nil {
+		eventData["ci_low"] = *result.CILow
+	}
+	if result.CIHigh != nil {
+		eventData["ci_high"] = *result.CIHigh
+	}
+	if result.ExitCode != 0 {
+		eventData["exit_code"] = result.ExitCode
+	}
+	if err := emitEvent(s, "observation.record", or(author, "agent:observer"), id, eventData); err != nil {
 		return nil, err
 	}
 

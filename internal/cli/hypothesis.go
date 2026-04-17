@@ -330,6 +330,7 @@ func hypothesisKillCmd() *cobra.Command {
 			if h.Status == entity.StatusKilled {
 				return fmt.Errorf("%s is already killed", h.ID)
 			}
+			prev := h.Status
 			h.Status = entity.StatusKilled
 			if err := dryRun(w, fmt.Sprintf("kill %s (%s)", h.ID, reason), map[string]any{"id": h.ID, "reason": reason}); err != nil {
 				return err
@@ -337,7 +338,11 @@ func hypothesisKillCmd() *cobra.Command {
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
-			if err := emitEvent(s, "hypothesis.kill", or(author, "human"), h.ID, map[string]string{"reason": reason}); err != nil {
+			if err := emitEvent(s, "hypothesis.kill", or(author, "human"), h.ID, map[string]any{
+				"from":   prev,
+				"to":     entity.StatusKilled,
+				"reason": reason,
+			}); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -384,7 +389,11 @@ and logged.`,
 			if err := s.WriteHypothesis(h); err != nil {
 				return err
 			}
-			if err := emitEvent(s, "hypothesis.reopen", or(author, "human"), h.ID, map[string]string{"reason": reason}); err != nil {
+			if err := emitEvent(s, "hypothesis.reopen", or(author, "human"), h.ID, map[string]any{
+				"from":   entity.StatusKilled,
+				"to":     entity.StatusOpen,
+				"reason": reason,
+			}); err != nil {
 				return err
 			}
 			return w.Emit(

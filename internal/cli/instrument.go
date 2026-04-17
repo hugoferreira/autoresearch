@@ -101,7 +101,21 @@ func instrumentRegisterCmd() *cobra.Command {
 			if err := s.RegisterInstrument(name, inst); err != nil {
 				return err
 			}
-			if err := emitEvent(s, "instrument.register", author, name, inst); err != nil {
+			eventData := map[string]any{
+				"cmd":    inst.Cmd,
+				"parser": inst.Parser,
+				"unit":   inst.Unit,
+			}
+			if inst.Pattern != "" {
+				eventData["pattern"] = inst.Pattern
+			}
+			if inst.MinSamples > 0 {
+				eventData["min_samples"] = inst.MinSamples
+			}
+			if len(inst.Requires) > 0 {
+				eventData["requires"] = inst.Requires
+			}
+			if err := emitEvent(s, "instrument.register", author, name, eventData); err != nil {
 				return err
 			}
 			return w.Emit(

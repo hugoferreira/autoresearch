@@ -82,13 +82,48 @@ get a new file plus an entry in the `groups` slice in `Root()`.
   to state files.
 - **Event log.** Every mutation appends to `.research/events.jsonl` with
   `{kind, actor, subject, ts, data}`. New mutating verbs must emit an event;
-  the dashboard, `log`, and `report` all read from it.
+  the dashboard, `log`, and `report` all read from it. The shape of `data`
+  follows the **Event payload rule** (below).
 - **Validation lives in `internal/firewall/`.** Don't scatter `if
   goal.Objective == "" { … }` checks through CLI handlers — add a validator
   and call it.
 - **Statistics.** Use `internal/stats`. Default 2000 bootstrap iterations,
   seeded PRNG for reproducibility. Don't import gonum directly from CLI
   handlers.
+
+## Event payload rule
+
+Events log semantic transitions, not state snapshots. A good `data` field
+captures what the reader can't recover from the subject's entity file
+later. Always include `kind`, `subject`, `actor`, `ts`, and `reason`
+(when the verb takes one). Additionally:
+
+- **When the event transitions a status field on the subject, record
+  both `from` and `to` explicitly.** Don't rely on the event `kind` alone
+  to imply the new state — make the log self-describing. Example:
+  `hypothesis.kill` emits `{from: "open", to: "killed", reason: "…"}`.
+- **Include time-sensitive context** that gets clobbered or recomputed
+  (e.g. `conclusion.write` captures `delta_frac` / CI bounds at the
+  moment of conclusion; `experiment.reset` captures the soon-to-be-
+  renamed branch).
+- **Include cross-references** the reader can't discover from the
+  subject alone (e.g. `observations[]` / `baseline` / `candidate` on
+  `conclusion.write`; `inspired_by` on `hypothesis.add`).
+- **Don't include** high-volume data (`per_sample` arrays), prose beyond
+  a ≤ 200-character snippet, whole entity structs, or anything
+  reconstructible from the subject's entity file (claim body, full
+  experiment budget, etc.). Spell out individual fields deliberately —
+  don't pass an entity struct as `data` and let struct growth leak in.
+
+Events are a human-readable audit log and an advisory source for cache
+invalidation. They are **not** a replay stream — reconstructing full
+entity state requires reading the entity files. Consequence: when a
+mutation on one entity side-effects another (e.g. `observation.record`
+bumps the experiment from `implemented` to `measured`; `conclusion.write`
+bumps the hypothesis to `unreviewed`), we do **not** synthesize a second
+event for the side-effect. Readers that need to know what changed
+consult the entity files; cache layers treat the event log as advisory
+and fall back to mtime for correctness.
 
 ## The strict-mode firewall
 

@@ -188,7 +188,12 @@ func experimentImplementCmd() *cobra.Command {
 				return fmt.Errorf("write worktree brief: %w", err)
 			}
 
-			eventData := map[string]any{"worktree": wtPath, "branch": branch}
+			eventData := map[string]any{
+				"from":     entity.ExpDesigned,
+				"to":       entity.ExpImplemented,
+				"worktree": wtPath,
+				"branch":   branch,
+			}
 			if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
 				eventData["impl_notes"] = snippet
 			}
@@ -262,7 +267,8 @@ events.jsonl — the research history tells the truth about retries.`,
 			}
 			if err := emitEvent(s, "experiment.reset", or(author, "human"), id, map[string]any{
 				"reason":           reason,
-				"from_status":      prevStatus,
+				"from":             prevStatus,
+				"to":               entity.ExpDesigned,
 				"abandoned_branch": abandoned,
 				"preserved_from":   prevBranch,
 			}); err != nil {
@@ -398,6 +404,8 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 				_ = err
 			}
 			if err := emitEvent(s, "experiment.implement", "system", id, map[string]any{
+				"from":     entity.ExpDesigned,
+				"to":       entity.ExpImplemented,
 				"worktree": wtPath,
 				"branch":   branch,
 			}); err != nil {
@@ -614,5 +622,24 @@ func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes 
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(wtPath, entity.BriefFileName), data, 0o644)
+	path := filepath.Join(wtPath, entity.BriefFileName)
+	tmp, err := os.CreateTemp(wtPath, ".brief-*")
+	if err != nil {
+		return fmt.Errorf("create temp brief: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp brief: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp brief: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename temp brief: %w", err)
+	}
+	return nil
 }
