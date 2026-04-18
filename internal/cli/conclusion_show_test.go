@@ -9,14 +9,6 @@ import (
 	"github.com/bytter/autoresearch/internal/store"
 )
 
-type conclusionShowTestResponse struct {
-	ID                          string                              `json:"id"`
-	Observations                []string                            `json:"observations"`
-	ObservationArtifacts        map[string][]entity.Artifact        `json:"observation_artifacts,omitempty"`
-	ObservationEvidenceFailures map[string][]entity.EvidenceFailure `json:"observation_evidence_failures,omitempty"`
-	ObservationReadIssues       map[string]string                   `json:"observation_read_issues,omitempty"`
-}
-
 func TestConclusionShowJSON_JoinsObservationArtifacts(t *testing.T) {
 	saveGlobals(t)
 	dir := t.TempDir()
@@ -114,7 +106,10 @@ func TestConclusionShowJSON_JoinsObservationArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := runCLIJSON[conclusionShowTestResponse](t, dir, "conclusion", "show", "C-0001")
+	got := runCLIJSON[conclusionShowJSON](t, dir, "conclusion", "show", "C-0001")
+	if got.Conclusion == nil {
+		t.Fatal("decoded conclusion is nil")
+	}
 	if got.ID != "C-0001" {
 		t.Fatalf("id = %q, want C-0001", got.ID)
 	}

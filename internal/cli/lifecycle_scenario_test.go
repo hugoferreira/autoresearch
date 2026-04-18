@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 )
 
@@ -37,20 +36,6 @@ type cliAnalyzeResponse struct {
 			DeltaFrac float64 `json:"delta_frac"`
 		} `json:"comparison,omitempty"`
 	} `json:"rows"`
-}
-
-type cliConclusionShowResponse struct {
-	ID                   string   `json:"id"`
-	Observations         []string `json:"observations"`
-	ObservationArtifacts map[string][]struct {
-		Name  string `json:"name"`
-		SHA   string `json:"sha"`
-		Path  string `json:"path"`
-		Bytes int64  `json:"bytes"`
-		Mime  string `json:"mime,omitempty"`
-	} `json:"observation_artifacts,omitempty"`
-	ObservationEvidenceFailures map[string][]entity.EvidenceFailure `json:"observation_evidence_failures,omitempty"`
-	ObservationReadIssues       map[string]string                   `json:"observation_read_issues,omitempty"`
 }
 
 type cliExperimentListRow struct {
@@ -316,7 +301,7 @@ func TestLifecycleScenario_EvidenceArtifactsCloseAuditChain(t *testing.T) {
 		"--baseline-experiment", baseline.ID,
 		"--observations", timingObsID,
 	)
-	show := runCLIJSON[cliConclusionShowResponse](t, dir, "conclusion", "show", concl.ID)
+	show := runCLIJSON[conclusionShowJSON](t, dir, "conclusion", "show", concl.ID)
 	arts, ok := show.ObservationArtifacts[timingObsID]
 	if !ok {
 		t.Fatalf("observation_artifacts missing timing observation %s: %+v", timingObsID, show.ObservationArtifacts)
@@ -394,7 +379,7 @@ func TestLifecycleScenario_EvidenceArtifactsCloseAuditChain(t *testing.T) {
 	if err := s.WriteConclusion(concl2Entity); err != nil {
 		t.Fatal(err)
 	}
-	show2 := runCLIJSON[cliConclusionShowResponse](t, dir, "conclusion", "show", concl2.ID)
+	show2 := runCLIJSON[conclusionShowJSON](t, dir, "conclusion", "show", concl2.ID)
 	if got, want := len(show2.ObservationEvidenceFailures[obs2.ID]), 1; got != want {
 		t.Fatalf("conclusion show evidence failures len = %d, want %d", got, want)
 	}

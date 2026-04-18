@@ -103,34 +103,7 @@ func conclusionShowCmd() *cobra.Command {
 				return err
 			}
 			if w.IsJSON() {
-				out := conclusionShowJSON{Conclusion: c}
-				if len(c.Observations) > 0 {
-					for _, id := range c.Observations {
-						obs, err := s.ReadObservation(id)
-						if err != nil {
-							if out.ObservationReadIssues == nil {
-								out.ObservationReadIssues = make(map[string]string, len(c.Observations))
-							}
-							out.ObservationReadIssues[id] = err.Error()
-							continue
-						}
-						if out.ObservationArtifacts == nil {
-							out.ObservationArtifacts = make(map[string][]entity.Artifact, len(c.Observations))
-						}
-						arts := make([]entity.Artifact, len(obs.Artifacts))
-						copy(arts, obs.Artifacts)
-						out.ObservationArtifacts[id] = arts
-						if len(obs.EvidenceFailures) > 0 {
-							if out.ObservationEvidenceFailures == nil {
-								out.ObservationEvidenceFailures = make(map[string][]entity.EvidenceFailure, len(c.Observations))
-							}
-							failures := make([]entity.EvidenceFailure, len(obs.EvidenceFailures))
-							copy(failures, obs.EvidenceFailures)
-							out.ObservationEvidenceFailures[id] = failures
-						}
-					}
-				}
-				return w.JSON(out)
+				return w.JSON(buildConclusionShowJSON(s, c))
 			}
 			w.Textf("id:           %s\n", c.ID)
 			w.Textf("hypothesis:   %s\n", c.Hypothesis)
