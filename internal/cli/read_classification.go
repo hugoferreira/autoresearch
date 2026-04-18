@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
@@ -23,11 +24,32 @@ type experimentReadView struct {
 	HypothesisStatus string `json:"hypothesis_status,omitempty"`
 }
 
+type staleExperimentView struct {
+	ID            string  `json:"id"`
+	Hypothesis    string  `json:"hypothesis"`
+	Status        string  `json:"status"`
+	LastEventKind string  `json:"last_event_kind"`
+	StaleMinutes  float64 `json:"stale_minutes"`
+}
+
 func normalizeExperimentReadClass(class experimentReadClass) experimentReadClass {
 	if class.Classification == "" {
 		class.Classification = experimentClassificationLive
 	}
 	return class
+}
+
+// loopActionable reports whether the research loop should still steer from
+// this experiment's current hypothesis state. This is intentionally broader
+// than gc's "terminal" notion: decisive-but-unreviewed hypotheses are also
+// non-actionable for further loop steering even though they are not yet safe
+// to reclaim.
+func (class experimentReadClass) loopActionable() bool {
+	return normalizeExperimentReadClass(class).Classification == experimentClassificationLive
+}
+
+func experimentReadClassForID(classByID map[string]experimentReadClass, expID string) experimentReadClass {
+	return normalizeExperimentReadClass(classByID[expID])
 }
 
 func classifyExperimentsForRead(s *store.Store, exps []*entity.Experiment) (map[string]experimentReadClass, error) {
@@ -122,14 +144,19 @@ func classifyExperimentForRead(e *entity.Experiment, hypStatus map[string]string
 	if e == nil {
 		return normalizeExperimentReadClass(experimentReadClass{})
 	}
-	status, ok := hypStatus[e.Hypothesis]
-	if ok && isTerminal(status) {
+	return classifyHypothesisStatusForExperimentRead(hypStatus[e.Hypothesis])
+}
+
+func classifyHypothesisStatusForExperimentRead(status string) experimentReadClass {
+	switch status {
+	case entity.StatusUnreviewed, entity.StatusSupported, entity.StatusRefuted, entity.StatusKilled:
 		return normalizeExperimentReadClass(experimentReadClass{
 			Classification:   experimentClassificationDead,
 			HypothesisStatus: status,
 		})
+	default:
+		return normalizeExperimentReadClass(experimentReadClass{})
 	}
-	return normalizeExperimentReadClass(experimentReadClass{})
 }
 
 func validateExperimentClassificationFilter(classification string) error {
@@ -157,4 +184,37 @@ func experimentClassificationMarker(classification string) string {
 		return "[dead]"
 	}
 	return ""
+}
+
+func findStaleExperimentsForRead(exps []*entity.Experiment, classByID map[string]experimentReadClass, events []store.Event, threshold time.Duration, now time.Time) []staleExperimentView {
+	stale := []staleExperimentView{}
+	for _, e := range exps {
+		switch e.Status {
+		case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
+		default:
+			continue
+		}
+		if e.IsBaseline {
+			continue
+		}
+		if !experimentReadClassForID(classByID, e.ID).loopActionable() {
+			continue
+		}
+		ts, kind := findLastEventForExperiment(events, e.ID)
+		if ts == nil {
+			continue
+		}
+		age := now.Sub(*ts)
+		if age < threshold {
+			continue
+		}
+		stale = append(stale, staleExperimentView{
+			ID:            e.ID,
+			Hypothesis:    e.Hypothesis,
+			Status:        e.Status,
+			LastEventKind: kind,
+			StaleMinutes:  age.Minutes(),
+		})
+	}
+	return stale
 }

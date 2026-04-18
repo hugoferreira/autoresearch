@@ -225,11 +225,12 @@ func (v *frontierView) init(s *store.Store) tea.Cmd {
 			return frontierLoadedMsg{err: err}
 		}
 		obsByExp := loadObservationsByExperiment(s)
-		rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, loadExperimentReadClasses(s))
+		expClassByID := loadExperimentReadClasses(s)
+		rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
 		return frontierLoadedMsg{
 			goal:       goal,
 			rows:       rows,
-			assessment: assessGoalCompletion(goal, concls, obsByExp),
+			assessment: assessGoalCompletion(goal, concls, obsByExp, expClassByID),
 			stalled:    stalled,
 		}
 	}

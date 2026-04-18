@@ -470,46 +470,21 @@ func statusCmd() *cobra.Command {
 				"main_checkout_dirty_paths": mainCheckout.Paths,
 			}, scope)
 
-			// Stale experiment detection.
-			type staleExp struct {
-				ID            string  `json:"id"`
-				Hypothesis    string  `json:"hypothesis"`
-				Status        string  `json:"status"`
-				LastEventKind string  `json:"last_event_kind"`
-				StaleMinutes  float64 `json:"stale_minutes"`
-			}
-			var stale []staleExp
+			// Stale experiment detection: reuse the same read-side
+			// actionability policy as dashboard/frontier instead of open-coding
+			// another "live enough to steer from" definition here.
+			var stale []staleExperimentView
 			if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
 				allEvents, err := s.Events(0)
 				if err != nil {
 					return err
 				}
-				threshold := time.Duration(staleMinutes) * time.Minute
-				now := time.Now().UTC()
-				for _, e := range exps {
-					switch e.Status {
-					case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
-					default:
-						continue
-					}
-					if e.IsBaseline {
-						continue
-					}
-					ts, kind := findLastEventForExperiment(allEvents, e.ID)
-					if ts == nil {
-						continue
-					}
-					age := now.Sub(*ts)
-					if age >= threshold {
-						stale = append(stale, staleExp{
-							ID:            e.ID,
-							Hypothesis:    e.Hypothesis,
-							Status:        e.Status,
-							LastEventKind: kind,
-							StaleMinutes:  age.Minutes(),
-						})
-					}
+				expClassByID, err := classifyExperimentsForRead(s, exps)
+				if err != nil {
+					return err
 				}
+				threshold := time.Duration(staleMinutes) * time.Minute
+				stale = findStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
 			}
 			if len(stale) > 0 {
 				payload["stale_experiments"] = stale

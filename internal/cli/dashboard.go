@@ -100,23 +100,23 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 // ---- snapshot capture ----
 
 type dashboardSnapshot struct {
-	Project                string              `json:"project"`
-	ScopeGoalID            string              `json:"scope_goal_id,omitempty"`
-	ScopeAll               bool                `json:"scope_all"`
-	Paused                 bool                `json:"paused"`
-	PauseReason            string              `json:"pause_reason,omitempty"`
-	Mode                   string              `json:"mode"`
-	MainCheckoutDirty      bool                `json:"main_checkout_dirty"`
-	MainCheckoutDirtyPaths []string            `json:"main_checkout_dirty_paths"`
-	Goal                   *entity.Goal        `json:"goal,omitempty"`
-	Budgets                dashboardBudgets    `json:"budgets"`
-	Counts                 map[string]int      `json:"counts"`
-	Tree                   []*treeNode         `json:"tree"`
-	Frontier               []frontierRow       `json:"frontier"`
-	StalledFor             int                 `json:"stalled_for"`
-	InFlight               []dashboardInFlight `json:"in_flight"`
-	StaleExperiments       []dashboardStaleExp `json:"stale_experiments,omitempty"`
-	RecentLessons          []*entity.Lesson    `json:"recent_lessons,omitempty"`
+	Project                string                `json:"project"`
+	ScopeGoalID            string                `json:"scope_goal_id,omitempty"`
+	ScopeAll               bool                  `json:"scope_all"`
+	Paused                 bool                  `json:"paused"`
+	PauseReason            string                `json:"pause_reason,omitempty"`
+	Mode                   string                `json:"mode"`
+	MainCheckoutDirty      bool                  `json:"main_checkout_dirty"`
+	MainCheckoutDirtyPaths []string              `json:"main_checkout_dirty_paths"`
+	Goal                   *entity.Goal          `json:"goal,omitempty"`
+	Budgets                dashboardBudgets      `json:"budgets"`
+	Counts                 map[string]int        `json:"counts"`
+	Tree                   []*treeNode           `json:"tree"`
+	Frontier               []frontierRow         `json:"frontier"`
+	StalledFor             int                   `json:"stalled_for"`
+	InFlight               []dashboardInFlight   `json:"in_flight"`
+	StaleExperiments       []staleExperimentView `json:"stale_experiments,omitempty"`
+	RecentLessons          []*entity.Lesson      `json:"recent_lessons,omitempty"`
 	recentLessonAccuracy   map[string]lessonAccuracySummary
 	RecentEvents           []store.Event `json:"recent_events"`
 	CapturedAt             time.Time     `json:"captured_at"`
@@ -141,14 +141,6 @@ type dashboardInFlight struct {
 	Instruments   []string   `json:"instruments"`
 	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
 	ElapsedS      float64    `json:"elapsed_s"`
-}
-
-type dashboardStaleExp struct {
-	ID            string  `json:"id"`
-	Hypothesis    string  `json:"hypothesis"`
-	Status        string  `json:"status"`
-	LastEventKind string  `json:"last_event_kind"`
-	StaleMinutes  float64 `json:"stale_minutes"`
 }
 
 const dashboardRecentEventsSummaryLimit = 10
@@ -287,7 +279,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		if len(e.ReferencedAsBaselineBy) > 0 {
 			continue
 		}
-		if expClassByID[e.ID].Classification == experimentClassificationDead {
+		if !experimentReadClassForID(expClassByID, e.ID).loopActionable() {
 			continue
 		}
 		row := dashboardInFlight{
@@ -316,35 +308,11 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		return a.After(*b)
 	})
 
-	// Stale experiment detection: flag non-terminal, non-baseline experiments
-	// whose last event is older than the configured threshold.
+	// Stale experiment detection: flag loop-actionable, non-baseline
+	// experiments whose last event is older than the configured threshold.
 	if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
 		threshold := time.Duration(staleMinutes) * time.Minute
-		now := time.Now().UTC()
-		for _, e := range exps {
-			switch e.Status {
-			case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
-			default:
-				continue
-			}
-			if e.IsBaseline {
-				continue
-			}
-			ts, kind := findLastEventForExperiment(allEvents, e.ID)
-			if ts == nil {
-				continue
-			}
-			age := now.Sub(*ts)
-			if age >= threshold {
-				snap.StaleExperiments = append(snap.StaleExperiments, dashboardStaleExp{
-					ID:            e.ID,
-					Hypothesis:    e.Hypothesis,
-					Status:        e.Status,
-					LastEventKind: kind,
-					StaleMinutes:  age.Minutes(),
-				})
-			}
-		}
+		snap.StaleExperiments = findStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
 	}
 
 	allObs, err := s.ListObservations()

@@ -152,7 +152,7 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 			out = append(out, goalFrontier{
 				Goal:       goal,
 				Rows:       rows,
-				Assessment: assessGoalCompletion(goal, concls, obsByExp),
+				Assessment: assessGoalCompletion(goal, concls, obsByExp, expClassByID),
 				StalledFor: stalled,
 			})
 		}
@@ -170,7 +170,7 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 	return []goalFrontier{{
 		Goal:       goal,
 		Rows:       rows,
-		Assessment: assessGoalCompletion(goal, concls, obsByExp),
+		Assessment: assessGoalCompletion(goal, concls, obsByExp, expClassByID),
 		StalledFor: stalled,
 	}}, nil
 }
@@ -230,10 +230,11 @@ type frontierRow struct {
 	Value      float64 `json:"value"`
 	DeltaFrac  float64 `json:"delta_frac"`
 	// Classification is a read-time label for the candidate experiment.
-	// "dead" means the experiment's parent hypothesis is already terminal,
-	// so the row is still historically valid but no longer actionable work.
+	// "dead" means the experiment's parent hypothesis is no longer
+	// loop-actionable for steering (terminal or decisive-but-unreviewed), so
+	// the row is still historically valid but no longer actionable work.
 	Classification string `json:"classification"`
-	// HypothesisStatus records the terminal hypothesis status that caused
+	// HypothesisStatus records the hypothesis status that caused
 	// Classification=dead. Kept separate from Hypothesis, which is the ID.
 	HypothesisStatus string `json:"hypothesis_status,omitempty"`
 	// RescuedBy is non-empty when the backing conclusion was supported via
@@ -278,10 +279,7 @@ func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 		if !ok {
 			continue
 		}
-		class := expClassByID[c.CandidateExp]
-		if class.Classification == "" {
-			class.Classification = experimentClassificationLive
-		}
+		class := experimentReadClassForID(expClassByID, c.CandidateExp)
 		rows = append(rows, frontierRow{
 			Conclusion:       c.ID,
 			Hypothesis:       c.Hypothesis,
@@ -307,9 +305,9 @@ func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 	for _, c := range sortedByTime {
 		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
 		if !ok {
-			if hasBest {
-				stalledFor++
-			}
+			continue
+		}
+		if !experimentReadClassForID(expClassByID, c.CandidateExp).loopActionable() {
 			continue
 		}
 		cur := frontierRow{
@@ -425,7 +423,7 @@ func betterFrontierValue(direction string, candidate, incumbent float64) bool {
 	return candidate > incumbent
 }
 
-func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation) frontierGoalAssessment {
+func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]experimentReadClass) frontierGoalAssessment {
 	if goal == nil || goal.IsOpenEnded() {
 		return frontierGoalAssessment{
 			Mode:              "open_ended",
@@ -446,6 +444,9 @@ func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 	hasReviewed := false
 	for _, c := range concls {
 		if c == nil || c.ReviewedBy == "" {
+			continue
+		}
+		if !experimentReadClassForID(expClassByID, c.CandidateExp).loopActionable() {
 			continue
 		}
 		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
