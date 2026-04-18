@@ -3,6 +3,7 @@ package instrument_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -374,6 +375,54 @@ func TestEvidence_FailureNonFatal(t *testing.T) {
 	}
 	if got := r.EvidenceFailures[0]; got.Name != "broken" || got.ExitCode != 7 || got.Error != "" {
 		t.Fatalf("unexpected evidence failure: %+v", got)
+	}
+}
+
+func TestEvidence_SpawnFailureRecordsErrorWithoutExitCode(t *testing.T) {
+	dir := t.TempDir()
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("look up sh: %v", err)
+	}
+	t.Setenv("PATH", "")
+
+	r, err := instrument.Run(context.Background(), instrument.Config{
+		ProjectDir:  dir,
+		WorktreeDir: dir,
+		Instrument: store.Instrument{
+			Cmd:     []string{shell, "-c", "echo cycles: 99"},
+			Parser:  "builtin:scalar",
+			Pattern: `cycles:\s*(\d+)`,
+			Unit:    "cycles",
+			Evidence: []store.EvidenceSpec{
+				{Name: "mechanism", Cmd: "echo trace"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Value != 99 {
+		t.Fatalf("primary value = %v, want 99", r.Value)
+	}
+	if got, want := len(r.EvidenceFailures), 1; got != want {
+		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
+	}
+	got := r.EvidenceFailures[0]
+	if got.Name != "mechanism" {
+		t.Fatalf("EvidenceFailures[0].Name = %q, want %q", got.Name, "mechanism")
+	}
+	if got.ExitCode != 0 {
+		t.Fatalf("EvidenceFailures[0].ExitCode = %d, want 0 for spawn failure", got.ExitCode)
+	}
+	if got.Error == "" {
+		t.Fatal("EvidenceFailures[0].Error is empty, want spawn failure detail")
+	}
+	if !strings.Contains(got.Error, `spawn "sh -c echo trace"`) {
+		t.Fatalf("EvidenceFailures[0].Error = %q, want spawn context", got.Error)
+	}
+	if _, ok := findArtifact(r.Artifacts, "evidence/mechanism"); ok {
+		t.Fatal("spawn-failed evidence should not produce an artifact")
 	}
 }
 

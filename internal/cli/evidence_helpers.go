@@ -9,7 +9,10 @@ import (
 )
 
 func formatEvidenceFailure(f entity.EvidenceFailure) string {
-	label := fmt.Sprintf("%s (exit %d)", f.Name, f.ExitCode)
+	label := f.Name
+	if f.ExitCode != 0 {
+		label = fmt.Sprintf("%s (exit %d)", f.Name, f.ExitCode)
+	}
 	if detail := strings.TrimSpace(f.Error); detail != "" {
 		return label + ": " + detail
 	}
