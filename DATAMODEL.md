@@ -267,6 +267,7 @@ observations are not mutated once written.
 | `CIMethod` | `string` | `ci_method` | e.g. `bootstrap-bca`. |
 | `Pass` | `*bool` | `pass` | For boolean instruments (e.g. `host_test=pass`). |
 | `Artifacts` | `[]Artifact` | `artifacts` | Content-addressed output files. |
+| `EvidenceFailures` | `[]EvidenceFailure` | `evidence_failures` | Non-fatal evidence side-artifact commands that failed after the primary measurement. |
 | `RawArtifact`, `RawSHA` | `string` | `raw_artifact`, `raw_sha` | Legacy single-artifact fields; kept in sync by `Normalize()`. |
 | `Command` | `string` | `command` | Command that produced the observation. |
 | `ExitCode` | `int` | `exit_code` | |
@@ -278,6 +279,9 @@ observations are not mutated once written.
 **`Artifact`** (`internal/entity/observation.go:12-18`): `Name`, `SHA`,
 `Path` (relative to `.research/`), `Bytes`, `Mime`. Artifacts live at
 `.research/artifacts/AB/CDEF…/<filename>` (see [On-disk layout](#on-disk-layout)).
+Evidence side-artifacts use logical names like `evidence/mechanism`;
+their combined stdout+stderr is stored alongside the primary artifact,
+and failures are recorded on the observation rather than failing it.
 
 No lifecycle: observations do not have a status.
 

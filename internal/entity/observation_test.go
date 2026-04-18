@@ -114,3 +114,57 @@ func TestObservationLegacyBackfill(t *testing.T) {
 		t.Errorf("backfilled artifact: %+v", o.Artifacts[0])
 	}
 }
+
+func TestObservationRoundTrip_PreservesEvidenceFailures(t *testing.T) {
+	ciLow := 95.0
+	ciHigh := 105.0
+	obs := &entity.Observation{
+		ID:         "O-0001",
+		Experiment: "E-0001",
+		Instrument: "timing",
+		MeasuredAt: time.Date(2026, 4, 18, 11, 0, 0, 0, time.UTC),
+		Value:      100,
+		Unit:       "cycles",
+		Samples:    3,
+		PerSample:  []float64{98, 100, 102},
+		CILow:      &ciLow,
+		CIHigh:     &ciHigh,
+		CIMethod:   "bootstrap_bca_95",
+		Artifacts: []entity.Artifact{{
+			Name:  "scalar",
+			SHA:   "abc123",
+			Path:  "artifacts/ab/c123/scalar.json",
+			Bytes: 42,
+			Mime:  "application/json",
+		}},
+		EvidenceFailures: []entity.EvidenceFailure{{
+			Name:     "mechanism",
+			ExitCode: 7,
+		}},
+		Command:     "echo cycles: 100",
+		ExitCode:    0,
+		Worktree:    "/tmp/worktree",
+		BaselineSHA: "deadbeef",
+		Author:      "agent:observer",
+	}
+	data, err := obs.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := entity.ParseObservation(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(back.EvidenceFailures), 1; got != want {
+		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
+	}
+	if got := back.EvidenceFailures[0]; got.Name != "mechanism" || got.ExitCode != 7 {
+		t.Fatalf("evidence failure lost: %+v", got)
+	}
+	if got, want := len(back.Artifacts), 1; got != want {
+		t.Fatalf("Artifacts len = %d, want %d", got, want)
+	}
+	if back.RawArtifact != obs.Artifacts[0].Path || back.RawSHA != obs.Artifacts[0].SHA {
+		t.Fatalf("legacy artifact fields not normalized: raw_artifact=%q raw_sha=%q", back.RawArtifact, back.RawSHA)
+	}
+}

@@ -201,6 +201,7 @@ func TestEventPayload_InstrumentRegisterEmitsFieldMap(t *testing.T) {
 		"--unit", "bool",
 		"--min-samples", "1",
 		"--requires", "build=pass",
+		"--evidence", "mechanism=printf trace",
 	})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("instrument register: %v", err)
@@ -217,14 +218,14 @@ func TestEventPayload_InstrumentRegisterEmitsFieldMap(t *testing.T) {
 	payload := decodePayload(t, e)
 
 	// Must have lowercase field-map keys (not capitalized struct field names).
-	wantKeys := []string{"cmd", "parser", "unit", "min_samples", "requires"}
+	wantKeys := []string{"cmd", "parser", "unit", "min_samples", "requires", "evidence"}
 	for _, k := range wantKeys {
 		if _, ok := payload[k]; !ok {
 			t.Errorf("payload missing key %q; got %v", k, payload)
 		}
 	}
 	// Must NOT carry the raw-struct shape (capitalized Go field names).
-	for _, k := range []string{"Cmd", "Parser", "Unit", "MinSamples", "Requires"} {
+	for _, k := range []string{"Cmd", "Parser", "Unit", "MinSamples", "Requires", "Evidence"} {
 		if _, ok := payload[k]; ok {
 			t.Errorf("payload leaked raw struct key %q", k)
 		}
@@ -242,5 +243,93 @@ func TestEventPayload_InstrumentRegisterEmitsFieldMap(t *testing.T) {
 	}
 	if len(reqs) != 1 || reqs[0] != "build=pass" {
 		t.Errorf("data.requires = %v, want [build=pass]", reqs)
+	}
+	evidence, ok := payload["evidence"].([]any)
+	if !ok {
+		t.Fatalf("data.evidence not a list: %T", payload["evidence"])
+	}
+	if len(evidence) != 1 {
+		t.Fatalf("data.evidence len = %d, want 1", len(evidence))
+	}
+	ev, ok := evidence[0].(map[string]any)
+	if !ok {
+		t.Fatalf("data.evidence[0] not an object: %T", evidence[0])
+	}
+	if ev["name"] != "mechanism" || ev["cmd"] != "printf trace" {
+		t.Fatalf("unexpected evidence payload: %+v", ev)
+	}
+	if _, ok := ev["Name"]; ok {
+		t.Fatalf("evidence payload leaked raw struct key Name: %+v", ev)
+	}
+}
+
+func TestEventPayload_ObservationRecordIncludesEvidenceFailures(t *testing.T) {
+	saveGlobals(t)
+	dir := gitInitScenarioRepo(t)
+	if _, err := store.Create(dir, store.Config{
+		Build:     store.CommandSpec{Command: "true"},
+		Test:      store.CommandSpec{Command: "true"},
+		Worktrees: store.WorktreesConfig{Root: t.TempDir()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	registerScenarioTimingInstrument(t, dir, "broken=echo nope >&2; exit 7")
+	registerScenarioSupportInstruments(t, dir)
+	goal := runCLIJSON[cliIDResponse](t, dir,
+		"goal", "set",
+		"--objective-instrument", "timing",
+		"--objective-target", "kernel",
+		"--objective-direction", "decrease",
+		"--constraint-require", "host_test=pass",
+	)
+	if goal.ID == "" {
+		t.Fatal("goal id missing")
+	}
+
+	hyp := runCLIJSON[cliIDResponse](t, dir,
+		"hypothesis", "add",
+		"--claim", "tighten the hot loop",
+		"--predicts-instrument", "timing",
+		"--predicts-target", "kernel",
+		"--predicts-direction", "decrease",
+		"--predicts-min-effect", "0.1",
+		"--kill-if", "tests fail",
+	)
+	exp := runCLIJSON[cliIDResponse](t, dir,
+		"experiment", "design", hyp.ID,
+		"--baseline", "HEAD",
+		"--instruments", "timing",
+	)
+	impl := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
+	writeScenarioMetrics(t, impl.Worktree, "80\n", "900\n")
+	gitCommitAll(t, impl.Worktree, "improve timing")
+	runCLI(t, dir, "observe", exp.ID, "--instrument", "timing")
+
+	s, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := findLastEvent(t, s, "observation.record")
+	if e == nil {
+		t.Fatal("observation.record event not found")
+	}
+	payload := decodePayload(t, e)
+	failures, ok := payload["evidence_failures"].([]any)
+	if !ok {
+		t.Fatalf("data.evidence_failures not a list: %T", payload["evidence_failures"])
+	}
+	if len(failures) != 1 {
+		t.Fatalf("data.evidence_failures len = %d, want 1", len(failures))
+	}
+	failure, ok := failures[0].(map[string]any)
+	if !ok {
+		t.Fatalf("data.evidence_failures[0] not an object: %T", failures[0])
+	}
+	if failure["name"] != "broken" {
+		t.Fatalf("failure name = %v, want broken", failure["name"])
+	}
+	if failure["exit_code"] != float64(7) {
+		t.Fatalf("failure exit_code = %v, want 7", failure["exit_code"])
 	}
 }

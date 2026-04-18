@@ -111,6 +111,10 @@ The core nouns are:
 | **Instrument** | A command plus parser that turns program behavior into a number or pass/fail result. | Makes optimization targets measurable and repeatable. |
 | **Artifact** | Content-addressed captured output attached to an observation. | Preserves the exact evidence a reviewer or human needs to audit a measurement. |
 
+Some artifacts are evidence side-artifacts: analysis outputs captured
+alongside a measurement so later mechanism claims are auditable from
+persisted state.
+
 `analyze` is a read-only computation over observations, not a first-class stored
 entity. It summarizes an experiment relative to the baseline and prepares the
 material a later `conclude` step will judge.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,99 @@ func TestInstrumentRegister_CmdRepeatableArgv(t *testing.T) {
 		if inst.Cmd[i] != w {
 			t.Errorf("Cmd[%d] = %q, want %q", i, inst.Cmd[i], w)
 		}
+	}
+}
+
+func TestInstrumentRegister_EvidenceStoredInOrder(t *testing.T) {
+	saveGlobals(t)
+	dir, s := setupGoalStore(t)
+
+	root := Root()
+	root.SetArgs([]string{
+		"-C", dir,
+		"instrument", "register", "timing_probe",
+		"--cmd", "sh",
+		"--cmd", "-c",
+		"--cmd", "echo cycles: 42",
+		"--parser", "builtin:scalar",
+		"--pattern", `cycles:\s*(\d+)`,
+		"--unit", "cycles",
+		"--evidence", "mechanism=printf candidate",
+		"--evidence", "summary=printf summary",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	cfg, err := s.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := cfg.Instruments["timing_probe"]
+	if got, want := len(inst.Evidence), 2; got != want {
+		t.Fatalf("Evidence len = %d, want %d", got, want)
+	}
+	if inst.Evidence[0].Name != "mechanism" || inst.Evidence[0].Cmd != "printf candidate" {
+		t.Fatalf("Evidence[0] = %+v", inst.Evidence[0])
+	}
+	if inst.Evidence[1].Name != "summary" || inst.Evidence[1].Cmd != "printf summary" {
+		t.Fatalf("Evidence[1] = %+v", inst.Evidence[1])
+	}
+}
+
+func TestInstrumentRegister_EvidenceValidation(t *testing.T) {
+	saveGlobals(t)
+	dir, _ := setupGoalStore(t)
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing equals",
+			args: []string{"--evidence", "mechanism"},
+			want: "want name=cmd",
+		},
+		{
+			name: "missing name",
+			args: []string{"--evidence", "=printf trace"},
+			want: "name is required",
+		},
+		{
+			name: "missing command",
+			args: []string{"--evidence", "mechanism="},
+			want: "command is required",
+		},
+		{
+			name: "duplicate names",
+			args: []string{"--evidence", "mechanism=printf one", "--evidence", "mechanism=printf two"},
+			want: "duplicate --evidence name",
+		},
+		{
+			name: "path separator in name",
+			args: []string{"--evidence", "bad/name=printf trace"},
+			want: "must not contain path separators",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := Root()
+			root.SetArgs(append([]string{
+				"-C", dir,
+				"instrument", "register", "timing_probe",
+				"--cmd", "true",
+				"--parser", "builtin:passfail",
+				"--unit", "bool",
+			}, tc.args...))
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("expected register to fail")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not contain %q", err, tc.want)
+			}
+		})
 	}
 }

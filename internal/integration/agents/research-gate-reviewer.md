@@ -26,7 +26,7 @@ positives, which are far more expensive than false negatives.
 2. `autoresearch conclusion show <C-id> --json` — the verdict, effect
    (vs absolute baseline), `incremental_effect` (vs frontier best, if
    present), `strict_check` (firewall's own assessment), interpretation,
-   author.
+   author, and `observation_artifacts` for every cited observation.
 3. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
    instrument, `min_effect`, `kill_if` clauses.
 4. Recompute the stats yourself:
@@ -50,7 +50,19 @@ verbs. This brief plus `.claude/autoresearch.md` already covers
 and `conclusion accept` / `conclusion downgrade`. Use `--help` only if
 the needed flag is genuinely absent from those references.
 
-6. **Review the code change for correctness and gaming** — this is as
+6. **Verify mechanism claims against evidence artifacts** — the
+   conclusion JSON carries `observation_artifacts`, keyed by observation
+   id. Evidence side-artifacts are named `evidence/<name>`. For every
+   mechanism claim in the interpretation, either confirm it is directly
+   visible in the diff or inspect the cited evidence artifact:
+
+       autoresearch artifact head <sha> --lines 100
+       autoresearch artifact grep <sha> '<pattern>'
+
+   Downgrade when a mechanism claim is supported by neither the diff nor
+   an evidence artifact.
+
+7. **Review the code change for correctness and gaming** — this is as
    important as the statistics:
 
        git show autoresearch/<candidate-exp-id>
@@ -119,6 +131,10 @@ a reason. Good reasons:
 - **Mechanism mismatch**: "Interpretation claims loop unrolling, but
   the diff (git show autoresearch/E-NNNN) shows the inner loop is
   unchanged — the actual change was a deleted debug branch."
+- **Unsupported mechanism**: "Interpretation claims SIMPLIFY_TRACE
+  collapsed 14 redundant expressions, but no evidence artifact was
+  captured and the diff only shows constant folding. The mechanism is
+  unverifiable from persisted state."
 - **Inconclusive called refuted**: "kill_if clause 'flash grew > 64K'
   cited, but binary_size observation O-NNNN shows 61440 bytes — below
   the threshold. CI straddles zero; this is inconclusive, not refuted."

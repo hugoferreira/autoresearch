@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
@@ -73,25 +74,26 @@ func runAndRecordObservation(
 		unit = inst.Unit
 	}
 	obs := &entity.Observation{
-		ID:          id,
-		Experiment:  exp.ID,
-		Instrument:  instName,
-		MeasuredAt:  result.FinishedAt.UTC(),
-		Value:       result.Value,
-		Unit:        unit,
-		Samples:     result.SamplesN,
-		PerSample:   result.PerSample,
-		CILow:       result.CILow,
-		CIHigh:      result.CIHigh,
-		CIMethod:    result.CIMethod,
-		Pass:        result.Pass,
-		Artifacts:   obsArts,
-		Command:     result.Command,
-		ExitCode:    result.ExitCode,
-		Worktree:    exp.Worktree,
-		BaselineSHA: exp.Baseline.SHA,
-		Author:      or(author, "agent:observer"),
-		Aux:         result.Aux,
+		ID:               id,
+		Experiment:       exp.ID,
+		Instrument:       instName,
+		MeasuredAt:       result.FinishedAt.UTC(),
+		Value:            result.Value,
+		Unit:             unit,
+		Samples:          result.SamplesN,
+		PerSample:        result.PerSample,
+		CILow:            result.CILow,
+		CIHigh:           result.CIHigh,
+		CIMethod:         result.CIMethod,
+		Pass:             result.Pass,
+		Artifacts:        obsArts,
+		EvidenceFailures: result.EvidenceFailures,
+		Command:          result.Command,
+		ExitCode:         result.ExitCode,
+		Worktree:         exp.Worktree,
+		BaselineSHA:      exp.Baseline.SHA,
+		Author:           or(author, "agent:observer"),
+		Aux:              result.Aux,
 	}
 	obs.Normalize()
 	if err := s.WriteObservation(obs); err != nil {
@@ -122,11 +124,29 @@ func runAndRecordObservation(
 	if result.ExitCode != 0 {
 		eventData["exit_code"] = result.ExitCode
 	}
+	if len(result.EvidenceFailures) > 0 {
+		eventData["evidence_failures"] = summarizeEvidenceFailures(result.EvidenceFailures)
+	}
 	if err := emitEvent(s, "observation.record", or(author, "agent:observer"), id, eventData); err != nil {
 		return nil, err
 	}
 
 	return obs, nil
+}
+
+func summarizeEvidenceFailures(failures []entity.EvidenceFailure) []map[string]any {
+	out := make([]map[string]any, 0, len(failures))
+	for _, f := range failures {
+		rec := map[string]any{
+			"name":      f.Name,
+			"exit_code": f.ExitCode,
+		}
+		if snippet := truncate(strings.TrimSpace(f.Error), 200); snippet != "" {
+			rec["error"] = snippet
+		}
+		out = append(out, rec)
+	}
+	return out
 }
 
 // observeAll runs all given instruments in dependency-safe order against an

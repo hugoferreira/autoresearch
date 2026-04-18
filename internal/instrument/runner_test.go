@@ -2,6 +2,9 @@ package instrument_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bytter/autoresearch/internal/instrument"
@@ -80,7 +83,7 @@ func TestSize_GNUFormat(t *testing.T) {
 		WorktreeDir: dir,
 		Name:        "size_flash",
 		Instrument: store.Instrument{
-			Cmd: []string{"sh", "-c", `printf '   text\tdata\t bss\t dec\t hex\tfilename\n  1024\t 256\t  64\t1344\t540\ta.out\n'`},
+			Cmd:    []string{"sh", "-c", `printf '   text\tdata\t bss\t dec\t hex\tfilename\n  1024\t 256\t  64\t1344\t540\ta.out\n'`},
 			Parser: "builtin:size",
 		},
 	})
@@ -101,7 +104,7 @@ func TestSize_MachOFormat(t *testing.T) {
 		ProjectDir:  dir,
 		WorktreeDir: dir,
 		Instrument: store.Instrument{
-			Cmd: []string{"sh", "-c", `printf '__TEXT\t__DATA\t__OBJC\tothers\tdec\thex\n4096\t0\t0\t1024\t5120\t1400\n'`},
+			Cmd:    []string{"sh", "-c", `printf '__TEXT\t__DATA\t__OBJC\tothers\tdec\thex\n4096\t0\t0\t1024\t5120\t1400\n'`},
 			Parser: "builtin:size",
 		},
 	})
@@ -280,4 +283,114 @@ func TestScalar_UnitHonored(t *testing.T) {
 	if r.Unit != "instructions" || r.Value != 42 {
 		t.Errorf("result: %+v", r)
 	}
+}
+
+func TestEvidence_ArtifactUsesShellContext(t *testing.T) {
+	dir := t.TempDir()
+	r, err := instrument.Run(context.Background(), instrument.Config{
+		ProjectDir:  dir,
+		WorktreeDir: dir,
+		Instrument: store.Instrument{
+			Cmd:     []string{"sh", "-c", "echo cycles: 42"},
+			Parser:  "builtin:scalar",
+			Pattern: `cycles:\s*(\d+)`,
+			Unit:    "cycles",
+			Evidence: []store.EvidenceSpec{{
+				Name: "mechanism",
+				Cmd:  `printf '%s|%s|%s' "$WORKTREE" "$PROJECT" "$(pwd)"`,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(r.EvidenceFailures), 0; got != want {
+		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
+	}
+	ev := artifactByName(t, r.Artifacts, "evidence/mechanism")
+	if ev.Filename != "mechanism.txt" {
+		t.Fatalf("evidence filename = %q, want mechanism.txt", ev.Filename)
+	}
+	if ev.Mime != "text/plain" {
+		t.Fatalf("evidence mime = %q, want text/plain", ev.Mime)
+	}
+	parts := strings.Split(string(ev.Content), "|")
+	if got, want := len(parts), 3; got != want {
+		t.Fatalf("evidence content parts = %d, want %d (%q)", got, want, ev.Content)
+	}
+	if parts[0] != dir || parts[1] != dir {
+		t.Fatalf("WORKTREE/PROJECT not propagated: %q", ev.Content)
+	}
+	gotPWD, err := filepath.EvalSymlinks(parts[2])
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", parts[2], err)
+	}
+	wantPWD, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+	if gotPWD != wantPWD {
+		t.Fatalf("pwd = %q, want %q (from %q)", gotPWD, wantPWD, ev.Content)
+	}
+}
+
+func TestEvidence_FailureNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "evidence.txt")
+	if err := os.WriteFile(marker, []byte("trace=ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := instrument.Run(context.Background(), instrument.Config{
+		ProjectDir:  dir,
+		WorktreeDir: dir,
+		Instrument: store.Instrument{
+			Cmd:     []string{"sh", "-c", "echo cycles: 99"},
+			Parser:  "builtin:scalar",
+			Pattern: `cycles:\s*(\d+)`,
+			Unit:    "cycles",
+			Evidence: []store.EvidenceSpec{
+				{Name: "mechanism", Cmd: "cat evidence.txt"},
+				{Name: "broken", Cmd: "echo nope >&2; exit 7"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Value != 99 {
+		t.Fatalf("primary value = %v, want 99", r.Value)
+	}
+	if _, ok := findArtifact(r.Artifacts, "scalar"); !ok {
+		t.Fatal("primary scalar artifact missing")
+	}
+	if _, ok := findArtifact(r.Artifacts, "evidence/mechanism"); !ok {
+		t.Fatal("successful evidence artifact missing")
+	}
+	if _, ok := findArtifact(r.Artifacts, "evidence/broken"); ok {
+		t.Fatal("failed evidence should not produce an artifact")
+	}
+	if got, want := len(r.EvidenceFailures), 1; got != want {
+		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
+	}
+	if got := r.EvidenceFailures[0]; got.Name != "broken" || got.ExitCode != 7 || got.Error != "" {
+		t.Fatalf("unexpected evidence failure: %+v", got)
+	}
+}
+
+func artifactByName(t *testing.T, arts []instrument.ArtifactContent, name string) instrument.ArtifactContent {
+	t.Helper()
+	if art, ok := findArtifact(arts, name); ok {
+		return art
+	}
+	t.Fatalf("artifact %q not found in %+v", name, arts)
+	return instrument.ArtifactContent{}
+}
+
+func findArtifact(arts []instrument.ArtifactContent, name string) (instrument.ArtifactContent, bool) {
+	for _, art := range arts {
+		if art.Name == name {
+			return art, true
+		}
+	}
+	return instrument.ArtifactContent{}, false
 }
