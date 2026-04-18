@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -224,13 +225,13 @@ func (v *frontierView) init(s *store.Store) tea.Cmd {
 		if err != nil {
 			return frontierLoadedMsg{err: err}
 		}
-		obsByExp := loadObservationsByExperiment(s)
-		expClassByID := loadExperimentReadClasses(s)
-		rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+		obsByExp := readmodel.LoadObservationsByExperiment(s)
+		expClassByID := readmodel.LoadExperimentReadClasses(s)
+		rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
 		return frontierLoadedMsg{
 			goal:       goal,
 			rows:       rows,
-			assessment: assessGoalCompletion(goal, concls, obsByExp, expClassByID),
+			assessment: readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
 			stalled:    stalled,
 		}
 	}

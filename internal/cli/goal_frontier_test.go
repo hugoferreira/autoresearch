@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/readmodel"
 )
 
 func TestBuildGoalFromFlags_DefaultsThresholdPolicy(t *testing.T) {
@@ -129,16 +130,16 @@ func TestFrontierRowBetter_RescuerTiebreak(t *testing.T) {
 	// Same primary value, but a has smaller size → a should win.
 	a := frontierRow{Value: 100.0, TiebreakValues: []float64{512}}
 	b := frontierRow{Value: 100.5, TiebreakValues: []float64{600}} // within 1% band
-	if !frontierRowBetter(goal, a, b) {
+	if !readmodel.FrontierRowBetter(goal, a, b) {
 		t.Errorf("a should beat b via rescuer tiebreak")
 	}
-	if frontierRowBetter(goal, b, a) {
+	if readmodel.FrontierRowBetter(goal, b, a) {
 		t.Errorf("b should not beat a")
 	}
 	// If primary gap exceeds neutral band, primary wins regardless of size.
 	c := frontierRow{Value: 80.0, TiebreakValues: []float64{9999}}
 	d := frontierRow{Value: 100.0, TiebreakValues: []float64{10}}
-	if !frontierRowBetter(goal, c, d) {
+	if !readmodel.FrontierRowBetter(goal, c, d) {
 		t.Errorf("primary-dominant candidate should win over size-dominant one when outside the neutral band")
 	}
 }
@@ -148,7 +149,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 		goal := &entity.Goal{
 			Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
 		}
-		got := assessGoalCompletion(goal, nil, nil, nil)
+		got := readmodel.AssessGoalCompletion(goal, nil, nil, nil)
 		if got.Mode != "open_ended" || got.Met || got.RecommendedAction != "continue" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -175,7 +176,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 		obsByExp := map[string][]*entity.Observation{
 			"E-0001": {{Instrument: "host_timing", Value: 0.75}},
 		}
-		got := assessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
 		if !got.Met || got.MetByConclusion != "C-0001" || got.RecommendedAction != "ask_human" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -211,7 +212,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 			"E-0001": {{Instrument: "host_timing", Value: 0.70}},
 			"E-0002": {{Instrument: "host_timing", Value: 0.82}},
 		}
-		got := assessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
 		if !got.Met || got.MetByConclusion != "C-0002" || got.RecommendedAction != "stop" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -279,7 +280,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 				{Instrument: "host_test", Pass: &pass},
 			},
 		}
-		got := assessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
 		if !got.Met || got.MetByConclusion != "C-0102" || got.RecommendedAction != "ask_human" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -306,7 +307,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 		obsByExp := map[string][]*entity.Observation{
 			"E-1000": {{Instrument: "throughput", Value: 112}},
 		}
-		got := assessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
 		if !got.Met || got.RecommendedAction != "continue" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -342,7 +343,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 			"E-2000": {{Instrument: "host_timing", Value: 0.70}},
 			"E-2001": {{Instrument: "host_timing", Value: 0.70}},
 		}
-		got := assessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
 		if got.Met || got.RecommendedAction != "continue" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -375,7 +376,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 				HypothesisStatus: entity.StatusKilled,
 			},
 		}
-		got := assessGoalCompletion(goal, concls, obsByExp, expClassByID)
+		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID)
 		if got.Met || got.MetByConclusion != "" || got.RecommendedAction != "continue" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -398,7 +399,7 @@ func TestComputeFrontierFromObservations_CarriesExperimentClassification(t *test
 	obsByExp := map[string][]*entity.Observation{
 		"E-0001": {{Instrument: "host_timing", Value: 0.75}},
 	}
-	rows, _ := computeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
+	rows, _ := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
 		"E-0001": {
 			Classification:   experimentClassificationDead,
 			HypothesisStatus: entity.StatusSupported,
@@ -460,7 +461,7 @@ func TestComputeFrontierFromObservations_StalledForIgnoresDeadRows(t *testing.T)
 		"E-0003": {{Instrument: "host_timing", Value: 90}},
 		"E-0004": {{Instrument: "host_timing", Value: 102}},
 	}
-	rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
+	rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
 		"E-0003": {
 			Classification:   experimentClassificationDead,
 			HypothesisStatus: entity.StatusRefuted,

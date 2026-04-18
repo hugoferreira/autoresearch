@@ -8,7 +8,7 @@ import (
 	"github.com/bytter/autoresearch/internal/store"
 )
 
-func TestAnnotateExperimentsForRead_UsesParentHypothesisStatus(t *testing.T) {
+func TestListExperimentsForHypothesisForRead_AnnotatesResults(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Create(dir, store.Config{
 		Build: store.CommandSpec{Command: "true"},
@@ -36,53 +36,57 @@ func TestAnnotateExperimentsForRead_UsesParentHypothesisStatus(t *testing.T) {
 		}
 	}
 
-	views, err := annotateExperimentsForRead(s, []*entity.Experiment{
-		{ID: "E-0001", Hypothesis: "H-0001"},
-		{ID: "E-0002", Hypothesis: "H-0002"},
-	})
+	for _, e := range []*entity.Experiment{
+		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, CreatedAt: now},
+		{ID: "E-0002", Hypothesis: "H-0002", Status: entity.ExpMeasured, CreatedAt: now},
+	} {
+		if err := s.WriteExperiment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	views, err := listExperimentsForHypothesisForRead(s, "H-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got, want := len(views), 1; got != want {
+		t.Fatalf("len(views) = %d, want %d", got, want)
+	}
+	if got, want := views[0].ID, "E-0001"; got != want {
+		t.Fatalf("views[0].ID = %q, want %q", got, want)
+	}
 	if got, want := views[0].Classification, experimentClassificationDead; got != want {
-		t.Fatalf("E-0001 classification = %q, want %q", got, want)
+		t.Fatalf("views[0].Classification = %q, want %q", got, want)
 	}
 	if got, want := views[0].HypothesisStatus, entity.StatusSupported; got != want {
-		t.Fatalf("E-0001 hypothesis_status = %q, want %q", got, want)
-	}
-	if got, want := views[1].Classification, experimentClassificationLive; got != want {
-		t.Fatalf("E-0002 classification = %q, want %q", got, want)
+		t.Fatalf("views[0].HypothesisStatus = %q, want %q", got, want)
 	}
 }
 
-func TestClassifyHypothesisStatusForExperimentRead(t *testing.T) {
-	cases := []struct {
-		name       string
-		status     string
-		class      string
-		actionable bool
-		wantStatus string
-	}{
-		{name: "missing defaults live", status: "", class: experimentClassificationLive, actionable: true, wantStatus: ""},
-		{name: "open stays live", status: entity.StatusOpen, class: experimentClassificationLive, actionable: true, wantStatus: ""},
-		{name: "inconclusive stays live", status: entity.StatusInconclusive, class: experimentClassificationLive, actionable: true, wantStatus: ""},
-		{name: "unreviewed is dead", status: entity.StatusUnreviewed, class: experimentClassificationDead, actionable: false, wantStatus: entity.StatusUnreviewed},
-		{name: "supported is dead", status: entity.StatusSupported, class: experimentClassificationDead, actionable: false, wantStatus: entity.StatusSupported},
-		{name: "refuted is dead", status: entity.StatusRefuted, class: experimentClassificationDead, actionable: false, wantStatus: entity.StatusRefuted},
-		{name: "killed is dead", status: entity.StatusKilled, class: experimentClassificationDead, actionable: false, wantStatus: entity.StatusKilled},
+func TestExperimentClassificationHelpers(t *testing.T) {
+	if err := validateExperimentClassificationFilter(""); err != nil {
+		t.Fatalf("validate empty: %v", err)
+	}
+	if err := validateExperimentClassificationFilter(experimentClassificationLive); err != nil {
+		t.Fatalf("validate live: %v", err)
+	}
+	if err := validateExperimentClassificationFilter(experimentClassificationDead); err != nil {
+		t.Fatalf("validate dead: %v", err)
+	}
+	if err := validateExperimentClassificationFilter("zombie"); err == nil {
+		t.Fatal("expected invalid classification to be rejected")
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := classifyHypothesisStatusForExperimentRead(tc.status)
-			if got.Classification != tc.class {
-				t.Fatalf("classification = %q, want %q", got.Classification, tc.class)
-			}
-			if got.HypothesisStatus != tc.wantStatus {
-				t.Fatalf("hypothesis_status = %q, want %q", got.HypothesisStatus, tc.wantStatus)
-			}
-			if got.LoopActionable() != tc.actionable {
-				t.Fatalf("loopActionable = %v, want %v", got.LoopActionable(), tc.actionable)
-			}
-		})
+	if got, want := experimentClassificationSummary("", ""), experimentClassificationLive; got != want {
+		t.Fatalf("summary(empty) = %q, want %q", got, want)
+	}
+	if got, want := experimentClassificationSummary(experimentClassificationDead, entity.StatusSupported), "dead (hypothesis=supported)"; got != want {
+		t.Fatalf("summary(dead) = %q, want %q", got, want)
+	}
+	if got, want := experimentClassificationMarker(experimentClassificationDead), "[dead]"; got != want {
+		t.Fatalf("marker(dead) = %q, want %q", got, want)
+	}
+	if got := experimentClassificationMarker(experimentClassificationLive); got != "" {
+		t.Fatalf("marker(live) = %q, want empty", got)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/integration"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
@@ -479,12 +480,12 @@ func statusCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				expClassByID, err := classifyExperimentsForRead(s, exps)
+				expClassByID, err := readmodel.ClassifyExperimentsForRead(s, exps)
 				if err != nil {
 					return err
 				}
 				threshold := time.Duration(staleMinutes) * time.Minute
-				stale = findStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
+				stale = readmodel.FindStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
 			}
 			if len(stale) > 0 {
 				payload["stale_experiments"] = stale

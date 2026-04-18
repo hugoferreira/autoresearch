@@ -245,7 +245,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	}
 
 	if snap.Goal != nil {
-		rows, stalled := computeFrontier(s, snap.Goal, concls)
+		rows, stalled := readmodel.ComputeFrontier(s, snap.Goal, concls)
 		snap.Frontier = rows
 		snap.StalledFor = stalled
 	}
@@ -269,7 +269,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	if err != nil {
 		return nil, err
 	}
-	expClassByID, err := classifyExperimentsForRead(s, exps)
+	expClassByID, err := readmodel.ClassifyExperimentsForRead(s, exps)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		if len(e.ReferencedAsBaselineBy) > 0 {
 			continue
 		}
-		if !experimentReadClassForID(expClassByID, e.ID).LoopActionable() {
+		if !readmodel.ExperimentReadClassForID(expClassByID, e.ID).LoopActionable() {
 			continue
 		}
 		row := dashboardInFlight{
@@ -289,7 +289,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 			Status:      e.Status,
 			Instruments: append([]string{}, e.Instruments...),
 		}
-		if ts, kind := findLastEventForExperiment(allEvents, e.ID); ts != nil && kind == "experiment.implement" {
+		if ts, kind := readmodel.FindLastEventForExperiment(allEvents, e.ID); ts != nil && kind == "experiment.implement" {
 			row.ImplementedAt = ts
 			row.ElapsedS = time.Since(*ts).Seconds()
 		}
@@ -313,7 +313,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	// experiments whose last event is older than the configured threshold.
 	if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
 		threshold := time.Duration(staleMinutes) * time.Minute
-		snap.StaleExperiments = findStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
+		snap.StaleExperiments = readmodel.FindStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
 	}
 
 	allObs, err := s.ListObservations()
@@ -379,12 +379,6 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
 
 	return snap, nil
-}
-
-// findLastEventForExperiment scans a pre-loaded event list backward for the
-// most recent event referencing expID and returns its timestamp and kind.
-func findLastEventForExperiment(events []store.Event, expID string) (ts *time.Time, kind string) {
-	return readmodel.FindLastEventForExperiment(events, expID)
 }
 
 // ---- one-shot + refresh loop ----

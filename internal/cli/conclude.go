@@ -9,6 +9,7 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
@@ -138,7 +139,7 @@ downgraded since there is no comparator).`,
 			goal, goalErr := s.ActiveGoal()
 			if goalErr == nil {
 				concls, _ := s.ListConclusions()
-				frontierRows, _ := computeFrontier(s, goal, concls)
+				frontierRows, _ := readmodel.ComputeFrontier(s, goal, concls)
 				if len(frontierRows) > 0 {
 					best := frontierRows[0].Candidate
 					// Only compute incremental if it differs from the absolute baseline.

@@ -130,8 +130,8 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 	if err != nil {
 		return nil, err
 	}
-	obsByExp := loadObservationsByExperiment(s)
-	expClassByID, err := classifyAllExperimentsForRead(s)
+	obsByExp := readmodel.LoadObservationsByExperiment(s)
+	expClassByID, err := readmodel.ClassifyAllExperimentsForRead(s)
 	if err != nil {
 		return nil, err
 	}
@@ -146,11 +146,11 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 			if err != nil {
 				return nil, err
 			}
-			rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+			rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
 			out = append(out, goalFrontier{
 				Goal:       goal,
 				Rows:       rows,
-				Assessment: assessGoalCompletion(goal, concls, obsByExp, expClassByID),
+				Assessment: readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
 				StalledFor: stalled,
 			})
 		}
@@ -164,11 +164,11 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+	rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
 	return []goalFrontier{{
 		Goal:       goal,
 		Rows:       rows,
-		Assessment: assessGoalCompletion(goal, concls, obsByExp, expClassByID),
+		Assessment: readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
 		StalledFor: stalled,
 	}}, nil
 }
@@ -223,29 +223,3 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 
 type frontierRow = readmodel.FrontierRow
 type frontierGoalAssessment = readmodel.FrontierGoalAssessment
-
-// computeFrontier returns rows in best-first order for the objective and the
-// count of conclusions written since the last frontier improvement.
-func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclusion) (rows []frontierRow, stalledFor int) {
-	return readmodel.ComputeFrontier(s, goal, concls)
-}
-
-func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]experimentReadClass) (rows []frontierRow, stalledFor int) {
-	return readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
-}
-
-func frontierRowBetter(goal *entity.Goal, a, b frontierRow) bool {
-	return readmodel.FrontierRowBetter(goal, a, b)
-}
-
-func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]experimentReadClass) frontierGoalAssessment {
-	return readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID)
-}
-
-func loadExperimentReadClasses(s *store.Store) map[string]experimentReadClass {
-	return readmodel.LoadExperimentReadClasses(s)
-}
-
-func loadObservationsByExperiment(s *store.Store) map[string][]*entity.Observation {
-	return readmodel.LoadObservationsByExperiment(s)
-}

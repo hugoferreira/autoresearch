@@ -11,6 +11,7 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
@@ -540,7 +541,7 @@ func experimentShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			view, err := readExperimentForRead(s, args[0])
+			view, err := readmodel.ReadExperimentForRead(s, args[0])
 			if err != nil {
 				return err
 			}

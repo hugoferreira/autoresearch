@@ -2,9 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 )
@@ -18,26 +16,6 @@ type experimentReadClass = readmodel.ExperimentReadClass
 type experimentReadView = readmodel.ExperimentReadView
 type staleExperimentView = readmodel.StaleExperimentView
 
-func experimentReadClassForID(classByID map[string]experimentReadClass, expID string) experimentReadClass {
-	return readmodel.ExperimentReadClassForID(classByID, expID)
-}
-
-func classifyExperimentsForRead(s *store.Store, exps []*entity.Experiment) (map[string]experimentReadClass, error) {
-	return readmodel.ClassifyExperimentsForRead(s, exps)
-}
-
-func annotateExperimentsForRead(s *store.Store, exps []*entity.Experiment) ([]*experimentReadView, error) {
-	return readmodel.AnnotateExperimentsForRead(s, exps)
-}
-
-func annotateExperimentForRead(s *store.Store, e *entity.Experiment) (*experimentReadView, error) {
-	return readmodel.AnnotateExperimentForRead(s, e)
-}
-
-func readExperimentForRead(s *store.Store, id string) (*experimentReadView, error) {
-	return readmodel.ReadExperimentForRead(s, id)
-}
-
 func listScopedExperimentsForRead(s *store.Store, scope goalScope) ([]*experimentReadView, error) {
 	list, err := s.ListExperiments()
 	if err == nil {
@@ -46,7 +24,7 @@ func listScopedExperimentsForRead(s *store.Store, scope goalScope) ([]*experimen
 	if err != nil {
 		return nil, err
 	}
-	return annotateExperimentsForRead(s, list)
+	return readmodel.AnnotateExperimentsForRead(s, list)
 }
 
 func listExperimentsForHypothesisForRead(s *store.Store, hypID string) ([]*experimentReadView, error) {
@@ -54,15 +32,7 @@ func listExperimentsForHypothesisForRead(s *store.Store, hypID string) ([]*exper
 	if err != nil {
 		return nil, err
 	}
-	return annotateExperimentsForRead(s, list)
-}
-
-func classifyAllExperimentsForRead(s *store.Store) (map[string]experimentReadClass, error) {
-	return readmodel.ClassifyAllExperimentsForRead(s)
-}
-
-func classifyHypothesisStatusForExperimentRead(status string) experimentReadClass {
-	return readmodel.ClassifyHypothesisStatusForExperimentRead(status)
+	return readmodel.AnnotateExperimentsForRead(s, list)
 }
 
 func validateExperimentClassificationFilter(classification string) error {
@@ -92,8 +62,4 @@ func experimentClassificationMarker(classification string) string {
 		return "[dead]"
 	}
 	return ""
-}
-
-func findStaleExperimentsForRead(exps []*entity.Experiment, classByID map[string]experimentReadClass, events []store.Event, threshold time.Duration, now time.Time) []staleExperimentView {
-	return readmodel.FindStaleExperimentsForRead(exps, classByID, events, threshold, now)
 }
