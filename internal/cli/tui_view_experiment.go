@@ -217,10 +217,10 @@ func (v *experimentDetailView) view(width, height int) string {
 		rows = append(rows, []string{"id", "measurement", "n", "ci", "pass"})
 		for i := 0; i < max; i++ {
 			o := v.obs[i]
-			meas := fmt.Sprintf("%s=%.6g %s", o.Instrument, o.Value, o.Unit)
+			meas := fmt.Sprintf("%s=%s", o.Instrument, fmtValue(o.Value, o.Unit))
 			ci := ""
 			if o.CILow != nil && o.CIHigh != nil {
-				ci = fmt.Sprintf("[%.6g, %.6g]", *o.CILow, *o.CIHigh)
+				ci = fmtValueRange(*o.CILow, *o.CIHigh, o.Unit)
 			}
 			pass := ""
 			if o.Pass != nil {
@@ -266,11 +266,11 @@ func (v *experimentDetailView) view(width, height int) string {
 			srows = append(srows, []string{
 				k,
 				fmt.Sprintf("%d", s.N),
-				fmt.Sprintf("%.6g", s.Mean),
-				fmt.Sprintf("[%.6g, %.6g]", s.CILow, s.CIHigh),
-				fmt.Sprintf("%.4g", s.StdDev),
-				fmt.Sprintf("%.6g", s.Min),
-				fmt.Sprintf("%.6g", s.Max),
+				fmtNumber(s.Mean),
+				fmtRange(s.CILow, s.CIHigh),
+				fmtNumber(s.StdDev),
+				fmtNumber(s.Min),
+				fmtNumber(s.Max),
 				s.CIMethod,
 			})
 		}

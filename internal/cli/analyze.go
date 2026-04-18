@@ -120,18 +120,16 @@ to persist a verdict.`,
 			for _, r := range rows {
 				w.Textln("")
 				w.Textf("instrument: %s\n", r.Instrument)
-				w.Textf("  candidate: n=%d  mean=%.6g  [%.6g, %.6g]  (stddev=%.4g)\n",
-					r.Candidate.N, r.Candidate.Mean, r.Candidate.CILow, r.Candidate.CIHigh, r.Candidate.StdDev)
+				w.Textf("  candidate: n=%d  mean=%s  %s  (stddev=%s)\n",
+					r.Candidate.N, fmtNumber(r.Candidate.Mean), fmtRange(r.Candidate.CILow, r.Candidate.CIHigh), fmtNumber(r.Candidate.StdDev))
 				if r.Baseline != nil {
-					w.Textf("  baseline:  n=%d  mean=%.6g  [%.6g, %.6g]  (stddev=%.4g)\n",
-						r.Baseline.N, r.Baseline.Mean, r.Baseline.CILow, r.Baseline.CIHigh, r.Baseline.StdDev)
+					w.Textf("  baseline:  n=%d  mean=%s  %s  (stddev=%s)\n",
+						r.Baseline.N, fmtNumber(r.Baseline.Mean), fmtRange(r.Baseline.CILow, r.Baseline.CIHigh), fmtNumber(r.Baseline.StdDev))
 				}
 				if r.Comparison != nil {
 					cmp := r.Comparison
-					w.Textf("  delta_abs:  %+.6g  95%% CI [%+.6g, %+.6g]\n",
-						cmp.DeltaAbs, cmp.CILowAbs, cmp.CIHighAbs)
-					w.Textf("  delta_frac: %+.4f  95%% CI [%+.4f, %+.4f]\n",
-						cmp.DeltaFrac, cmp.CILowFrac, cmp.CIHighFrac)
+					w.Textf("  delta_abs:  %s\n", formatSignedCI95(cmp.DeltaAbs, cmp.CILowAbs, cmp.CIHighAbs))
+					w.Textf("  delta_frac: %s\n", formatSignedCI95(cmp.DeltaFrac, cmp.CILowFrac, cmp.CIHighFrac))
 					w.Textf("  mann–whitney U=%.1f  p=%.4f\n", cmp.UStat, cmp.PValue)
 				}
 			}
@@ -173,4 +171,3 @@ func sortedKeys(m map[string][]*entity.Observation) []string {
 	sort.Strings(out)
 	return out
 }
-

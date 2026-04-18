@@ -159,18 +159,21 @@ goal and names the instrument that will measure its predicted effect.
 | From                      | To                 | Trigger                                           |
 | ------------------------- | ------------------ | ------------------------------------------------- |
 | —                         | `open`             | `hypothesis add`                                  |
-| `open`                    | `unreviewed`       | `conclude` with decisive verdict (`supported`/`refuted`) |
-| `open`                    | `inconclusive`     | `conclude inconclusive` (no gate review needed)   |
+| `open` / `inconclusive`   | `unreviewed`       | `conclude` with decisive verdict (`supported`/`refuted`) |
+| `open` / `inconclusive`   | `inconclusive`     | `conclude inconclusive`                           |
 | `unreviewed`              | `supported` / `refuted` | `conclusion accept --reviewed-by`            |
-| `supported` / `refuted`   | `inconclusive`     | `conclusion downgrade --reason` (critic)          |
+| `unreviewed` / `supported` / `refuted` | `inconclusive` | `conclusion downgrade --reason` (critic) or `conclusion withdraw --reason` (author/orchestrator/human) |
 | `inconclusive`            | `unreviewed`       | `conclusion appeal --reason`                      |
-| `open`                    | `killed`           | `hypothesis kill --reason`                        |
+| `open` / `inconclusive`   | `killed`           | `hypothesis kill --reason`                        |
 | `killed`                  | `open`             | `hypothesis reopen --reason`                      |
 
 `unreviewed` is the post-conclude / pre-review holding state and exists to
 keep the two-agent firewall honest: the generator cannot derive a child
 hypothesis from, nor can `hypothesis apply` ship, a conclusion that hasn't
-been independently reviewed.
+been independently reviewed. `conclude` and `hypothesis kill` are only valid
+from `open` or `inconclusive`; if a decisive claim should no longer stand,
+the lifecycle first moves it back through `conclusion downgrade` or
+`conclusion withdraw`.
 
 ---
 
@@ -323,10 +326,10 @@ experiment, and the statistical comparison of their observations.
 | `Strict` field | Type | YAML key | Notes |
 | --- | --- | --- | --- |
 | `Passed` | `bool` | `passed` | Whether the firewall accepted the requested verdict. |
-| `RequestedFrom` | `string` | `downgraded_from` | Original verdict before a strict downgrade. |
+| `RequestedFrom` | `string` | `downgraded_from` | Original verdict before a firewall downgrade, critic downgrade, or author-side withdrawal. |
 | `RescuedBy` | `string` | `rescued_by` | Instrument name of the goal rescuer whose clause check saved the verdict. Empty when the primary passed directly or when the downgrade wasn't rescued. |
 | `Directional` | `bool` | `directional` | True when the hypothesis predicted with `MinEffect == 0` (direction-only). A rendering hint so a clean-CI but tiny effect is never mistaken for a quantitative win. |
-| `Reasons` | `[]string` | `reasons` | Why the firewall downgraded or (on rescue) what the primary looked like before rescue fired. |
+| `Reasons` | `[]string` | `reasons` | Why the verdict moved back to `inconclusive` or (on rescue) what the primary looked like before rescue fired. |
 
 | `ClauseCheck` field | Type | YAML key | Notes |
 | --- | --- | --- | --- |
@@ -346,8 +349,12 @@ crosses zero in the wrong direction, if sample counts are insufficient, or
 if `|delta_frac| < Hypothesis.Predicts.MinEffect`. A directional
 hypothesis (`MinEffect == 0`) skips the magnitude gate; the CI-clean-side
 check still applies. A critic can also call `conclusion downgrade` to flip
-a decisive verdict to `inconclusive` with a reason. `conclusion appeal`
-reverses a downgrade and moves the hypothesis back to `unreviewed`.
+a decisive verdict to `inconclusive` with a reason. The main
+session/author/human can instead call `conclusion withdraw` to retract a
+decisive claim explicitly; both paths preserve the original verdict in
+`Strict.RequestedFrom`, but the event log distinguishes critic downgrade
+from author-side withdrawal. `conclusion appeal` only reverses critic
+downgrades and moves the hypothesis back to `unreviewed`.
 
 **Rescue path**: when the goal declares `Rescuers` and a positive
 `NeutralBandFrac`, a failing `supported` check can be salvaged.
@@ -375,10 +382,18 @@ classification above.
 - Frontier rows may still point at experiments classified `dead`. That label
   controls current loop actionability and rendering; it does not invalidate a
   historically best result.
+- Current-truth surfaces treat the hypothesis's current accepted stance as
+  authoritative. Older supported conclusions from hypotheses now at
+  `refuted` or `inconclusive` no longer count toward the frontier or
+  `goal_assessment`.
 - `goal_assessment.met` is about the best accepted supported conclusion that
   still satisfies the goal's constraints and threshold. A reviewed win still
   counts after acceptance moves its hypothesis to `supported` and the
   experiment becomes read-classified `dead`.
+- Back-compat exception: legacy stores may still contain `supported` →
+  `killed` histories from before the lifecycle guard tightened. Read-only
+  frontier/goal views may still show those historical wins, but shipping and
+  default winner resolution do not treat `killed` as currently shippable.
 - `stalled_for` counts conclusions written since the last conclusion that
   actually improved the frontier. Once a frontier exists, every later
   non-improving conclusion increments the counter, even if that conclusion is

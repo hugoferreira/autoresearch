@@ -125,9 +125,15 @@ The system is intentionally gated at a few hard boundaries:
 | **Experiment isolation** | Every experiment runs in its own git worktree from the recorded baseline. | Prevents cross-experiment leakage and makes resets cheap. |
 | **Observation dependency gate** | `observe` refuses an instrument whose declared prerequisites (for example `host_test=pass`) have not passed on the same experiment, unless `--force` is used. | Stops invalid preconditions from being mistaken for meaningful measurements. |
 | **Strict conclusion gate** | `conclude` may downgrade `supported` to `inconclusive` when the CI crosses zero in the wrong direction or the observed effect misses the hypothesis's `min_effect`. | Makes "supported" hard to earn. |
-| **Independent review gate** | Decisive conclusions can be independently accepted or downgraded by the gate reviewer or `conclusion downgrade`. | Adds a second pass over stats, artifacts, and diffs before a result is treated as settled. |
+| **Independent review gate** | Decisive conclusions stay provisional until the gate reviewer resolves them via `conclusion accept` or `conclusion downgrade`; later author-side retractions use `conclusion withdraw`. | Keeps the current scientific stance explicit and auditable. |
 | **Pause and budget gates** | Mutating verbs refuse to proceed when the project is paused or budgets are exhausted. | Gives humans and policies a hard stop on the loop. |
 | **Single-writer gate** | Only the CLI writes `.research/`. Agents and subagents must go through verbs, not file edits. | Keeps state atomic, auditable, and machine-readable. |
+
+Once a decisive claim is on the record, autoresearch treats the hypothesis
+status as the current accepted stance. If later evidence or review means the
+claim should no longer stand, move it back to `inconclusive` first via
+reviewer-side `conclusion downgrade` or author/orchestrator-side
+`conclusion withdraw`, then re-conclude from the new evidence.
 
 ## Install
 
@@ -245,7 +251,7 @@ is paused.
 | **observe** | `observe <exp> --instrument <name>`, `observe <exp> --all` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
-| **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |
+| **conclusion** | `list`, `show`, `accept`, `downgrade`, `withdraw`, `appeal` |
 | **tree / frontier** | `tree [--goal G-NNNN\|all]`, `frontier [--goal G-NNNN\|all]` |
 | **log** | `log [--goal G-NNNN\|all] [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |

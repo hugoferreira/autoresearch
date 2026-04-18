@@ -63,8 +63,17 @@ downgraded since there is no comparator).`,
 			if err != nil {
 				return err
 			}
-			if hyp.Status == entity.StatusKilled {
-				return fmt.Errorf("hypothesis %s is killed; reopen before concluding", hypID)
+			if !hypothesisStatusAllowsConclude(hyp.Status) {
+				switch hyp.Status {
+				case entity.StatusKilled:
+					return fmt.Errorf("hypothesis %s is killed; reopen before concluding", hypID)
+				case entity.StatusUnreviewed:
+					return fmt.Errorf("hypothesis %s is unreviewed — resolve the pending conclusion via `conclusion accept`, `conclusion downgrade`, or `conclusion withdraw` before concluding again", hypID)
+				case entity.StatusSupported, entity.StatusRefuted:
+					return fmt.Errorf("hypothesis %s is %s — use `conclusion withdraw` or `conclusion downgrade` before concluding again", hypID, hyp.Status)
+				default:
+					return fmt.Errorf("hypothesis %s has status %q; concluding is only valid for open or inconclusive hypotheses", hypID, hyp.Status)
+				}
 			}
 
 			// Load observations, enforce they target the hypothesis's predicted instrument
@@ -351,13 +360,13 @@ downgraded since there is no comparator).`,
 				w.Textf("  baseline:    %s  (n=%d)\n", baselineExp, effect.NBaseline)
 			}
 			if cmp != nil {
-				w.Textf("  delta_frac:  %+.4f  95%% CI [%+.4f, %+.4f]  (vs absolute baseline)\n", effect.DeltaFrac, effect.CILowFrac, effect.CIHighFrac)
+				w.Textf("  delta_frac:  %s  (vs absolute baseline)\n", formatSignedCI95(effect.DeltaFrac, effect.CILowFrac, effect.CIHighFrac))
 				w.Textf("  p-value:     %.4g  (%s)\n", effect.PValue, concl.StatTest)
 			}
 			if concl.IncrementalEffect != nil {
 				ie := concl.IncrementalEffect
-				w.Textf("  incremental: %s  delta_frac=%+.4f  CI [%+.4f, %+.4f]  (vs frontier best)\n",
-					incrementalExp, ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac)
+				w.Textf("  incremental: %s  delta_frac=%s  (vs frontier best)\n",
+					incrementalExp, formatSignedCI(ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac))
 			}
 			if len(decision.Reasons) > 0 && !decision.Downgraded {
 				w.Textln("  notes:")

@@ -323,15 +323,15 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 	} else {
 		for _, c := range v.concls {
 			extras := ""
-			if c.Strict.RequestedFrom != "" {
-				extras = tuiDim.Render("  (downgraded from " + c.Strict.RequestedFrom + ")")
+			if summary := conclusionAdjustmentSummary(c); summary != "" {
+				extras = tuiDim.Render("  (" + summary + ")")
 			} else if c.Strict.RescuedBy != "" {
 				extras = tuiYellow.Render("  (rescued by " + c.Strict.RescuedBy + ")")
 			} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
 				extras = tuiDim.Render("  (directional)")
 			}
-			lines = append(lines, fmt.Sprintf("  %s  %s  delta_frac=%.4f  p=%.4g%s",
-				c.ID, tuiVerdictBadge(c.Verdict), c.Effect.DeltaFrac, c.Effect.PValue, extras))
+			lines = append(lines, fmt.Sprintf("  %s  %s  delta_frac=%s  p=%.4g%s",
+				c.ID, tuiVerdictBadge(c.Verdict), fmtSignedNumber(c.Effect.DeltaFrac), c.Effect.PValue, extras))
 			links = append(links, hypDetailLink{kind: hypDetailLinkConclusion, id: c.ID, line: len(lines) - 1})
 		}
 	}
@@ -344,7 +344,7 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 		for _, o := range v.obs {
 			ci := ""
 			if o.CILow != nil && o.CIHigh != nil {
-				ci = fmt.Sprintf("[%s, %s]", fmtValue(*o.CILow, o.Unit), fmtValue(*o.CIHigh, o.Unit))
+				ci = fmtValueRange(*o.CILow, *o.CIHigh, o.Unit)
 			}
 			pass := ""
 			if o.Pass != nil {

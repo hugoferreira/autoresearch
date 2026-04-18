@@ -85,11 +85,11 @@ func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 	requireByInst := frontierRequireConstraints(goal)
 
 	for _, c := range concls {
-		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		class := ExperimentReadClassForID(expClassByID, c.CandidateExp)
+		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst, class)
 		if !ok {
 			continue
 		}
-		class := ExperimentReadClassForID(expClassByID, c.CandidateExp)
 		rows = append(rows, FrontierRow{
 			Conclusion:       c.ID,
 			Hypothesis:       c.Hypothesis,
@@ -113,7 +113,7 @@ func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 	hasBest := false
 	var bestRow FrontierRow
 	for _, c := range sortedByTime {
-		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst, ExperimentReadClassForID(expClassByID, c.CandidateExp))
 		if ok {
 			cur := FrontierRow{
 				Value:          val,
@@ -170,7 +170,6 @@ func FrontierRowBetter(goal *entity.Goal, a, b FrontierRow) bool {
 }
 
 func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) FrontierGoalAssessment {
-	_ = expClassByID
 	if goal == nil || goal.IsOpenEnded() {
 		return FrontierGoalAssessment{
 			Mode:              "open_ended",
@@ -193,11 +192,11 @@ func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 		if c == nil || c.ReviewedBy == "" {
 			continue
 		}
-		// goal_assessment is about accepted historical wins, not loop
-		// actionability. Once a supported conclusion is accepted, its parent
-		// hypothesis becomes supported and the experiment read class goes dead;
-		// the assessment must still be able to report the goal as met.
 		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
+			continue
+		}
+		class := ExperimentReadClassForID(expClassByID, c.CandidateExp)
+		if !SupportedConclusionCountsForReadSurface(class.HypothesisStatus) {
 			continue
 		}
 		obs := obsByExp[c.CandidateExp]
@@ -300,11 +299,14 @@ func frontierRequireConstraints(goal *entity.Goal) map[string]string {
 	return requireByInst
 }
 
-func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obsByExp map[string][]*entity.Observation, requireByInst map[string]string) (float64, bool) {
+func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obsByExp map[string][]*entity.Observation, requireByInst map[string]string, class ExperimentReadClass) (float64, bool) {
 	if goal == nil || c == nil {
 		return 0, false
 	}
 	if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
+		return 0, false
+	}
+	if !SupportedConclusionCountsForReadSurface(class.HypothesisStatus) {
 		return 0, false
 	}
 	if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {

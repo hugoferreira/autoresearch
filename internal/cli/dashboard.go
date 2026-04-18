@@ -538,8 +538,8 @@ func renderDashboardFrontier(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 			if r.Classification == experimentClassificationDead {
 				dead = "  " + a.dim(experimentClassificationMarker(r.Classification))
 			}
-			fmt.Fprintf(w, " %s %s  %s  %s=%.6g%s\n",
-				marker, a.cyan(r.Conclusion), a.cyan(r.Hypothesis), snap.Goal.Objective.Instrument, r.Value, dead)
+			fmt.Fprintf(w, " %s %s  %s  %s=%s%s\n",
+				marker, a.cyan(r.Conclusion), a.cyan(r.Hypothesis), snap.Goal.Objective.Instrument, fmtNumber(r.Value), dead)
 		}
 	}
 	if lim := snap.Budgets.Limits.FrontierStallK; lim > 0 {

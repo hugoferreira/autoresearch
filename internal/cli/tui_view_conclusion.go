@@ -98,8 +98,8 @@ func (v *conclusionListView) view(width, height int) string {
 	rows := make([]string, len(v.filtered))
 	for i, c := range v.filtered {
 		extras := ""
-		if c.Strict.RequestedFrom != "" {
-			extras = tuiDim.Render("  ↓from " + c.Strict.RequestedFrom)
+		if summary := conclusionAdjustmentSummary(c); summary != "" {
+			extras = tuiDim.Render("  " + summary)
 		} else if c.Strict.RescuedBy != "" {
 			extras = tuiYellow.Render("  ⚕rescued:" + c.Strict.RescuedBy)
 		} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
@@ -111,9 +111,9 @@ func (v *conclusionListView) view(width, height int) string {
 		} else if c.Verdict == entity.VerdictSupported || c.Verdict == entity.VerdictRefuted {
 			review = tuiYellow.Render("±")
 		}
-		rows[i] = fmt.Sprintf("%-8s  %s %s hyp=%-8s  Δfrac=%+.4f  p=%.4g%s",
+		rows[i] = fmt.Sprintf("%-8s  %s %s hyp=%-8s  Δfrac=%s  p=%.4g%s",
 			c.ID, padRight(tuiVerdictBadge(c.Verdict), 12), review,
-			c.Hypothesis, c.Effect.DeltaFrac, c.Effect.PValue, extras)
+			c.Hypothesis, fmtSignedNumber(c.Effect.DeltaFrac), c.Effect.PValue, extras)
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
 }
@@ -178,8 +178,12 @@ func (v *conclusionDetailView) view(width, height int) string {
 		lines = append(lines, tuiDim.Render("candidate=")+c.CandidateExp+"  "+tuiDim.Render("baseline=")+emptyDash(c.BaselineExp))
 	}
 	if c.Strict.RequestedFrom != "" {
+		header := "⚠ downgraded from " + c.Strict.RequestedFrom
+		if conclusionAdjustmentKind(c) == conclusionAdjustmentWith {
+			header = "↺ withdrawn from " + c.Strict.RequestedFrom
+		}
 		lines = append(lines, "")
-		lines = append(lines, tuiBoldYellow.Render("⚠ downgraded from "+c.Strict.RequestedFrom))
+		lines = append(lines, tuiBoldYellow.Render(header))
 		for _, r := range c.Strict.Reasons {
 			lines = append(lines, "  · "+r)
 		}
@@ -203,8 +207,8 @@ func (v *conclusionDetailView) view(width, height int) string {
 			}
 			header := fmt.Sprintf("  %s (%s) %s", cc.Instrument, cc.Role, status)
 			if cc.Effect != nil {
-				header += fmt.Sprintf("  Δfrac=%+.4f  CI[%+.4f,%+.4f]",
-					cc.Effect.DeltaFrac, cc.Effect.CILowFrac, cc.Effect.CIHighFrac)
+				header += fmt.Sprintf("  Δfrac=%s",
+					formatSignedCI(cc.Effect.DeltaFrac, cc.Effect.CILowFrac, cc.Effect.CIHighFrac))
 			}
 			lines = append(lines, header)
 			for _, r := range cc.Reasons {
@@ -215,10 +219,10 @@ func (v *conclusionDetailView) view(width, height int) string {
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render("Effect:"))
 	lines = append(lines, fmt.Sprintf("  instrument=%s  test=%s", c.Effect.Instrument, c.StatTest))
-	lines = append(lines, fmt.Sprintf("  delta_abs=%+.6g  delta_frac=%+.4f",
-		c.Effect.DeltaAbs, c.Effect.DeltaFrac))
-	lines = append(lines, fmt.Sprintf("  abs_ci=[%.6g,%.6g]  frac_ci=[%+.4f,%+.4f]",
-		c.Effect.CILowAbs, c.Effect.CIHighAbs, c.Effect.CILowFrac, c.Effect.CIHighFrac))
+	lines = append(lines, fmt.Sprintf("  delta_abs=%s  delta_frac=%s",
+		fmtSignedNumber(c.Effect.DeltaAbs), fmtSignedNumber(c.Effect.DeltaFrac)))
+	lines = append(lines, fmt.Sprintf("  abs_ci=%s  frac_ci=%s",
+		fmtSignedRange(c.Effect.CILowAbs, c.Effect.CIHighAbs), fmtSignedRange(c.Effect.CILowFrac, c.Effect.CIHighFrac)))
 	lines = append(lines, fmt.Sprintf("  p_value=%.4g  method=%s  n=(cand=%d, base=%d)",
 		c.Effect.PValue, c.Effect.CIMethod, c.Effect.NCandidate, c.Effect.NBaseline))
 	lines = append(lines, "")
