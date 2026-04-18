@@ -79,30 +79,10 @@ type cliStatusResponse struct {
 	Counts            map[string]int `json:"counts"`
 }
 
+const scenarioReviewRationale = "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected."
+
 func TestLifecycleScenario_ReadSurfacesStayConsistentAfterAcceptedWinAndLaterStall(t *testing.T) {
-	saveGlobals(t)
-	dir := gitInitScenarioRepo(t)
-	if _, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
-	}); err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
-
-	registerScenarioInstruments(t, dir)
-
-	goal := runCLIJSON[cliIDResponse](t, dir,
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
-		"--success-threshold", "0.1",
-		"--on-success", "stop",
-		"--constraint-max", "binary_size=1000",
-		"--constraint-require", "host_test=pass",
-	)
-	baseline := runCLIJSON[cliIDResponse](t, dir, "experiment", "baseline")
+	dir, goal, baseline := setupLifecycleScenario(t)
 
 	hyp1 := runCLIJSON[cliIDResponse](t, dir,
 		"hypothesis", "add",
@@ -136,11 +116,7 @@ func TestLifecycleScenario_ReadSurfacesStayConsistentAfterAcceptedWinAndLaterSta
 		"--baseline-experiment", baseline.ID,
 		"--observations", observeResultID(t, obs1, "timing"),
 	)
-	runCLIJSON[cliIDResponse](t, dir,
-		"conclusion", "accept", concl1.ID,
-		"--reviewed-by", "human:gate",
-		"--rationale", "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected.",
-	)
+	acceptScenarioConclusion(t, dir, concl1.ID)
 
 	hyp2 := runCLIJSON[cliIDResponse](t, dir,
 		"hypothesis", "add",
@@ -246,29 +222,7 @@ func TestLifecycleScenario_ReadSurfacesStayConsistentAfterAcceptedWinAndLaterSta
 }
 
 func TestLifecycleScenario_WithdrawnAndRefutedHypothesisDropsOldWinFromCurrentTruthSurfaces(t *testing.T) {
-	saveGlobals(t)
-	dir := gitInitScenarioRepo(t)
-	if _, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
-	}); err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
-
-	registerScenarioInstruments(t, dir)
-
-	goal := runCLIJSON[cliIDResponse](t, dir,
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
-		"--success-threshold", "0.1",
-		"--on-success", "stop",
-		"--constraint-max", "binary_size=1000",
-		"--constraint-require", "host_test=pass",
-	)
-	baseline := runCLIJSON[cliIDResponse](t, dir, "experiment", "baseline")
+	dir, goal, baseline := setupLifecycleScenario(t)
 
 	hyp := runCLIJSON[cliIDResponse](t, dir,
 		"hypothesis", "add",
@@ -295,11 +249,7 @@ func TestLifecycleScenario_WithdrawnAndRefutedHypothesisDropsOldWinFromCurrentTr
 		"--baseline-experiment", baseline.ID,
 		"--observations", observeResultID(t, obs1, "timing"),
 	)
-	runCLIJSON[cliIDResponse](t, dir,
-		"conclusion", "accept", concl1.ID,
-		"--reviewed-by", "human:gate",
-		"--rationale", "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected.",
-	)
+	acceptScenarioConclusion(t, dir, concl1.ID)
 
 	runCLIJSON[cliIDResponse](t, dir,
 		"conclusion", "withdraw", concl1.ID,
@@ -323,11 +273,7 @@ func TestLifecycleScenario_WithdrawnAndRefutedHypothesisDropsOldWinFromCurrentTr
 		"--baseline-experiment", baseline.ID,
 		"--observations", observeResultID(t, obs2, "timing"),
 	)
-	runCLIJSON[cliIDResponse](t, dir,
-		"conclusion", "accept", concl2.ID,
-		"--reviewed-by", "human:gate",
-		"--rationale", "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected.",
-	)
+	acceptScenarioConclusion(t, dir, concl2.ID)
 
 	frontier := runCLIJSON[cliFrontierResponse](t, dir, "frontier", "--goal", goal.ID)
 	if frontier.ScopeGoalID != goal.ID || frontier.GoalID != goal.ID {
@@ -423,6 +369,43 @@ func registerScenarioInstruments(t *testing.T, dir string) {
 	)
 }
 
+func setupLifecycleScenario(t *testing.T) (dir string, goal cliIDResponse, baseline cliIDResponse) {
+	t.Helper()
+	saveGlobals(t)
+	dir = gitInitScenarioRepo(t)
+	if _, err := store.Create(dir, store.Config{
+		Build:     store.CommandSpec{Command: "true"},
+		Test:      store.CommandSpec{Command: "true"},
+		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
+	}); err != nil {
+		t.Fatalf("store.Create: %v", err)
+	}
+
+	registerScenarioInstruments(t, dir)
+
+	goal = runCLIJSON[cliIDResponse](t, dir,
+		"goal", "set",
+		"--objective-instrument", "timing",
+		"--objective-target", "kernel",
+		"--objective-direction", "decrease",
+		"--success-threshold", "0.1",
+		"--on-success", "stop",
+		"--constraint-max", "binary_size=1000",
+		"--constraint-require", "host_test=pass",
+	)
+	baseline = runCLIJSON[cliIDResponse](t, dir, "experiment", "baseline")
+	return dir, goal, baseline
+}
+
+func acceptScenarioConclusion(t *testing.T, dir, conclID string) {
+	t.Helper()
+	runCLIJSON[cliIDResponse](t, dir,
+		"conclusion", "accept", conclID,
+		"--reviewed-by", "human:gate",
+		"--rationale", scenarioReviewRationale,
+	)
+}
+
 func gitInitScenarioRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -472,42 +455,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 
 func runCLI(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-
-	oldStdout, oldStderr := os.Stdout, os.Stderr
-	rOut, wOut, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-	rErr, wErr, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stderr pipe: %v", err)
-	}
-	outCh := make(chan string, 1)
-	errCh := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(rOut)
-		outCh <- string(data)
-	}()
-	go func() {
-		data, _ := io.ReadAll(rErr)
-		errCh <- string(data)
-	}()
-
-	os.Stdout = wOut
-	os.Stderr = wErr
-	defer func() {
-		os.Stdout = oldStdout
-		os.Stderr = oldStderr
-	}()
-
-	root := Root()
-	root.SetArgs(append([]string{"-C", dir}, args...))
-	execErr := root.Execute()
-
-	_ = wOut.Close()
-	_ = wErr.Close()
-	stdout := <-outCh
-	stderr := <-errCh
+	stdout, stderr, execErr := executeCLI(t, dir, args...)
 	if execErr != nil {
 		t.Fatalf("autoresearch %s: %v\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), execErr, stdout, stderr)
 	}
@@ -526,6 +474,18 @@ func runCLIJSON[T any](t *testing.T, dir string, args ...string) T {
 
 func runCLIErr(t *testing.T, dir string, args ...string) error {
 	t.Helper()
+	stdout, stderr, execErr := executeCLI(t, dir, args...)
+	if execErr == nil {
+		return nil
+	}
+	if stdout != "" || stderr != "" {
+		return fmt.Errorf("%w\nstdout:\n%s\nstderr:\n%s", execErr, stdout, stderr)
+	}
+	return execErr
+}
+
+func executeCLI(t *testing.T, dir string, args ...string) (stdout, stderr string, execErr error) {
+	t.Helper()
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
 	rOut, wOut, err := os.Pipe()
@@ -556,19 +516,13 @@ func runCLIErr(t *testing.T, dir string, args ...string) error {
 
 	root := Root()
 	root.SetArgs(append([]string{"-C", dir}, args...))
-	execErr := root.Execute()
+	execErr = root.Execute()
 
 	_ = wOut.Close()
 	_ = wErr.Close()
-	stdout := <-outCh
-	stderr := <-errCh
-	if execErr == nil {
-		return nil
-	}
-	if stdout != "" || stderr != "" {
-		return fmt.Errorf("%w\nstdout:\n%s\nstderr:\n%s", execErr, stdout, stderr)
-	}
-	return execErr
+	stdout = <-outCh
+	stderr = <-errCh
+	return stdout, stderr, execErr
 }
 
 func observeResultID(t *testing.T, resp cliObserveAllResponse, inst string) string {

@@ -7,8 +7,24 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 )
+
+type conclusionInconclusiveTransition struct {
+	Action       string
+	DryRunVerb   string
+	ResultVerb   string
+	EventKind    string
+	ReasonPrefix string
+	ReasonLabel  string
+	Actor        string
+	ReviewedBy   string
+	LessonMode   lessonSyncMode
+	BodySection  string
+	BodyTemplate string
+	EventExtra   map[string]any
+}
 
 func conclusionCommands() []*cobra.Command {
 	c := &cobra.Command{
@@ -203,70 +219,20 @@ marked inconclusive.`,
 			if err != nil {
 				return err
 			}
-			switch c.Verdict {
-			case entity.VerdictSupported, entity.VerdictRefuted:
-			case entity.VerdictInconclusive:
-				return fmt.Errorf("%s is already inconclusive; nothing to downgrade", c.ID)
-			default:
-				return fmt.Errorf("%s has unknown verdict %q", c.ID, c.Verdict)
-			}
-			prev := c.Verdict
-			c.Verdict = entity.VerdictInconclusive
-			if c.Strict.RequestedFrom == "" {
-				c.Strict.RequestedFrom = prev
-			}
-			c.Strict.Passed = false
-			c.Strict.Reasons = append(c.Strict.Reasons, "critic downgrade: "+reason)
-			if reviewedBy != "" {
-				c.ReviewedBy = reviewedBy
-			}
-			if err := dryRun(w, fmt.Sprintf("downgrade %s from %s to inconclusive (%s)", c.ID, prev, reason), map[string]any{"id": c.ID, "from": prev, "reason": reason}); err != nil {
-				return err
-			}
-			if err := s.WriteConclusion(c); err != nil {
-				return err
-			}
-			// Update hypothesis status to match.
-			hyp, err := s.ReadHypothesis(c.Hypothesis)
-			if err == nil {
-				hyp.Status = entity.VerdictInconclusive
-				_ = s.WriteHypothesis(hyp)
-			}
-			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnDowngrade)
-			if err != nil {
-				return err
-			}
-			for _, change := range lessonChanges {
-				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), or(reviewedBy, "agent:critic"), change.LessonID, map[string]any{
-					"from_status": change.FromStatus,
-					"to_status":   change.ToStatus,
-					"from_source": change.FromSource,
-					"to_source":   change.ToSource,
-					"hypothesis":  c.Hypothesis,
-					"conclusion":  c.ID,
-				}); err != nil {
-					return err
-				}
-			}
-			if err := emitEvent(s, "conclusion.critic_downgrade", "agent:critic", c.ID, map[string]any{
-				"from":        prev,
-				"reason":      reason,
-				"reviewed_by": reviewedBy,
-				"hypothesis":  c.Hypothesis,
-			}); err != nil {
-				return err
-			}
-			return w.Emit(
-				fmt.Sprintf("downgraded %s: %s → inconclusive (%s)", c.ID, prev, reason),
-				map[string]any{
-					"status":     "ok",
-					"id":         c.ID,
-					"from":       prev,
-					"to":         entity.VerdictInconclusive,
-					"reason":     reason,
-					"hypothesis": c.Hypothesis,
+			return transitionConclusionToInconclusive(w, s, c, reason, conclusionInconclusiveTransition{
+				Action:       "downgrade",
+				DryRunVerb:   "downgrade",
+				ResultVerb:   "downgraded",
+				EventKind:    "conclusion.critic_downgrade",
+				ReasonPrefix: conclusionReasonCriticDowngradePrefix,
+				ReasonLabel:  "downgrade",
+				Actor:        "agent:critic",
+				ReviewedBy:   reviewedBy,
+				LessonMode:   lessonSyncOnDowngrade,
+				EventExtra: map[string]any{
+					"reviewed_by": reviewedBy,
 				},
-			)
+			})
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "why the conclusion is being downgraded (required)")
@@ -305,71 +271,19 @@ before re-concluding the hypothesis from new evidence.`,
 			if err != nil {
 				return err
 			}
-			switch c.Verdict {
-			case entity.VerdictSupported, entity.VerdictRefuted:
-			case entity.VerdictInconclusive:
-				return fmt.Errorf("%s is already inconclusive; nothing to withdraw", c.ID)
-			default:
-				return fmt.Errorf("%s has unknown verdict %q", c.ID, c.Verdict)
-			}
-
-			prev := c.Verdict
 			withdrawer := or(author, "agent:orchestrator")
-			if err := dryRun(w, fmt.Sprintf("withdraw %s from %s (%s)", c.ID, prev, reason), map[string]any{"id": c.ID, "from": prev, "reason": reason}); err != nil {
-				return err
-			}
-
-			c.Verdict = entity.VerdictInconclusive
-			if c.Strict.RequestedFrom == "" {
-				c.Strict.RequestedFrom = prev
-			}
-			c.Strict.Passed = false
-			c.Strict.Reasons = append(c.Strict.Reasons, conclusionReasonWithdrawalPrefix+reason)
-			c.Body = entity.AppendMarkdownSection(c.Body, "Withdrawal", fmt.Sprintf("**Withdrawn by:** %s\n\n%s", withdrawer, reason))
-			if err := s.WriteConclusion(c); err != nil {
-				return err
-			}
-
-			hyp, err := s.ReadHypothesis(c.Hypothesis)
-			if err == nil {
-				hyp.Status = entity.StatusInconclusive
-				_ = s.WriteHypothesis(hyp)
-			}
-			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnWithdraw)
-			if err != nil {
-				return err
-			}
-			for _, change := range lessonChanges {
-				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), withdrawer, change.LessonID, map[string]any{
-					"from_status": change.FromStatus,
-					"to_status":   change.ToStatus,
-					"from_source": change.FromSource,
-					"to_source":   change.ToSource,
-					"hypothesis":  c.Hypothesis,
-					"conclusion":  c.ID,
-				}); err != nil {
-					return err
-				}
-			}
-			if err := emitEvent(s, "conclusion.withdraw", withdrawer, c.ID, map[string]any{
-				"from":       prev,
-				"to":         entity.VerdictInconclusive,
-				"reason":     reason,
-				"hypothesis": c.Hypothesis,
-			}); err != nil {
-				return err
-			}
-			return w.Emit(
-				fmt.Sprintf("withdrew %s: %s → inconclusive (%s)", c.ID, prev, reason),
-				map[string]any{
-					"status":     "ok",
-					"id":         c.ID,
-					"from":       prev,
-					"to":         entity.VerdictInconclusive,
-					"reason":     reason,
-					"hypothesis": c.Hypothesis,
-				},
-			)
+			return transitionConclusionToInconclusive(w, s, c, reason, conclusionInconclusiveTransition{
+				Action:       "withdraw",
+				DryRunVerb:   "withdraw",
+				ResultVerb:   "withdrew",
+				EventKind:    "conclusion.withdraw",
+				ReasonPrefix: conclusionReasonWithdrawalPrefix,
+				ReasonLabel:  "withdraw",
+				Actor:        withdrawer,
+				LessonMode:   lessonSyncOnWithdraw,
+				BodySection:  "Withdrawal",
+				BodyTemplate: "**Withdrawn by:** %s\n\n%s",
+			})
 		},
 	}
 	c.Flags().StringVar(&reason, "reason", "", "why the conclusion is being withdrawn (required)")
@@ -439,21 +353,8 @@ conclusion cannot be shipped until it has been reviewed.`,
 				hyp.Status = c.Verdict
 				_ = s.WriteHypothesis(hyp)
 			}
-			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnAccept)
-			if err != nil {
+			if err := emitHypothesisLessonSyncEvents(s, c.Hypothesis, c.ID, lessonSyncOnAccept, reviewedBy); err != nil {
 				return err
-			}
-			for _, change := range lessonChanges {
-				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), reviewedBy, change.LessonID, map[string]any{
-					"from_status": change.FromStatus,
-					"to_status":   change.ToStatus,
-					"from_source": change.FromSource,
-					"to_source":   change.ToSource,
-					"hypothesis":  c.Hypothesis,
-					"conclusion":  c.ID,
-				}); err != nil {
-					return err
-				}
 			}
 
 			if err := emitEvent(s, "conclusion.accept", reviewedBy, c.ID, map[string]any{
@@ -544,24 +445,12 @@ verdict should stand.`,
 				hyp.Status = entity.StatusUnreviewed
 				_ = s.WriteHypothesis(hyp)
 			}
-			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnAppeal)
-			if err != nil {
+			appealer := or(author, "agent:orchestrator")
+			if err := emitHypothesisLessonSyncEvents(s, c.Hypothesis, c.ID, lessonSyncOnAppeal, appealer); err != nil {
 				return err
 			}
-			for _, change := range lessonChanges {
-				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), or(author, "agent:orchestrator"), change.LessonID, map[string]any{
-					"from_status": change.FromStatus,
-					"to_status":   change.ToStatus,
-					"from_source": change.FromSource,
-					"to_source":   change.ToSource,
-					"hypothesis":  c.Hypothesis,
-					"conclusion":  c.ID,
-				}); err != nil {
-					return err
-				}
-			}
 
-			if err := emitEvent(s, "conclusion.appeal", or(author, "agent:orchestrator"), c.ID, map[string]any{
+			if err := emitEvent(s, "conclusion.appeal", appealer, c.ID, map[string]any{
 				"original_verdict": originalVerdict,
 				"hypothesis":       c.Hypothesis,
 				"rebuttal":         truncate(rebuttal, 200),
@@ -583,4 +472,102 @@ verdict should stand.`,
 	c.Flags().StringVar(&rebuttal, "rebuttal", "", "specific disagreement with the downgrade reason (required)")
 	addAuthorFlag(c, &author, "")
 	return c
+}
+
+func transitionConclusionToInconclusive(w *output.Writer, s *store.Store, c *entity.Conclusion, reason string, spec conclusionInconclusiveTransition) error {
+	prev, err := validateConclusionCanBecomeInconclusive(c, spec.Action)
+	if err != nil {
+		return err
+	}
+	if err := dryRun(w, fmt.Sprintf("%s %s from %s to inconclusive (%s)", spec.DryRunVerb, c.ID, prev, reason), map[string]any{"id": c.ID, "from": prev, "reason": reason}); err != nil {
+		return err
+	}
+
+	c.Verdict = entity.VerdictInconclusive
+	if c.Strict.RequestedFrom == "" {
+		c.Strict.RequestedFrom = prev
+	}
+	c.Strict.Passed = false
+	c.Strict.Reasons = append(c.Strict.Reasons, spec.ReasonPrefix+reason)
+	if spec.ReviewedBy != "" {
+		c.ReviewedBy = spec.ReviewedBy
+	}
+	if spec.BodySection != "" {
+		c.Body = entity.AppendMarkdownSection(c.Body, spec.BodySection, fmt.Sprintf(spec.BodyTemplate, spec.Actor, reason))
+	}
+	if err := s.WriteConclusion(c); err != nil {
+		return err
+	}
+	if err := setHypothesisStatusIfPresent(s, c.Hypothesis, entity.StatusInconclusive); err != nil {
+		return err
+	}
+	if err := emitHypothesisLessonSyncEvents(s, c.Hypothesis, c.ID, spec.LessonMode, spec.Actor); err != nil {
+		return err
+	}
+	eventData := map[string]any{
+		"from":       prev,
+		"to":         entity.VerdictInconclusive,
+		"reason":     reason,
+		"hypothesis": c.Hypothesis,
+	}
+	for k, v := range spec.EventExtra {
+		eventData[k] = v
+	}
+	if err := emitEvent(s, spec.EventKind, spec.Actor, c.ID, eventData); err != nil {
+		return err
+	}
+	return w.Emit(
+		fmt.Sprintf("%s %s: %s → inconclusive (%s)", spec.ResultVerb, c.ID, prev, reason),
+		map[string]any{
+			"status":     "ok",
+			"id":         c.ID,
+			"from":       prev,
+			"to":         entity.VerdictInconclusive,
+			"reason":     reason,
+			"hypothesis": c.Hypothesis,
+		},
+	)
+}
+
+func validateConclusionCanBecomeInconclusive(c *entity.Conclusion, action string) (string, error) {
+	switch c.Verdict {
+	case entity.VerdictSupported, entity.VerdictRefuted:
+		return c.Verdict, nil
+	case entity.VerdictInconclusive:
+		return "", fmt.Errorf("%s is already inconclusive; nothing to %s", c.ID, action)
+	default:
+		return "", fmt.Errorf("%s has unknown verdict %q", c.ID, c.Verdict)
+	}
+}
+
+func setHypothesisStatusIfPresent(s *store.Store, hypID, status string) error {
+	hyp, err := s.ReadHypothesis(hypID)
+	if err != nil {
+		if errors.Is(err, store.ErrHypothesisNotFound) {
+			return nil
+		}
+		return err
+	}
+	hyp.Status = status
+	return s.WriteHypothesis(hyp)
+}
+
+func emitHypothesisLessonSyncEvents(s *store.Store, hypID, conclID string, mode lessonSyncMode, actor string) error {
+	lessonChanges, err := syncHypothesisLessons(s, hypID, mode)
+	if err != nil {
+		return err
+	}
+	for _, change := range lessonChanges {
+		if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), actor, change.LessonID, map[string]any{
+			"from_status": change.FromStatus,
+			"to_status":   change.ToStatus,
+			"from_source": change.FromSource,
+			"to_source":   change.ToSource,
+			"hypothesis":  hypID,
+			"conclusion":  conclID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
