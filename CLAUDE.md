@@ -69,6 +69,11 @@ get a new file plus an entry in the `groups` slice in `Root()`.
   store and return `ErrPaused` (exit 3) when paused. Read-only verbs
   (`status`, `log`, `tree`, `frontier`, `report`, `artifact <read>`,
   `conclusion show`, `dashboard`, `*-list`, `*-show`) work even when paused.
+- **Read models live in `internal/readmodel/`.** `experiment list/show`,
+  `frontier`, `status`, `dashboard`, and the TUI consume shared read-side
+  projections from there. Don't re-encode "live/dead", frontier, or
+  actionability rules per CLI surface. Read-time `dead` means "not
+  loop-actionable now", not "historically irrelevant".
 - **Output.** Every verb supports `--json`. Use the `output` package; don't
   hand-roll JSON. Text output is for humans; JSON is the agent contract and
   must stay stable across patches.
@@ -285,6 +290,12 @@ poll loop. Views exclusively handle `storeChangedMsg`.
 - **New entity field.** Update `internal/entity/`, the markdown
   serialization in `internal/store/`, any validators in `internal/firewall/`,
   and the report renderer.
+- **Changing read-side semantics.** If you change `experiment list`,
+  `frontier`, `status`, `dashboard`, or TUI behavior, update the shared
+  projection in `internal/readmodel/` and add at least one scenario-style CLI
+  test that drives a real lifecycle end to end and asserts multiple read
+  surfaces together. Narrow unit tests are still useful, but they are not
+  sufficient on their own for these contracts.
 - **Touching statistics.** Keep the seeded PRNG. Reproducibility of CIs
   across runs is part of the contract — agents diff `analyze` output.
 

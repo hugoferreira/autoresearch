@@ -227,6 +227,22 @@ unmodified code and serve as comparators for hypothesis-bound experiments.
 lost, the retry history is auditable. A baseline experiment follows the
 same status progression but carries `IsBaseline=true`.
 
+### Read-side experiment classification
+
+Read surfaces derive a second, non-persisted experiment label from the parent
+hypothesis status. This does not replace `Experiment.Status`; it is a
+read-time projection used by `experiment list`, `experiment show`,
+`frontier`, `status`, `dashboard`, and the TUI.
+
+| Classification | Derived when | Meaning |
+| --- | --- | --- |
+| `live` | The experiment has no parent hypothesis, or the parent hypothesis is still loop-actionable. | The loop may still steer from this work. |
+| `dead` | The parent hypothesis is `unreviewed`, `supported`, `refuted`, or `killed`. | The work remains historically real, but it is no longer actionable for further steering. |
+
+This label is intentionally about actionability, not historical relevance. A
+baseline or an accepted winning experiment may still be important to derived
+views even when later rendered as `dead`.
+
 ---
 
 ## Observation
@@ -349,6 +365,24 @@ a clean primary win. The frontier's sort uses rescuers as a bounded
 tiebreak when primary values are within `NeutralBandFrac`: a rescued
 candidate whose rescuer wins displaces the prior best at the same
 primary tier.
+
+### Derived frontier snapshot
+
+`frontier` is not a stored entity. It is a read projection over supported
+conclusions, observations, goal policy, and the read-side experiment
+classification above.
+
+- Frontier rows may still point at experiments classified `dead`. That label
+  controls current loop actionability and rendering; it does not invalidate a
+  historically best result.
+- `goal_assessment.met` is about the best accepted supported conclusion that
+  still satisfies the goal's constraints and threshold. A reviewed win still
+  counts after acceptance moves its hypothesis to `supported` and the
+  experiment becomes read-classified `dead`.
+- `stalled_for` counts conclusions written since the last conclusion that
+  actually improved the frontier. Once a frontier exists, every later
+  non-improving conclusion increments the counter, even if that conclusion is
+  inconclusive or otherwise non-actionable.
 
 ---
 
