@@ -285,6 +285,24 @@ and failures are recorded on the observation rather than failing it.
 
 No lifecycle: observations do not have a status.
 
+### Derived read-side joins
+
+`conclusion show --json` is a read projection over the stored conclusion plus
+additive observation-side evidence joins keyed by cited observation id. These
+fields are not persisted on `Conclusion`; they are assembled at read time so a
+reviewer can audit the cited evidence chain without issuing extra observation
+reads.
+
+| JSON field | Derived from | Meaning |
+| --- | --- | --- |
+| `observation_artifacts` | `Observation.Artifacts` | Artifact metadata for readable cited observations. Values are metadata only, never artifact bytes. |
+| `observation_evidence_failures` | `Observation.EvidenceFailures` | Non-fatal evidence capture failures for readable cited observations where evidence capture was configured but failed. |
+| `observation_read_issues` | read error on `Store.ReadObservation(id)` | Cited observations that could not be read at all (for example missing or corrupt persisted state). |
+
+These three cases are intentionally distinct. `observation_evidence_failures`
+and `observation_read_issues` do **not** mean "no evidence configured"; they
+mean the persisted audit chain is incomplete in different ways.
+
 ---
 
 ## Conclusion
@@ -369,6 +387,12 @@ a clean primary win. The frontier's sort uses rescuers as a bounded
 tiebreak when primary values are within `NeutralBandFrac`: a rescued
 candidate whose rescuer wins displaces the prior best at the same
 primary tier.
+
+`conclusion show --json` therefore exposes both the persisted conclusion and
+the read-side evidence joins above. The stored `Observations[]` list remains
+authoritative even if one cited observation later becomes unreadable; the read
+surface reports that breakage via `observation_read_issues` rather than
+silently dropping the citation.
 
 ### Derived frontier snapshot
 

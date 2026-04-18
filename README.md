@@ -113,7 +113,10 @@ The core nouns are:
 
 Some artifacts are evidence side-artifacts: analysis outputs captured
 alongside a measurement so later mechanism claims are auditable from
-persisted state.
+persisted state. Reviewer-facing read surfaces preserve that audit chain:
+`conclusion show --json` distinguishes readable evidence artifacts,
+non-fatal evidence capture failures, and cited observations whose
+persisted evidence can no longer be read.
 
 `analyze` is a read-only computation over observations, not a first-class stored
 entity. It summarizes an experiment relative to the baseline and prepares the
