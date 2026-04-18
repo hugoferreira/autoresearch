@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -279,7 +280,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		if len(e.ReferencedAsBaselineBy) > 0 {
 			continue
 		}
-		if !experimentReadClassForID(expClassByID, e.ID).loopActionable() {
+		if !experimentReadClassForID(expClassByID, e.ID).LoopActionable() {
 			continue
 		}
 		row := dashboardInFlight{
@@ -383,14 +384,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 // findLastEventForExperiment scans a pre-loaded event list backward for the
 // most recent event referencing expID and returns its timestamp and kind.
 func findLastEventForExperiment(events []store.Event, expID string) (ts *time.Time, kind string) {
-	for i := len(events) - 1; i >= 0; i-- {
-		e := events[i]
-		if e.Subject == expID {
-			t := e.Ts
-			return &t, e.Kind
-		}
-	}
-	return nil, ""
+	return readmodel.FindLastEventForExperiment(events, expID)
 }
 
 // ---- one-shot + refresh loop ----

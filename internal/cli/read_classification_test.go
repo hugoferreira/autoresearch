@@ -80,8 +80,8 @@ func TestClassifyHypothesisStatusForExperimentRead(t *testing.T) {
 			if got.HypothesisStatus != tc.wantStatus {
 				t.Fatalf("hypothesis_status = %q, want %q", got.HypothesisStatus, tc.wantStatus)
 			}
-			if got.loopActionable() != tc.actionable {
-				t.Fatalf("loopActionable = %v, want %v", got.loopActionable(), tc.actionable)
+			if got.LoopActionable() != tc.actionable {
+				t.Fatalf("loopActionable = %v, want %v", got.LoopActionable(), tc.actionable)
 			}
 		})
 	}
