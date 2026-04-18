@@ -366,6 +366,36 @@ func TestTUI_ObservationDetail(t *testing.T) {
 	}
 }
 
+func TestTUI_ObservationDetailShowsEvidenceSpawnFailure(t *testing.T) {
+	v := newObservationDetailView("O-0003")
+	o := &entity.Observation{
+		ID:         "O-0003",
+		Experiment: "E-0007",
+		Instrument: "host_timing",
+		MeasuredAt: time.Date(2026, 4, 12, 11, 0, 0, 0, time.UTC),
+		Value:      1.2,
+		Unit:       "s",
+		Samples:    1,
+		EvidenceFailures: []entity.EvidenceFailure{{
+			Name:  "mechanism",
+			Error: `spawn "sh -c echo trace": exec: "sh": executable file not found in $PATH`,
+		}},
+		Command:  "make test",
+		ExitCode: 0,
+		Author:   "agent:observer",
+	}
+	nv, _ := v.update(obsDetailLoadedMsg{o: o}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{
+		"Evidence failures:",
+		`mechanism: spawn "sh -c echo trace": exec: "sh": executable file not found in $PATH`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("observation detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestTUI_ConclusionList(t *testing.T) {
 	v := newConclusionListView(goalScope{All: true})
 	cs := []*entity.Conclusion{
