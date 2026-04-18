@@ -123,17 +123,7 @@ type dashboardSnapshot struct {
 	CapturedAt             time.Time     `json:"captured_at"`
 }
 
-type dashboardBudgets struct {
-	Limits struct {
-		MaxExperiments int `json:"max_experiments"`
-		MaxWallTimeH   int `json:"max_wall_time_h"`
-		FrontierStallK int `json:"frontier_stall_k"`
-	} `json:"limits"`
-	Usage struct {
-		Experiments int     `json:"experiments"`
-		ElapsedH    float64 `json:"elapsed_h"`
-	} `json:"usage"`
-}
+type dashboardBudgets = readmodel.BudgetSnapshot
 
 type dashboardInFlight = readmodel.InFlightExperimentView
 
@@ -209,13 +199,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		}
 	}
 
-	snap.Budgets.Limits.MaxExperiments = cfg.Budgets.MaxExperiments
-	snap.Budgets.Limits.MaxWallTimeH = cfg.Budgets.MaxWallTimeH
-	snap.Budgets.Limits.FrontierStallK = cfg.Budgets.FrontierStallK
-	snap.Budgets.Usage.Experiments = st.Counters["E"]
-	if st.ResearchStartedAt != nil {
-		snap.Budgets.Usage.ElapsedH = time.Since(*st.ResearchStartedAt).Hours()
-	}
+	snap.Budgets = readmodel.BuildBudgetSnapshot(cfg, st, snap.CapturedAt)
 
 	resolver := newGoalScopeResolver(s, scope)
 
@@ -324,13 +308,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	// which re-scans every entity directory. Only observations need a
 	// targeted ReadDir because they're loaded inside computeFrontier, not
 	// directly available here.
-	snap.Counts = map[string]int{
-		"hypotheses":   len(hyps),
-		"experiments":  len(exps),
-		"observations": len(allObs),
-		"conclusions":  len(concls),
-		"lessons":      lessonCount,
-	}
+	snap.Counts = readmodel.BuildCountsWithLessons(len(hyps), len(exps), len(allObs), len(concls), lessonCount)
 
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
 

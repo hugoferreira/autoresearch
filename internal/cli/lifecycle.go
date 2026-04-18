@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 
@@ -451,12 +450,7 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			counts := map[string]int{
-				"hypotheses":   len(hyps),
-				"experiments":  len(exps),
-				"observations": len(obs),
-				"conclusions":  len(concls),
-			}
+			counts := readmodel.BuildCounts(len(hyps), len(exps), len(obs), len(concls))
 
 			payload := mergeGoalScopePayload(map[string]any{
 				"root":                      s.Root(),
@@ -499,17 +493,7 @@ func statusCmd() *cobra.Command {
 			var unobservedInstruments []string
 			if !scope.All && scope.GoalID != "" {
 				if goal, err := s.ReadGoal(scope.GoalID); err == nil {
-					needed := map[string]bool{goal.Objective.Instrument: true}
-					for _, c := range goal.Constraints {
-						needed[c.Instrument] = true
-					}
-					for _, o := range obs {
-						delete(needed, o.Instrument)
-					}
-					for inst := range needed {
-						unobservedInstruments = append(unobservedInstruments, inst)
-					}
-					sort.Strings(unobservedInstruments)
+					unobservedInstruments = readmodel.FindUnobservedGoalInstruments(goal, obs)
 				}
 			}
 			if len(unobservedInstruments) > 0 {
