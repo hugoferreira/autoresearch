@@ -484,8 +484,9 @@ func statusCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				now := time.Now().UTC()
 				threshold := time.Duration(staleMinutes) * time.Minute
-				stale = readmodel.FindStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
+				_, stale = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, threshold, now)
 			}
 			if len(stale) > 0 {
 				payload["stale_experiments"] = stale

@@ -67,3 +67,89 @@ func TestFindStaleExperimentsForRead_ExcludesNonActionableWork(t *testing.T) {
 		t.Fatalf("stale[0].ID = %q, want %q", got, want)
 	}
 }
+
+func TestBuildInFlightExperiments_FiltersAndSorts(t *testing.T) {
+	now := time.Date(2026, 4, 18, 20, 0, 0, 0, time.UTC)
+	exps := []*entity.Experiment{
+		{
+			ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
+			Instruments:            []string{"host_timing"},
+			ReferencedAsBaselineBy: []string{"C-0001"},
+		},
+		{
+			ID: "E-0002", Hypothesis: "H-0002", Status: entity.ExpMeasured,
+			Instruments: []string{"host_timing"},
+		},
+		{
+			ID: "E-0003", Hypothesis: "H-0003", Status: entity.ExpImplemented,
+			Instruments: []string{"host_timing"},
+		},
+		{
+			ID: "E-0004", Hypothesis: "H-0004", Status: entity.ExpMeasured,
+			Instruments: []string{"host_timing", "host_test"},
+		},
+		{
+			ID: "E-0005", Hypothesis: "H-0005", Status: entity.ExpMeasured,
+			Instruments: []string{"host_timing"},
+		},
+	}
+	classByID := map[string]ExperimentReadClass{
+		"E-0002": ClassifyHypothesisStatusForExperimentRead(entity.StatusSupported),
+	}
+	old := now.Add(-10 * time.Minute)
+	recent := now.Add(-2 * time.Minute)
+	events := []store.Event{
+		{Ts: old, Kind: "experiment.implement", Subject: "E-0003"},
+		{Ts: recent, Kind: "experiment.implement", Subject: "E-0004"},
+	}
+
+	inFlight := BuildInFlightExperiments(exps, classByID, events, now)
+	if got, want := len(inFlight), 3; got != want {
+		t.Fatalf("inFlight len = %d, want %d", got, want)
+	}
+	if got, want := inFlight[0].ID, "E-0004"; got != want {
+		t.Fatalf("inFlight[0].ID = %q, want %q", got, want)
+	}
+	if got, want := inFlight[1].ID, "E-0003"; got != want {
+		t.Fatalf("inFlight[1].ID = %q, want %q", got, want)
+	}
+	if got, want := inFlight[2].ID, "E-0005"; got != want {
+		t.Fatalf("inFlight[2].ID = %q, want %q", got, want)
+	}
+	if got, want := inFlight[0].ElapsedS, 120.0; got != want {
+		t.Fatalf("inFlight[0].ElapsedS = %v, want %v", got, want)
+	}
+	if got, want := inFlight[1].ElapsedS, 600.0; got != want {
+		t.Fatalf("inFlight[1].ElapsedS = %v, want %v", got, want)
+	}
+	if inFlight[2].ImplementedAt != nil {
+		t.Fatalf("inFlight[2].ImplementedAt = %v, want nil", inFlight[2].ImplementedAt)
+	}
+}
+
+func TestBuildExperimentActivity_UsesSharedThresholdAndNow(t *testing.T) {
+	now := time.Date(2026, 4, 18, 20, 0, 0, 0, time.UTC)
+	exps := []*entity.Experiment{
+		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, Instruments: []string{"host_timing"}},
+	}
+	classByID := map[string]ExperimentReadClass{
+		"E-0001": ClassifyHypothesisStatusForExperimentRead(entity.StatusOpen),
+	}
+	events := []store.Event{
+		{Ts: now.Add(-10 * time.Minute), Kind: "experiment.implement", Subject: "E-0001"},
+	}
+
+	inFlight, stale := BuildExperimentActivity(exps, classByID, events, 5*time.Minute, now)
+	if got, want := len(inFlight), 1; got != want {
+		t.Fatalf("inFlight len = %d, want %d", got, want)
+	}
+	if got, want := len(stale), 1; got != want {
+		t.Fatalf("stale len = %d, want %d", got, want)
+	}
+	if got, want := inFlight[0].ElapsedS, 600.0; got != want {
+		t.Fatalf("inFlight[0].ElapsedS = %v, want %v", got, want)
+	}
+	if got, want := stale[0].StaleMinutes, 10.0; got != want {
+		t.Fatalf("stale[0].StaleMinutes = %v, want %v", got, want)
+	}
+}

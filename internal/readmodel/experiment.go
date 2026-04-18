@@ -1,6 +1,7 @@
 package readmodel
 
 import (
+	"sort"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -33,6 +34,17 @@ type StaleExperimentView struct {
 	Status        string  `json:"status"`
 	LastEventKind string  `json:"last_event_kind"`
 	StaleMinutes  float64 `json:"stale_minutes"`
+}
+
+// InFlightExperimentView is the read model shared by dashboard/TUI for active
+// experiments that still need human or agent attention.
+type InFlightExperimentView struct {
+	ID            string     `json:"id"`
+	Hypothesis    string     `json:"hypothesis"`
+	Status        string     `json:"status"`
+	Instruments   []string   `json:"instruments"`
+	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
+	ElapsedS      float64    `json:"elapsed_s"`
 }
 
 func normalizeExperimentReadClass(class ExperimentReadClass) ExperimentReadClass {
@@ -149,6 +161,54 @@ func classifyExperimentForRead(e *entity.Experiment, hypStatus map[string]string
 		return normalizeExperimentReadClass(ExperimentReadClass{})
 	}
 	return ClassifyHypothesisStatusForExperimentRead(hypStatus[e.Hypothesis])
+}
+
+func BuildExperimentActivity(exps []*entity.Experiment, classByID map[string]ExperimentReadClass, events []store.Event, staleThreshold time.Duration, now time.Time) (inFlight []InFlightExperimentView, stale []StaleExperimentView) {
+	inFlight = BuildInFlightExperiments(exps, classByID, events, now)
+	if staleThreshold > 0 {
+		stale = FindStaleExperimentsForRead(exps, classByID, events, staleThreshold, now)
+	}
+	return inFlight, stale
+}
+
+func BuildInFlightExperiments(exps []*entity.Experiment, classByID map[string]ExperimentReadClass, events []store.Event, now time.Time) []InFlightExperimentView {
+	inFlight := []InFlightExperimentView{}
+	for _, e := range exps {
+		if e.Status != entity.ExpImplemented && e.Status != entity.ExpMeasured {
+			continue
+		}
+		if len(e.ReferencedAsBaselineBy) > 0 {
+			continue
+		}
+		if !ExperimentReadClassForID(classByID, e.ID).LoopActionable() {
+			continue
+		}
+		row := InFlightExperimentView{
+			ID:          e.ID,
+			Hypothesis:  e.Hypothesis,
+			Status:      e.Status,
+			Instruments: append([]string{}, e.Instruments...),
+		}
+		if ts, kind := FindLastEventForExperiment(events, e.ID); ts != nil && kind == "experiment.implement" {
+			row.ImplementedAt = ts
+			row.ElapsedS = now.Sub(*ts).Seconds()
+		}
+		inFlight = append(inFlight, row)
+	}
+	sort.SliceStable(inFlight, func(i, j int) bool {
+		a, b := inFlight[i].ImplementedAt, inFlight[j].ImplementedAt
+		if a == nil && b == nil {
+			return inFlight[i].ID < inFlight[j].ID
+		}
+		if a == nil {
+			return false
+		}
+		if b == nil {
+			return true
+		}
+		return a.After(*b)
+	})
+	return inFlight
 }
 
 func FindStaleExperimentsForRead(exps []*entity.Experiment, classByID map[string]ExperimentReadClass, events []store.Event, threshold time.Duration, now time.Time) []StaleExperimentView {

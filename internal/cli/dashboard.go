@@ -135,14 +135,7 @@ type dashboardBudgets struct {
 	} `json:"usage"`
 }
 
-type dashboardInFlight struct {
-	ID            string     `json:"id"`
-	Hypothesis    string     `json:"hypothesis"`
-	Status        string     `json:"status"`
-	Instruments   []string   `json:"instruments"`
-	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
-	ElapsedS      float64    `json:"elapsed_s"`
-}
+type dashboardInFlight = readmodel.InFlightExperimentView
 
 const dashboardRecentEventsSummaryLimit = 10
 
@@ -273,48 +266,11 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range exps {
-		if e.Status != entity.ExpImplemented && e.Status != entity.ExpMeasured {
-			continue
-		}
-		if len(e.ReferencedAsBaselineBy) > 0 {
-			continue
-		}
-		if !readmodel.ExperimentReadClassForID(expClassByID, e.ID).LoopActionable() {
-			continue
-		}
-		row := dashboardInFlight{
-			ID:          e.ID,
-			Hypothesis:  e.Hypothesis,
-			Status:      e.Status,
-			Instruments: append([]string{}, e.Instruments...),
-		}
-		if ts, kind := readmodel.FindLastEventForExperiment(allEvents, e.ID); ts != nil && kind == "experiment.implement" {
-			row.ImplementedAt = ts
-			row.ElapsedS = time.Since(*ts).Seconds()
-		}
-		snap.InFlight = append(snap.InFlight, row)
-	}
-	sort.SliceStable(snap.InFlight, func(i, j int) bool {
-		a, b := snap.InFlight[i].ImplementedAt, snap.InFlight[j].ImplementedAt
-		if a == nil && b == nil {
-			return snap.InFlight[i].ID < snap.InFlight[j].ID
-		}
-		if a == nil {
-			return false
-		}
-		if b == nil {
-			return true
-		}
-		return a.After(*b)
-	})
-
-	// Stale experiment detection: flag loop-actionable, non-baseline
-	// experiments whose last event is older than the configured threshold.
+	staleThreshold := time.Duration(0)
 	if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
-		threshold := time.Duration(staleMinutes) * time.Minute
-		snap.StaleExperiments = readmodel.FindStaleExperimentsForRead(exps, expClassByID, allEvents, threshold, time.Now().UTC())
+		staleThreshold = time.Duration(staleMinutes) * time.Minute
 	}
+	snap.InFlight, snap.StaleExperiments = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, staleThreshold, snap.CapturedAt)
 
 	allObs, err := s.ListObservations()
 	if err != nil {
