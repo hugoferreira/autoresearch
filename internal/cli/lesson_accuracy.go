@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 )
@@ -171,11 +169,4 @@ func classifyLessonAccuracy(pe *entity.PredictedEffect, c *entity.Conclusion) st
 	default:
 		return lessonAccuracyHit
 	}
-}
-
-func formatPredictedEffectRange(pe *entity.PredictedEffect) string {
-	if pe.MaxEffect > 0 {
-		return fmt.Sprintf("%s–%s", fmtNumber(pe.MinEffect), fmtNumber(pe.MaxEffect))
-	}
-	return fmtNumber(pe.MinEffect)
 }

@@ -286,7 +286,7 @@ func (v *frontierView) view(width, height int) string {
 	assessment := ""
 	switch v.assessment.Mode {
 	case "threshold":
-		assessment = fmt.Sprintf("threshold=%s -> %s", fmtNumber(v.assessment.Threshold), v.assessment.OnThreshold)
+		assessment = formatGoalThresholdDecision(v.assessment.Threshold, v.assessment.OnThreshold)
 		if v.assessment.Met {
 			assessment += " (met)"
 		}

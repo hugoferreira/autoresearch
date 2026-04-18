@@ -357,18 +357,6 @@ func tuiMeterColor(used, limit float64, s string) string {
 	}
 }
 
-// ---- shared formatting ----
-
-// formatPredictedEffect renders a PredictedEffect as a human-readable string
-// like "decrease host_timing by ≥0.05 (up to 0.1)".
-func formatPredictedEffect(pe *entity.PredictedEffect) string {
-	s := fmt.Sprintf("%s %s by ≥%s", pe.Direction, pe.Instrument, fmtNumber(pe.MinEffect))
-	if pe.MaxEffect > 0 {
-		s += fmt.Sprintf(" (up to %s)", fmtNumber(pe.MaxEffect))
-	}
-	return s
-}
-
 // lessonAccuracyArrow returns a colored arrow when accuracy comparisons show
 // a dominant trend. Down means overshooting; up means undershooting.
 func lessonAccuracyArrow(summary lessonAccuracySummary) string {

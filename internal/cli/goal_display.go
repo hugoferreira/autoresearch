@@ -1,10 +1,6 @@
 package cli
 
-import (
-	"fmt"
-
-	"github.com/bytter/autoresearch/internal/entity"
-)
+import "github.com/bytter/autoresearch/internal/entity"
 
 func formatGoalObjective(g *entity.Goal) string {
 	if g == nil {
@@ -24,5 +20,5 @@ func formatGoalCompletion(g *entity.Goal) string {
 	if g.IsOpenEnded() {
 		return "open-ended -> continue_until_stall"
 	}
-	return fmt.Sprintf("threshold=%g -> %s", g.Completion.Threshold, g.EffectiveOnThreshold())
+	return formatGoalThresholdDecision(g.Completion.Threshold, g.EffectiveOnThreshold())
 }

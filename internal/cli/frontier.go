@@ -201,7 +201,7 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 	}
 	switch f.Assessment.Mode {
 	case "threshold":
-		w.Textf("goal_assessment: threshold=%s -> %s", fmtNumber(f.Assessment.Threshold), f.Assessment.OnThreshold)
+		w.Textf("goal_assessment: %s", formatGoalThresholdDecision(f.Assessment.Threshold, f.Assessment.OnThreshold))
 		if f.Assessment.Met {
 			w.Textf(" (met by %s; recommended=%s)\n", f.Assessment.MetByConclusion, f.Assessment.RecommendedAction)
 		} else {

@@ -5,6 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/bytter/autoresearch/internal/entity"
 )
 
 // Human-facing CLI/TUI/report surfaces intentionally round more aggressively
@@ -57,6 +59,18 @@ func fmtSignedRange(low, high float64) string {
 	return fmt.Sprintf("[%s, %s]", fmtSignedNumber(low), fmtSignedNumber(high))
 }
 
+func formatGoalThresholdDecision(threshold float64, onThreshold string) string {
+	return fmt.Sprintf("threshold=%s -> %s", fmtNumber(threshold), onThreshold)
+}
+
+func formatSignedCI95(delta, low, high float64) string {
+	return fmt.Sprintf("%s  95%% CI %s", fmtSignedNumber(delta), fmtSignedRange(low, high))
+}
+
+func formatSignedCI(delta, low, high float64) string {
+	return fmt.Sprintf("%s  CI %s", fmtSignedNumber(delta), fmtSignedRange(low, high))
+}
+
 // fmtValue formats a numeric value with a compact unit suffix.
 // Seconds are scaled to ns/us/ms/s; bytes shortened to B/KB/MB; everything
 // else gets compact human precision plus the unit suffix.
@@ -92,6 +106,23 @@ func fmtValue(v float64, unit string) string {
 
 func fmtValueRange(low, high float64, unit string) string {
 	return fmt.Sprintf("[%s, %s]", fmtValue(low, unit), fmtValue(high, unit))
+}
+
+// formatPredictedEffect renders a PredictedEffect as a human-readable string
+// like "decrease host_timing by ≥0.05 (up to 0.1)".
+func formatPredictedEffect(pe *entity.PredictedEffect) string {
+	s := fmt.Sprintf("%s %s by ≥%s", pe.Direction, pe.Instrument, fmtNumber(pe.MinEffect))
+	if pe.MaxEffect > 0 {
+		s += fmt.Sprintf(" (up to %s)", fmtNumber(pe.MaxEffect))
+	}
+	return s
+}
+
+func formatPredictedEffectRange(pe *entity.PredictedEffect) string {
+	if pe.MaxEffect > 0 {
+		return fmt.Sprintf("%s–%s", fmtNumber(pe.MinEffect), fmtNumber(pe.MaxEffect))
+	}
+	return fmtNumber(pe.MinEffect)
 }
 
 func shortUnit(u string) string {

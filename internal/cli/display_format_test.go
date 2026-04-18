@@ -1,6 +1,10 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/bytter/autoresearch/internal/entity"
+)
 
 func TestFmtNumber(t *testing.T) {
 	t.Parallel()
@@ -74,5 +78,32 @@ func TestFmtValue(t *testing.T) {
 				t.Fatalf("fmtValue(%v, %q) = %q, want %q", tc.v, tc.unit, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFormatHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got, want := formatGoalThresholdDecision(0.2, "ask_human"), "threshold=0.2 -> ask_human"; got != want {
+		t.Fatalf("formatGoalThresholdDecision() = %q, want %q", got, want)
+	}
+	if got, want := formatSignedCI95(-0.123456, -0.2, -0.05), "-0.1235  95% CI [-0.2, -0.05]"; got != want {
+		t.Fatalf("formatSignedCI95() = %q, want %q", got, want)
+	}
+	if got, want := formatSignedCI(0.123456, 0.05, 0.2), "+0.1235  CI [+0.05, +0.2]"; got != want {
+		t.Fatalf("formatSignedCI() = %q, want %q", got, want)
+	}
+
+	pe := &entity.PredictedEffect{
+		Instrument: "timing",
+		Direction:  "decrease",
+		MinEffect:  0.05,
+		MaxEffect:  0.1,
+	}
+	if got, want := formatPredictedEffect(pe), "decrease timing by ≥0.05 (up to 0.1)"; got != want {
+		t.Fatalf("formatPredictedEffect() = %q, want %q", got, want)
+	}
+	if got, want := formatPredictedEffectRange(pe), "0.05–0.1"; got != want {
+		t.Fatalf("formatPredictedEffectRange() = %q, want %q", got, want)
 	}
 }

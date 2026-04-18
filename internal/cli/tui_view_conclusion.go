@@ -207,8 +207,8 @@ func (v *conclusionDetailView) view(width, height int) string {
 			}
 			header := fmt.Sprintf("  %s (%s) %s", cc.Instrument, cc.Role, status)
 			if cc.Effect != nil {
-				header += fmt.Sprintf("  Δfrac=%s  CI%s",
-					fmtSignedNumber(cc.Effect.DeltaFrac), fmtSignedRange(cc.Effect.CILowFrac, cc.Effect.CIHighFrac))
+				header += fmt.Sprintf("  Δfrac=%s",
+					formatSignedCI(cc.Effect.DeltaFrac, cc.Effect.CILowFrac, cc.Effect.CIHighFrac))
 			}
 			lines = append(lines, header)
 			for _, r := range cc.Reasons {

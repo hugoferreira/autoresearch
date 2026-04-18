@@ -128,10 +128,8 @@ to persist a verdict.`,
 				}
 				if r.Comparison != nil {
 					cmp := r.Comparison
-					w.Textf("  delta_abs:  %s  95%% CI %s\n",
-						fmtSignedNumber(cmp.DeltaAbs), fmtSignedRange(cmp.CILowAbs, cmp.CIHighAbs))
-					w.Textf("  delta_frac: %s  95%% CI %s\n",
-						fmtSignedNumber(cmp.DeltaFrac), fmtSignedRange(cmp.CILowFrac, cmp.CIHighFrac))
+					w.Textf("  delta_abs:  %s\n", formatSignedCI95(cmp.DeltaAbs, cmp.CILowAbs, cmp.CIHighAbs))
+					w.Textf("  delta_frac: %s\n", formatSignedCI95(cmp.DeltaFrac, cmp.CILowFrac, cmp.CIHighFrac))
 					w.Textf("  mann–whitney U=%.1f  p=%.4f\n", cmp.UStat, cmp.PValue)
 				}
 			}
