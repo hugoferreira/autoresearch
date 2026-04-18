@@ -349,7 +349,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 		}
 	})
 
-	t.Run("dead reviewed candidates do not satisfy threshold", func(t *testing.T) {
+	t.Run("accepted supported candidates still satisfy threshold after promotion", func(t *testing.T) {
 		goal := &entity.Goal{
 			Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
 			Completion: &entity.Completion{
@@ -373,11 +373,11 @@ func TestAssessGoalCompletion(t *testing.T) {
 		expClassByID := map[string]experimentReadClass{
 			"E-3000": {
 				Classification:   experimentClassificationDead,
-				HypothesisStatus: entity.StatusKilled,
+				HypothesisStatus: entity.StatusSupported,
 			},
 		}
 		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID)
-		if got.Met || got.MetByConclusion != "" || got.RecommendedAction != "continue" {
+		if !got.Met || got.MetByConclusion != "C-3000" || got.RecommendedAction != "stop" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
 	})
@@ -416,7 +416,7 @@ func TestComputeFrontierFromObservations_CarriesExperimentClassification(t *test
 	}
 }
 
-func TestComputeFrontierFromObservations_StalledForIgnoresDeadRows(t *testing.T) {
+func TestComputeFrontierFromObservations_StalledForCountsLaterConclusionsAfterAcceptedWin(t *testing.T) {
 	goal := &entity.Goal{
 		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
 	}
@@ -433,7 +433,7 @@ func TestComputeFrontierFromObservations_StalledForIgnoresDeadRows(t *testing.T)
 		{
 			ID:           "C-0002",
 			Hypothesis:   "H-0002",
-			Verdict:      entity.VerdictSupported,
+			Verdict:      entity.VerdictInconclusive,
 			CandidateExp: "E-0002",
 			Effect:       entity.Effect{Instrument: "host_timing", DeltaFrac: -0.09},
 			CreatedAt:    base.Add(1 * time.Minute),
@@ -441,39 +441,30 @@ func TestComputeFrontierFromObservations_StalledForIgnoresDeadRows(t *testing.T)
 		{
 			ID:           "C-0003",
 			Hypothesis:   "H-0003",
-			Verdict:      entity.VerdictSupported,
+			Verdict:      entity.VerdictRefuted,
 			CandidateExp: "E-0003",
 			Effect:       entity.Effect{Instrument: "host_timing", DeltaFrac: -0.20},
 			CreatedAt:    base.Add(2 * time.Minute),
-		},
-		{
-			ID:           "C-0004",
-			Hypothesis:   "H-0004",
-			Verdict:      entity.VerdictSupported,
-			CandidateExp: "E-0004",
-			Effect:       entity.Effect{Instrument: "host_timing", DeltaFrac: -0.08},
-			CreatedAt:    base.Add(3 * time.Minute),
 		},
 	}
 	obsByExp := map[string][]*entity.Observation{
 		"E-0001": {{Instrument: "host_timing", Value: 100}},
 		"E-0002": {{Instrument: "host_timing", Value: 101}},
 		"E-0003": {{Instrument: "host_timing", Value: 90}},
-		"E-0004": {{Instrument: "host_timing", Value: 102}},
 	}
 	rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
-		"E-0003": {
+		"E-0001": {
 			Classification:   experimentClassificationDead,
-			HypothesisStatus: entity.StatusRefuted,
+			HypothesisStatus: entity.StatusSupported,
 		},
 	})
 	if got, want := stalled, 2; got != want {
 		t.Fatalf("stalled_for = %d, want %d", got, want)
 	}
-	if got, want := len(rows), 4; got != want {
+	if got, want := len(rows), 1; got != want {
 		t.Fatalf("rows len = %d, want %d", got, want)
 	}
-	if got, want := rows[0].Candidate, "E-0003"; got != want {
+	if got, want := rows[0].Candidate, "E-0001"; got != want {
 		t.Fatalf("best row candidate = %q, want %q", got, want)
 	}
 	if got, want := rows[0].Classification, experimentClassificationDead; got != want {

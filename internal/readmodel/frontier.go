@@ -114,26 +114,27 @@ func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 	var bestRow FrontierRow
 	for _, c := range sortedByTime {
 		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
-		if !ok {
-			continue
+		if ok {
+			cur := FrontierRow{
+				Value:          val,
+				TiebreakValues: rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
+			}
+			if !hasBest {
+				hasBest = true
+				bestRow = cur
+				stalledFor = 0
+				continue
+			}
+			if FrontierRowBetter(goal, cur, bestRow) {
+				bestRow = cur
+				stalledFor = 0
+				continue
+			}
 		}
-		if !ExperimentReadClassForID(expClassByID, c.CandidateExp).LoopActionable() {
-			continue
-		}
-		cur := FrontierRow{
-			Value:          val,
-			TiebreakValues: rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
-		}
-		if !hasBest {
-			hasBest = true
-			bestRow = cur
-			stalledFor = 0
-			continue
-		}
-		if FrontierRowBetter(goal, cur, bestRow) {
-			bestRow = cur
-			stalledFor = 0
-		} else {
+		// stalled_for tracks conclusions written since the last frontier
+		// improvement, not just supported+feasible conclusions. Once the
+		// frontier exists, every later non-improving conclusion advances it.
+		if hasBest {
 			stalledFor++
 		}
 	}
@@ -169,6 +170,7 @@ func FrontierRowBetter(goal *entity.Goal, a, b FrontierRow) bool {
 }
 
 func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) FrontierGoalAssessment {
+	_ = expClassByID
 	if goal == nil || goal.IsOpenEnded() {
 		return FrontierGoalAssessment{
 			Mode:              "open_ended",
@@ -191,9 +193,10 @@ func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 		if c == nil || c.ReviewedBy == "" {
 			continue
 		}
-		if !ExperimentReadClassForID(expClassByID, c.CandidateExp).LoopActionable() {
-			continue
-		}
+		// goal_assessment is about accepted historical wins, not loop
+		// actionability. Once a supported conclusion is accepted, its parent
+		// hypothesis becomes supported and the experiment read class goes dead;
+		// the assessment must still be able to report the goal as met.
 		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
 			continue
 		}
