@@ -322,35 +322,70 @@ func TestTUI_ExperimentDetailShowsDeadClassification(t *testing.T) {
 }
 
 func TestTUI_ObservationDetail(t *testing.T) {
-	v := newObservationDetailView("O-0003")
 	pass := true
 	ciLow, ciHigh := 1.1, 1.3
-	o := &entity.Observation{
+	o := testObservationDetailEntity()
+	o.Samples = 5
+	o.PerSample = []float64{1.1, 1.2, 1.3}
+	o.CILow = &ciLow
+	o.CIHigh = &ciHigh
+	o.CIMethod = "bca"
+	o.Pass = &pass
+	o.Artifacts = []entity.Artifact{{
+		Name: "primary", SHA: "abcdef1234567890", Path: "artifacts/ab/abcdef1234567890", Bytes: 2048,
+	}}
+	o.EvidenceFailures = []entity.EvidenceFailure{{
+		Name:     testEvidenceName,
+		ExitCode: 7,
+		Error:    "profile tool crashed",
+	}}
+	o.Worktree = "/tmp/wt"
+	o.BaselineSHA = "fedcba9876543210"
+	o.Aux = map[string]any{"stdev": 0.04, "warm": true}
+	out := renderObservationDetailForTest(o, 40)
+	for _, want := range []string{
+		"O-0003", "host_timing=1.2 s", "experiment=E-0007", "Artifacts (1):",
+		"Evidence failures:", testEvidenceName + " (exit 7): profile tool crashed",
+		"make test", "stdev", "warm",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("observation detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func testObservationDetailEntity() *entity.Observation {
+	return &entity.Observation{
 		ID:         "O-0003",
 		Experiment: "E-0007",
 		Instrument: "host_timing",
 		MeasuredAt: time.Date(2026, 4, 12, 11, 0, 0, 0, time.UTC),
 		Value:      1.2,
 		Unit:       "s",
-		Samples:    5,
-		PerSample:  []float64{1.1, 1.2, 1.3},
-		CILow:      &ciLow,
-		CIHigh:     &ciHigh,
-		CIMethod:   "bca",
-		Pass:       &pass,
-		Artifacts: []entity.Artifact{{
-			Name: "primary", SHA: "abcdef1234567890", Path: "artifacts/ab/abcdef1234567890", Bytes: 2048,
-		}},
-		Command:     "make test",
-		ExitCode:    0,
-		Worktree:    "/tmp/wt",
-		BaselineSHA: "fedcba9876543210",
-		Author:      "agent:observer",
-		Aux:         map[string]any{"stdev": 0.04, "warm": true},
+		Samples:    1,
+		Command:    "make test",
+		ExitCode:   0,
+		Author:     "agent:observer",
 	}
+}
+
+func renderObservationDetailForTest(o *entity.Observation, height int) string {
+	v := newObservationDetailView(o.ID)
 	nv, _ := v.update(obsDetailLoadedMsg{o: o}, nil)
-	out := stripANSI(nv.view(120, 25))
-	for _, want := range []string{"O-0003", "host_timing=1.2 s", "experiment=E-0007", "Artifacts (1):", "make test", "stdev", "warm"} {
+	return stripANSI(nv.view(120, height))
+}
+
+func TestTUI_ObservationDetailShowsEvidenceSpawnFailure(t *testing.T) {
+	o := testObservationDetailEntity()
+	o.EvidenceFailures = []entity.EvidenceFailure{{
+		Name:  testEvidenceName,
+		Error: testEvidenceSpawnTraceErr,
+	}}
+	out := renderObservationDetailForTest(o, 20)
+	for _, want := range []string{
+		"Evidence failures:",
+		testEvidenceName + ": " + testEvidenceSpawnTraceErr,
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("observation detail missing %q:\n%s", want, out)
 		}

@@ -31,20 +31,26 @@ type CommandSpec struct {
 	WorkDir string `yaml:"workdir,omitempty"`
 }
 
+type EvidenceSpec struct {
+	Name string `yaml:"name"`
+	Cmd  string `yaml:"cmd"`
+}
+
 type Instrument struct {
-	Cmd        []string `yaml:"cmd"`
-	Parser     string   `yaml:"parser"`
+	Cmd    []string `yaml:"cmd"`
+	Parser string   `yaml:"parser"`
 	// Pattern is the extraction regex used by parsers that pull a scalar out
 	// of command stdout (currently builtin:scalar). It MUST contain exactly
 	// one capture group producing a base-10 integer. Ignored by other parsers.
-	Pattern    string   `yaml:"pattern,omitempty"`
-	Unit       string   `yaml:"unit"`
-	MinSamples int      `yaml:"min_samples,omitempty"`
+	Pattern    string `yaml:"pattern,omitempty"`
+	Unit       string `yaml:"unit"`
+	MinSamples int    `yaml:"min_samples,omitempty"`
 	// Requires lists instrument prerequisites as "instrument=condition" pairs.
 	// Before running this instrument, the observe command checks that each
 	// prerequisite has a passing observation on the same experiment.
 	// v1 condition: "pass" — the prerequisite must have pass=true.
-	Requires   []string `yaml:"requires,omitempty"`
+	Requires []string       `yaml:"requires,omitempty"`
+	Evidence []EvidenceSpec `yaml:"evidence,omitempty"`
 }
 
 type Budgets struct {
@@ -76,7 +82,17 @@ func (s *Store) Config() (*Config, error) {
 	if cached.Instruments != nil {
 		out.Instruments = make(map[string]Instrument, len(cached.Instruments))
 		for k, v := range cached.Instruments {
-			out.Instruments[k] = v
+			inst := v
+			if len(v.Cmd) > 0 {
+				inst.Cmd = append([]string(nil), v.Cmd...)
+			}
+			if len(v.Requires) > 0 {
+				inst.Requires = append([]string(nil), v.Requires...)
+			}
+			if len(v.Evidence) > 0 {
+				inst.Evidence = append([]EvidenceSpec(nil), v.Evidence...)
+			}
+			out.Instruments[k] = inst
 		}
 	}
 	return &out, nil

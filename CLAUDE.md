@@ -77,6 +77,11 @@ get a new file plus an entry in the `groups` slice in `Root()`.
 - **Output.** Every verb supports `--json`. Use the `output` package; don't
   hand-roll JSON. Text output is for humans; JSON is the agent contract and
   must stay stable across patches.
+- **Read surfaces should be total.** If a reviewer-facing read path joins
+  cross-entity evidence (for example `conclusion show --json` joining cited
+  observations), do not silently drop unreadable references. Surface the read
+  issue explicitly and keep it distinct from "evidence capture was configured
+  but failed" and from "no evidence was configured".
 - **Errors.** Sentinel errors live in `internal/cli/errors.go`. `ErrPaused`
   → exit 3, `ErrBudgetExhausted` → exit 4. Don't invent new exit codes
   without updating `cmd/autoresearch/main.go` and the README/agent doc.

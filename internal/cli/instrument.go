@@ -60,6 +60,13 @@ func instrumentListCmd() *cobra.Command {
 				if len(inst.Requires) > 0 {
 					extra += fmt.Sprintf("  requires=%s", strings.Join(inst.Requires, ","))
 				}
+				if len(inst.Evidence) > 0 {
+					names := make([]string, 0, len(inst.Evidence))
+					for _, ev := range inst.Evidence {
+						names = append(names, ev.Name)
+					}
+					extra += fmt.Sprintf("  evidence=%s", strings.Join(names, ","))
+				}
 				w.Textf("  %-16s  parser=%-18s  unit=%-12s%s\n", n, inst.Parser, unit, extra)
 			}
 			return nil
@@ -67,15 +74,59 @@ func instrumentListCmd() *cobra.Command {
 	}
 }
 
+func parseEvidenceSpecs(raw []string) ([]store.EvidenceSpec, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]store.EvidenceSpec, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		name, cmd, ok := strings.Cut(item, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid --evidence %q: want name=cmd", item)
+		}
+		name = strings.TrimSpace(name)
+		cmd = strings.TrimSpace(cmd)
+		if name == "" {
+			return nil, fmt.Errorf("invalid --evidence %q: name is required", item)
+		}
+		if cmd == "" {
+			return nil, fmt.Errorf("invalid --evidence %q: command is required", item)
+		}
+		if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+			return nil, fmt.Errorf("invalid --evidence name %q: must not contain path separators", name)
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("duplicate --evidence name %q", name)
+		}
+		seen[name] = struct{}{}
+		out = append(out, store.EvidenceSpec{Name: name, Cmd: cmd})
+	}
+	return out, nil
+}
+
+func evidenceEventData(specs []store.EvidenceSpec) []map[string]any {
+	out := make([]map[string]any, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, map[string]any{
+			"name": spec.Name,
+			"cmd":  spec.Cmd,
+		})
+	}
+	return out
+}
+
 func instrumentRegisterCmd() *cobra.Command {
 	var (
-		cmdStr     []string
-		parser     string
-		pattern    string
-		unit       string
-		requires   []string
-		minSamples int
-		author     string
+		cmdStr      []string
+		parser      string
+		pattern     string
+		unit        string
+		requires    []string
+		evidenceRaw []string
+		minSamples  int
+		author      string
 	)
 	c := &cobra.Command{
 		Use:   "register <name>",
@@ -84,6 +135,10 @@ func instrumentRegisterCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			name := args[0]
+			evidence, err := parseEvidenceSpecs(evidenceRaw)
+			if err != nil {
+				return err
+			}
 
 			s, err := openStoreLive()
 			if err != nil {
@@ -95,6 +150,7 @@ func instrumentRegisterCmd() *cobra.Command {
 				Pattern:    pattern,
 				Unit:       unit,
 				Requires:   requires,
+				Evidence:   evidence,
 				MinSamples: minSamples,
 			}
 			if err := dryRun(w, fmt.Sprintf("register instrument %q (unit=%s)", name, unit), map[string]any{"name": name, "instrument": inst}); err != nil {
@@ -117,6 +173,9 @@ func instrumentRegisterCmd() *cobra.Command {
 			if len(inst.Requires) > 0 {
 				eventData["requires"] = inst.Requires
 			}
+			if len(inst.Evidence) > 0 {
+				eventData["evidence"] = evidenceEventData(inst.Evidence)
+			}
 			if err := emitEvent(s, "instrument.register", author, name, eventData); err != nil {
 				return err
 			}
@@ -131,6 +190,7 @@ func instrumentRegisterCmd() *cobra.Command {
 	c.Flags().StringVar(&pattern, "pattern", "", "regex with exactly one capture group (required for builtin:scalar)")
 	c.Flags().StringVar(&unit, "unit", "", "unit of measurement (e.g. cycles, bytes, seconds, instructions)")
 	c.Flags().StringArrayVar(&requires, "requires", nil, "prerequisite as 'instrument=pass' (repeatable); observe will refuse to run this instrument until prerequisites have passing observations")
+	c.Flags().StringArrayVar(&evidenceRaw, "evidence", nil, "optional evidence side-artifact as 'name=cmd' (repeatable); runs via `sh -c` after the primary measurement and records non-fatal failures on the observation")
 	c.Flags().IntVar(&minSamples, "min-samples", 0, "minimum samples required (strict mode)")
 	addAuthorFlag(c, &author, "")
 	return c

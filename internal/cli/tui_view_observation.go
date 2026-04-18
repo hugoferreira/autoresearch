@@ -108,6 +108,14 @@ func (v *observationDetailView) view(width, height int) string {
 		lines = append(lines, renderTable(rows, "  "))
 	}
 
+	if len(o.EvidenceFailures) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, tuiBold.Render("Evidence failures:"))
+		for _, failure := range o.EvidenceFailures {
+			lines = append(lines, "  - "+formatEvidenceFailure(failure))
+		}
+	}
+
 	if len(o.PerSample) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, tuiBold.Render("Per-sample:"))

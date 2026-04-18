@@ -236,6 +236,22 @@ autoresearch experiment design <hyp-id> \
 3. Does it move the predicted instrument? → the hypothesis's instrument
 4. Does it violate constraints? → every constraint instrument from the goal
 
+If a mechanism claim will depend on qualitative analysis that is not
+already visible in the diff — a disassembly, subpass table, counter
+dump, intermediate-state summary — capture it as an evidence
+side-artifact on the instrument that owns the primary measurement:
+
+```sh
+autoresearch instrument register <name> \
+    ...existing flags... \
+    --evidence mechanism='profile-expr --json'
+```
+
+Evidence commands run after the primary measurement and persist combined
+stdout+stderr as `evidence/<name>` artifacts on the resulting
+observation. Use them to ground mechanism claims; do not write
+mechanism prose that depends on an uncaptured analysis.
+
 ### 3. Implement
 
 Create the worktree from the main project, then spawn a coder helper:
@@ -362,8 +378,16 @@ configure rescuers — the goal does.
 
 - Cite specific numbers from the analyze output.
 - Link the mechanism (the code change) to the measurement (the effect).
+- Every mechanism claim must be backed by either the diff itself or a
+  persisted evidence artifact on one of the cited observations. Name
+  the supporting observation / artifact when the diff alone is not
+  enough.
 - Acknowledge any constraint at risk.
 - Do NOT speculate about unmeasured causes — that's a new hypothesis.
+
+If the mechanism you want to describe is supported by neither the diff
+nor an evidence artifact, stop and surface a measurement-contract gap
+instead of writing the unsupported claim into the conclusion.
 
 ### 6. Record a lesson (required on decisive conclusions)
 

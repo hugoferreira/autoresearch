@@ -19,6 +19,13 @@ func conclusionCommands() []*cobra.Command {
 	return []*cobra.Command{c}
 }
 
+type conclusionShowJSON struct {
+	*entity.Conclusion
+	ObservationArtifacts        map[string][]entity.Artifact        `json:"observation_artifacts,omitempty"`
+	ObservationEvidenceFailures map[string][]entity.EvidenceFailure `json:"observation_evidence_failures,omitempty"`
+	ObservationReadIssues       map[string]string                   `json:"observation_read_issues,omitempty"`
+}
+
 func conclusionListCmd() *cobra.Command {
 	var hyp, verdict, goalFlag string
 	c := &cobra.Command{
@@ -96,7 +103,7 @@ func conclusionShowCmd() *cobra.Command {
 				return err
 			}
 			if w.IsJSON() {
-				return w.JSON(c)
+				return w.JSON(buildConclusionShowJSON(s, c))
 			}
 			w.Textf("id:           %s\n", c.ID)
 			w.Textf("hypothesis:   %s\n", c.Hypothesis)

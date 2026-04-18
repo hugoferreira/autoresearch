@@ -17,6 +17,12 @@ type Artifact struct {
 	Mime  string `json:"mime,omitempty"`
 }
 
+type EvidenceFailure struct {
+	Name     string `json:"name"`
+	ExitCode int    `json:"exit_code"`
+	Error    string `json:"error,omitempty"`
+}
+
 type Observation struct {
 	ID         string    `json:"id"`
 	Experiment string    `json:"experiment"`
@@ -31,7 +37,8 @@ type Observation struct {
 	CIMethod   string    `json:"ci_method,omitempty"`
 	Pass       *bool     `json:"pass,omitempty"`
 
-	Artifacts []Artifact `json:"artifacts"`
+	Artifacts        []Artifact        `json:"artifacts"`
+	EvidenceFailures []EvidenceFailure `json:"evidence_failures,omitempty"`
 
 	// Legacy convenience pointers to the primary (first) artifact. Kept in
 	// sync by Normalize; older observations without the Artifacts list are

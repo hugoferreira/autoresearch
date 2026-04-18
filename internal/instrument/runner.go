@@ -3,26 +3,26 @@
 //
 // Four built-in parsers are supported:
 //
-//   builtin:passfail — run cmd once; value=1 if exit==0 else 0, unit="pass".
-//                      Used for host_compile, host_test, and similar binary
-//                      outcomes.
-//   builtin:timing   — run cmd N times; value=mean seconds, per_sample + BCa
-//                      95% bootstrap CI (via internal/stats).
-//   builtin:size     — run cmd once; first numeric column is the "text" size
-//                      in bytes; all header columns land in aux. Tolerant of
-//                      both GNU `size` (text/data/bss) and Mach-O
-//                      `size` (__TEXT/__DATA/...) output formats.
-//   builtin:scalar   — run cmd N times; extract a single integer from each
-//                      stdout using a user-declared regex (instrument.Pattern,
-//                      set via `--pattern` at `instrument register` time).
-//                      The regex MUST have exactly one capture group. Returns
-//                      per_sample + BCa 95% CI. The unit is whatever the user
-//                      declared when registering — cycles, instructions,
-//                      page_faults, bytes, whatever the command prints.
-//                      Intended for any tool whose output contains a single
-//                      scalar: qemu semihosting, perf stat, objdump line
-//                      counts, cachegrind, etc. Nothing in the parser knows
-//                      about any specific tool.
+//	builtin:passfail — run cmd once; value=1 if exit==0 else 0, unit="pass".
+//	                   Used for host_compile, host_test, and similar binary
+//	                   outcomes.
+//	builtin:timing   — run cmd N times; value=mean seconds, per_sample + BCa
+//	                   95% bootstrap CI (via internal/stats).
+//	builtin:size     — run cmd once; first numeric column is the "text" size
+//	                   in bytes; all header columns land in aux. Tolerant of
+//	                   both GNU `size` (text/data/bss) and Mach-O
+//	                   `size` (__TEXT/__DATA/...) output formats.
+//	builtin:scalar   — run cmd N times; extract a single integer from each
+//	                   stdout using a user-declared regex (instrument.Pattern,
+//	                   set via `--pattern` at `instrument register` time).
+//	                   The regex MUST have exactly one capture group. Returns
+//	                   per_sample + BCa 95% CI. The unit is whatever the user
+//	                   declared when registering — cycles, instructions,
+//	                   page_faults, bytes, whatever the command prints.
+//	                   Intended for any tool whose output contains a single
+//	                   scalar: qemu semihosting, perf stat, objdump line
+//	                   counts, cachegrind, etc. Nothing in the parser knows
+//	                   about any specific tool.
 package instrument
 
 import (
@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
 )
@@ -60,7 +61,8 @@ type ArtifactContent struct {
 }
 
 type Result struct {
-	Artifacts []ArtifactContent
+	Artifacts        []ArtifactContent
+	EvidenceFailures []entity.EvidenceFailure
 
 	Command    string
 	ExitCode   int
@@ -82,18 +84,26 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	if len(cfg.Instrument.Cmd) == 0 {
 		return nil, errors.New("instrument has no cmd")
 	}
+	var (
+		res *Result
+		err error
+	)
 	switch cfg.Instrument.Parser {
 	case "builtin:passfail":
-		return runPassFail(ctx, cfg)
+		res, err = runPassFail(ctx, cfg)
 	case "builtin:timing":
-		return runTiming(ctx, cfg)
+		res, err = runTiming(ctx, cfg)
 	case "builtin:size":
-		return runSize(ctx, cfg)
+		res, err = runSize(ctx, cfg)
 	case "builtin:scalar":
-		return runScalar(ctx, cfg)
+		res, err = runScalar(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("unknown parser %q (available: builtin:passfail, builtin:timing, builtin:size, builtin:scalar)", cfg.Instrument.Parser)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return runEvidence(ctx, cfg, res)
 }
 
 type execOutcome struct {
@@ -135,6 +145,41 @@ func execOnce(ctx context.Context, cfg Config, argv []string) (*execOutcome, err
 	}, nil
 }
 
+func execShell(ctx context.Context, cfg Config, script string) (*execOutcome, error) {
+	return execOnce(ctx, cfg, []string{"sh", "-c", script})
+}
+
+func runEvidence(ctx context.Context, cfg Config, res *Result) (*Result, error) {
+	if len(cfg.Instrument.Evidence) == 0 {
+		return res, nil
+	}
+	for _, spec := range cfg.Instrument.Evidence {
+		o, err := execShell(ctx, cfg, spec.Cmd)
+		if err != nil {
+			res.EvidenceFailures = append(res.EvidenceFailures, entity.EvidenceFailure{
+				Name:  spec.Name,
+				Error: err.Error(),
+			})
+			continue
+		}
+		if o.ExitCode != 0 {
+			res.EvidenceFailures = append(res.EvidenceFailures, entity.EvidenceFailure{
+				Name:     spec.Name,
+				ExitCode: o.ExitCode,
+			})
+			continue
+		}
+		res.Artifacts = append(res.Artifacts, ArtifactContent{
+			Name:     "evidence/" + spec.Name,
+			Filename: spec.Name + ".txt",
+			Content:  o.Stdout,
+			Mime:     "text/plain",
+		})
+	}
+	res.FinishedAt = time.Now()
+	return res, nil
+}
+
 func runPassFail(ctx context.Context, cfg Config) (*Result, error) {
 	o, err := execOnce(ctx, cfg, cfg.Instrument.Cmd)
 	if err != nil {
@@ -149,15 +194,16 @@ func runPassFail(ctx context.Context, cfg Config) (*Result, error) {
 		Artifacts: []ArtifactContent{
 			{Name: "stdout", Filename: "stdout.txt", Content: o.Stdout, Mime: "text/plain"},
 		},
-		Command:    o.Command,
-		ExitCode:   o.ExitCode,
-		StartedAt:  o.Start,
-		FinishedAt: o.Start.Add(o.Elapsed),
-		Value:      val,
-		Unit:       "pass",
-		SamplesN:   1,
-		Pass:       &pass,
-		Aux:        map[string]any{"elapsed_s": o.Elapsed.Seconds()},
+		EvidenceFailures: nil,
+		Command:          o.Command,
+		ExitCode:         o.ExitCode,
+		StartedAt:        o.Start,
+		FinishedAt:       o.Start.Add(o.Elapsed),
+		Value:            val,
+		Unit:             "pass",
+		SamplesN:         1,
+		Pass:             &pass,
+		Aux:              map[string]any{"elapsed_s": o.Elapsed.Seconds()},
 	}, nil
 }
 
@@ -207,17 +253,18 @@ func runTiming(ctx context.Context, cfg Config) (*Result, error) {
 		Artifacts: []ArtifactContent{
 			{Name: "timing", Filename: "timing.json", Content: raw, Mime: "application/json"},
 		},
-		Command:    strings.Join(cfg.Instrument.Cmd, " "),
-		ExitCode:   0,
-		StartedAt:  started,
-		FinishedAt: finished,
-		Value:      mean,
-		Unit:       "seconds",
-		SamplesN:   samples,
-		PerSample:  per,
-		CILow:      &low,
-		CIHigh:     &high,
-		CIMethod:   "bootstrap_bca_95",
+		EvidenceFailures: nil,
+		Command:          strings.Join(cfg.Instrument.Cmd, " "),
+		ExitCode:         0,
+		StartedAt:        started,
+		FinishedAt:       finished,
+		Value:            mean,
+		Unit:             "seconds",
+		SamplesN:         samples,
+		PerSample:        per,
+		CILow:            &low,
+		CIHigh:           &high,
+		CIMethod:         "bootstrap_bca_95",
 	}, nil
 }
 
@@ -237,14 +284,15 @@ func runSize(ctx context.Context, cfg Config) (*Result, error) {
 		Artifacts: []ArtifactContent{
 			{Name: "size", Filename: "size.txt", Content: o.Stdout, Mime: "text/plain"},
 		},
-		Command:    o.Command,
-		ExitCode:   o.ExitCode,
-		StartedAt:  o.Start,
-		FinishedAt: o.Start.Add(o.Elapsed),
-		Value:      float64(text),
-		Unit:       "bytes",
-		SamplesN:   1,
-		Aux:        aux,
+		EvidenceFailures: nil,
+		Command:          o.Command,
+		ExitCode:         o.ExitCode,
+		StartedAt:        o.Start,
+		FinishedAt:       o.Start.Add(o.Elapsed),
+		Value:            float64(text),
+		Unit:             "bytes",
+		SamplesN:         1,
+		Aux:              aux,
 	}, nil
 }
 
@@ -321,17 +369,18 @@ func runScalar(ctx context.Context, cfg Config) (*Result, error) {
 		Artifacts: []ArtifactContent{
 			{Name: "scalar", Filename: "scalar.json", Content: raw, Mime: "application/json"},
 		},
-		Command:    strings.Join(cfg.Instrument.Cmd, " "),
-		ExitCode:   0,
-		StartedAt:  started,
-		FinishedAt: finished,
-		Value:      summary.Mean,
-		Unit:       unit,
-		SamplesN:   samples,
-		PerSample:  per,
-		CILow:      &summary.CILow,
-		CIHigh:     &summary.CIHigh,
-		CIMethod:   "bootstrap_bca_95",
+		EvidenceFailures: nil,
+		Command:          strings.Join(cfg.Instrument.Cmd, " "),
+		ExitCode:         0,
+		StartedAt:        started,
+		FinishedAt:       finished,
+		Value:            summary.Mean,
+		Unit:             unit,
+		SamplesN:         samples,
+		PerSample:        per,
+		CILow:            &summary.CILow,
+		CIHigh:           &summary.CIHigh,
+		CIMethod:         "bootstrap_bca_95",
 	}, nil
 }
 
@@ -388,4 +437,3 @@ func parseSize(out []byte) (int64, map[string]any, error) {
 	}
 	return text, aux, nil
 }
-

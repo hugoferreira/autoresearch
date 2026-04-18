@@ -285,6 +285,17 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 
 Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
 
+In ` + "`--json`" + ` mode, ` + "`conclusion show`" + ` returns the conclusion plus three
+additive maps keyed by cited observation id:
+
+- ` + "`observation_artifacts`" + ` — artifact metadata only (` + "`name`" + ` / ` + "`sha`" + ` / ` + "`path`" + ` / ` + "`bytes`" + ` / ` + "`mime`" + `), never artifact content
+- ` + "`observation_evidence_failures`" + ` — non-fatal evidence-capture failures persisted on readable observations
+- ` + "`observation_read_issues`" + ` — cited observations that could not be read (for example missing or corrupt persisted evidence)
+
+Do not treat ` + "`observation_evidence_failures`" + ` or ` + "`observation_read_issues`" + ` as
+equivalent to "no evidence configured". They mean the evidence chain is
+incomplete and should be reviewed explicitly.
+
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--goal G-NNNN|all] [--experiment E-XXXX | --observation O-XXXX]
     autoresearch artifact stat   <sha-or-prefix>
@@ -301,7 +312,7 @@ Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provision
         --cmd a --cmd b --cmd c \                      # repeat --cmd once per argv element; commas in a value are preserved
         --parser builtin:{passfail|timing|size|scalar} \
         [--pattern 'regex with one capture group']  # required for builtin:scalar
-        --unit U [--requires inst=pass,...] [--min-samples N]
+        --unit U [--requires inst=pass,...] [--evidence name=cmd] [--min-samples N]
     autoresearch instrument list
     autoresearch instrument delete <name> [--reason "..."] [--force]
         # delete refuses while the instrument is referenced by the active
@@ -357,6 +368,13 @@ Examples of ` + "`builtin:scalar`" + ` instruments (the name is your choice):
 The parser requires an integer. If your tool emits a fractional number,
 scale it (as in the ccn example). If your tool emits multiple metrics,
 register multiple instruments with different patterns.
+
+Use ` + "`--evidence name=cmd`" + ` when a later mechanism claim depends on a
+qualitative readout that is not itself the primary measurement — for
+example a disassembly, subpass dump, or intermediate-state table. The
+CLI runs evidence commands after the primary measurement via ` + "`sh -c`" + `,
+captures combined stdout+stderr as an ` + "`evidence/<name>`" + ` artifact on the
+observation, and records non-fatal failures in ` + "`observation.evidence_failures`" + `.
 
 ## Strict-mode firewall
 
