@@ -6,6 +6,11 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 )
 
+const (
+	testEvidenceName          = "mechanism"
+	testEvidenceSpawnTraceErr = `spawn "sh -c echo trace": exec: "sh": executable file not found in $PATH`
+)
+
 func TestFormatEvidenceFailure(t *testing.T) {
 	tests := []struct {
 		name string
@@ -15,27 +20,27 @@ func TestFormatEvidenceFailure(t *testing.T) {
 		{
 			name: "exit only",
 			in: entity.EvidenceFailure{
-				Name:     "mechanism",
+				Name:     testEvidenceName,
 				ExitCode: 7,
 			},
-			want: "mechanism (exit 7)",
+			want: testEvidenceName + " (exit 7)",
 		},
 		{
 			name: "spawn error omits meaningless zero exit",
 			in: entity.EvidenceFailure{
-				Name:  "mechanism",
-				Error: `spawn "sh -c echo trace": exec: "sh": executable file not found in $PATH`,
+				Name:  testEvidenceName,
+				Error: testEvidenceSpawnTraceErr,
 			},
-			want: `mechanism: spawn "sh -c echo trace": exec: "sh": executable file not found in $PATH`,
+			want: testEvidenceName + ": " + testEvidenceSpawnTraceErr,
 		},
 		{
 			name: "exit and error",
 			in: entity.EvidenceFailure{
-				Name:     "mechanism",
+				Name:     testEvidenceName,
 				ExitCode: 7,
 				Error:    "trace command failed",
 			},
-			want: "mechanism (exit 7): trace command failed",
+			want: testEvidenceName + " (exit 7): trace command failed",
 		},
 	}
 	for _, tt := range tests {
