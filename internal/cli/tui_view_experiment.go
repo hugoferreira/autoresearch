@@ -15,15 +15,15 @@ import (
 
 type experimentListView struct {
 	scope        goalScope
-	all          []*entity.Experiment
-	filtered     []*entity.Experiment
+	all          []*experimentReadView
+	filtered     []*experimentReadView
 	cursor       int
 	statusFilter string
 	err          error
 }
 
 type expListLoadedMsg struct {
-	list []*entity.Experiment
+	list []*experimentReadView
 	err  error
 }
 
@@ -35,10 +35,7 @@ func (v *experimentListView) title() string { return "Experiments" }
 
 func (v *experimentListView) init(s *store.Store) tea.Cmd {
 	return func() tea.Msg {
-		list, err := s.ListExperiments()
-		if err == nil {
-			list, err = newGoalScopeResolver(s, v.scope).filterExperiments(list)
-		}
+		list, err := listScopedExperimentsForRead(s, v.scope)
 		return expListLoadedMsg{list: list, err: err}
 	}
 }
@@ -103,7 +100,7 @@ func (v *experimentListView) view(width, height int) string {
 			hypLabel = tuiCyan.Render("[baseline]")
 		}
 		rows[i] = fmt.Sprintf("%-8s  %s  %-14s  inst=%s",
-			e.ID, padRight(tuiExpStatusBadge(e.Status), 12),
+			e.ID, padRight(tuiExpStatusBadgeWithClassification(e.Status, e.Classification), 19),
 			hypLabel, strings.Join(e.Instruments, ","))
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
@@ -113,7 +110,7 @@ func (v *experimentListView) view(width, height int) string {
 
 type experimentDetailView struct {
 	id      string
-	e       *entity.Experiment
+	e       *experimentReadView
 	obs     []*entity.Observation
 	summ    map[string]stats.Summary
 	compact bool
@@ -121,7 +118,7 @@ type experimentDetailView struct {
 }
 
 type expDetailLoadedMsg struct {
-	e    *entity.Experiment
+	e    *experimentReadView
 	obs  []*entity.Observation
 	summ map[string]stats.Summary
 	err  error
@@ -136,7 +133,7 @@ func (v *experimentDetailView) title() string { return "Experiment " + v.id }
 func (v *experimentDetailView) init(s *store.Store) tea.Cmd {
 	id := v.id
 	return func() tea.Msg {
-		e, err := s.ReadExperiment(id)
+		view, err := readExperimentForRead(s, id)
 		if err != nil {
 			return expDetailLoadedMsg{err: err}
 		}
@@ -150,7 +147,7 @@ func (v *experimentDetailView) init(s *store.Store) tea.Cmd {
 				summ[name] = stats.Summarize(xs, 0, 0)
 			}
 		}
-		return expDetailLoadedMsg{e: e, obs: obs, summ: summ}
+		return expDetailLoadedMsg{e: view, obs: obs, summ: summ}
 	}
 }
 
@@ -179,7 +176,7 @@ func (v *experimentDetailView) view(width, height int) string {
 	}
 	e := v.e
 	lines := []string{}
-	lines = append(lines, tuiBold.Render(e.ID)+"  "+tuiExpStatusBadge(e.Status))
+	lines = append(lines, tuiBold.Render(e.ID)+"  "+tuiExpStatusBadgeWithClassification(e.Status, e.Classification))
 	lines = append(lines, "")
 
 	// Aligned key/value table — keys right-padded to the longest key.
@@ -189,6 +186,7 @@ func (v *experimentDetailView) view(width, height int) string {
 	}
 	kv := [][2]string{
 		{"hypothesis", hypValue},
+		{"classification", experimentClassificationSummary(e.Classification, e.HypothesisStatus)},
 		{"author", e.Author},
 	}
 	if e.Worktree != "" {

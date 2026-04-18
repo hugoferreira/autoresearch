@@ -137,7 +137,7 @@ func (v *hypothesisListView) view(width, height int) string {
 type hypothesisDetailView struct {
 	id         string
 	h          *entity.Hypothesis
-	exps       []*entity.Experiment
+	exps       []*experimentReadView
 	concls     []*entity.Conclusion
 	obs        []*entity.Observation
 	linkCursor int
@@ -147,7 +147,7 @@ type hypothesisDetailView struct {
 
 type hypDetailLoadedMsg struct {
 	h      *entity.Hypothesis
-	exps   []*entity.Experiment
+	exps   []*experimentReadView
 	concls []*entity.Conclusion
 	obs    []*entity.Observation
 	err    error
@@ -166,14 +166,17 @@ func (v *hypothesisDetailView) init(s *store.Store) tea.Cmd {
 		if err != nil {
 			return hypDetailLoadedMsg{err: err}
 		}
-		exps, _ := s.ListExperimentsForHypothesis(id)
+		annotated, err := listExperimentsForHypothesisForRead(s, id)
+		if err != nil {
+			return hypDetailLoadedMsg{err: err}
+		}
 		concls, _ := s.ListConclusionsForHypothesis(id)
 		var allObs []*entity.Observation
-		for _, e := range exps {
+		for _, e := range annotated {
 			obs, _ := s.ListObservationsForExperiment(e.ID)
 			allObs = append(allObs, obs...)
 		}
-		return hypDetailLoadedMsg{h: h, exps: exps, concls: concls, obs: allObs}
+		return hypDetailLoadedMsg{h: h, exps: annotated, concls: concls, obs: allObs}
 	}
 }
 
@@ -309,7 +312,7 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 	} else {
 		for _, e := range v.exps {
 			lines = append(lines, fmt.Sprintf("  %s  %s  inst=%s",
-				e.ID, tuiExpStatusBadge(e.Status), strings.Join(e.Instruments, ",")))
+				e.ID, tuiExpStatusBadgeWithClassification(e.Status, e.Classification), strings.Join(e.Instruments, ",")))
 			links = append(links, hypDetailLink{kind: hypDetailLinkExperiment, id: e.ID, line: len(lines) - 1})
 		}
 	}

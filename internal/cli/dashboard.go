@@ -276,11 +276,18 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	if err != nil {
 		return nil, err
 	}
+	expClassByID, err := classifyExperimentsForRead(s, exps)
+	if err != nil {
+		return nil, err
+	}
 	for _, e := range exps {
 		if e.Status != entity.ExpImplemented && e.Status != entity.ExpMeasured {
 			continue
 		}
 		if len(e.ReferencedAsBaselineBy) > 0 {
+			continue
+		}
+		if expClassByID[e.ID].Classification == experimentClassificationDead {
 			continue
 		}
 		row := dashboardInFlight{
@@ -642,8 +649,12 @@ func renderDashboardFrontier(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 			if i == 0 {
 				marker = " " + a.boldYellow("*")
 			}
-			fmt.Fprintf(w, " %s %s  %s  %s=%.6g\n",
-				marker, a.cyan(r.Conclusion), a.cyan(r.Hypothesis), snap.Goal.Objective.Instrument, r.Value)
+			dead := ""
+			if r.Classification == experimentClassificationDead {
+				dead = "  " + a.dim(experimentClassificationMarker(r.Classification))
+			}
+			fmt.Fprintf(w, " %s %s  %s  %s=%.6g%s\n",
+				marker, a.cyan(r.Conclusion), a.cyan(r.Hypothesis), snap.Goal.Objective.Instrument, r.Value, dead)
 		}
 	}
 	if lim := snap.Budgets.Limits.FrontierStallK; lim > 0 {

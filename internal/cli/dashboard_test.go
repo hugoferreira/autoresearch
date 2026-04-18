@@ -77,6 +77,68 @@ func TestCaptureDashboard_InFlightExcludesReferencedBaselines(t *testing.T) {
 	}
 }
 
+func TestCaptureDashboard_InFlightExcludesDeadExperiments(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Create(dir, store.Config{
+		Build: store.CommandSpec{Command: "true"},
+		Test:  store.CommandSpec{Command: "true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	for _, h := range []*entity.Hypothesis{
+		{
+			ID: "H-0001", GoalID: "G-0001", Claim: "finished",
+			Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
+			KillIf:   []string{"tests fail"}, Status: entity.StatusSupported, Author: "human", CreatedAt: now,
+		},
+		{
+			ID: "H-0002", GoalID: "G-0001", Claim: "still live",
+			Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
+			KillIf:   []string{"tests fail"}, Status: entity.StatusOpen, Author: "human", CreatedAt: now,
+		},
+	} {
+		if err := s.WriteHypothesis(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, e := range []*entity.Experiment{
+		{
+			ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
+			Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
+			Author: "agent:designer", CreatedAt: now,
+		},
+		{
+			ID: "E-0002", Hypothesis: "H-0002", Status: entity.ExpMeasured,
+			Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
+			Author: "agent:designer", CreatedAt: now,
+		},
+	} {
+		if err := s.WriteExperiment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snap, err := captureDashboard(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := make(map[string]bool, len(snap.InFlight))
+	for _, r := range snap.InFlight {
+		ids[r.ID] = true
+	}
+	if ids["E-0001"] {
+		t.Error("E-0001 belongs to a terminal hypothesis and should not appear in-flight")
+	}
+	if !ids["E-0002"] {
+		t.Error("E-0002 belongs to an open hypothesis and should appear in-flight")
+	}
+}
+
 // Synthetic snapshot factory: avoids needing a real on-disk store for the
 // pure-rendering tests. The capture path is exercised separately via the
 // shell smoke tests where a real init + state is cheap.

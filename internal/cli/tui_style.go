@@ -85,6 +85,14 @@ func tuiExpStatusBadge(status string) string {
 	}
 }
 
+func tuiExpStatusBadgeWithClassification(status, classification string) string {
+	badge := tuiExpStatusBadge(status)
+	if classification == experimentClassificationDead {
+		badge += " " + tuiDim.Render(experimentClassificationMarker(classification))
+	}
+	return badge
+}
+
 // tuiVerdictBadge colors a conclusion verdict string.
 func tuiVerdictBadge(verdict string) string {
 	switch verdict {

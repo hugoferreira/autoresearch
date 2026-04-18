@@ -445,6 +445,9 @@ func (v *dashboardView) renderFrontierPanel(width, height int) string {
 			tuiCyan.Render(r.Hypothesis),
 			snap.Goal.Objective.Instrument,
 			r.Value)
+		if r.Classification == experimentClassificationDead {
+			line += "  " + tuiDim.Render(experimentClassificationMarker(r.Classification))
+		}
 		lines = append(lines, line)
 	}
 	innerW := width - 4

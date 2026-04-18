@@ -470,7 +470,7 @@ func experimentWorktreeCmd() *cobra.Command {
 }
 
 func experimentListCmd() *cobra.Command {
-	var status, hyp, goalFlag string
+	var status, hyp, classification, goalFlag string
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List experiments",
@@ -484,20 +484,22 @@ func experimentListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			all, err := s.ListExperiments()
+			if err := validateExperimentClassificationFilter(classification); err != nil {
+				return err
+			}
+			annotated, err := listScopedExperimentsForRead(s, scope)
 			if err != nil {
 				return err
 			}
-			all, err = newGoalScopeResolver(s, scope).filterExperiments(all)
-			if err != nil {
-				return err
-			}
-			var filtered []*entity.Experiment
-			for _, e := range all {
+			var filtered []*experimentReadView
+			for _, e := range annotated {
 				if status != "" && e.Status != status {
 					continue
 				}
 				if hyp != "" && e.Hypothesis != hyp {
+					continue
+				}
+				if classification != "" && e.Classification != classification {
 					continue
 				}
 				filtered = append(filtered, e)
@@ -510,14 +512,19 @@ func experimentListCmd() *cobra.Command {
 				return nil
 			}
 			for _, e := range filtered {
-				w.Textf("  %-8s  %-12s  hyp=%-8s  instruments=%s\n",
-					e.ID, e.Status, e.Hypothesis, strings.Join(e.Instruments, ","))
+				statusCell := e.Status
+				if marker := experimentClassificationMarker(e.Classification); marker != "" {
+					statusCell += " " + marker
+				}
+				w.Textf("  %-8s  %-20s  hyp=%-8s  instruments=%s\n",
+					e.ID, statusCell, e.Hypothesis, strings.Join(e.Instruments, ","))
 			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&status, "status", "", "filter by status")
 	c.Flags().StringVar(&hyp, "hypothesis", "", "filter by hypothesis id")
+	c.Flags().StringVar(&classification, "classification", "", "filter by read classification (live|dead)")
 	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
 }
@@ -533,31 +540,32 @@ func experimentShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			e, err := s.ReadExperiment(args[0])
+			view, err := readExperimentForRead(s, args[0])
 			if err != nil {
 				return err
 			}
 			if w.IsJSON() {
-				return w.JSON(e)
+				return w.JSON(view)
 			}
-			w.Textf("id:           %s\n", e.ID)
-			w.Textf("hypothesis:   %s\n", e.Hypothesis)
-			w.Textf("status:       %s\n", e.Status)
-			w.Textf("baseline:     %s", e.Baseline.Ref)
-			if e.Baseline.SHA != "" {
-				w.Textf(" (%s)", e.Baseline.SHA[:12])
+			w.Textf("id:             %s\n", view.ID)
+			w.Textf("hypothesis:     %s\n", view.Hypothesis)
+			w.Textf("status:         %s\n", view.Status)
+			w.Textf("classification: %s\n", experimentClassificationSummary(view.Classification, view.HypothesisStatus))
+			w.Textf("baseline:       %s", view.Baseline.Ref)
+			if view.Baseline.SHA != "" {
+				w.Textf(" (%s)", view.Baseline.SHA[:12])
 			}
 			w.Textln("")
-			w.Textf("instruments:  %s\n", strings.Join(e.Instruments, ", "))
-			if e.Worktree != "" {
-				w.Textf("worktree:     %s\n", e.Worktree)
-				w.Textf("branch:       %s\n", e.Branch)
+			w.Textf("instruments:    %s\n", strings.Join(view.Instruments, ", "))
+			if view.Worktree != "" {
+				w.Textf("worktree:       %s\n", view.Worktree)
+				w.Textf("branch:         %s\n", view.Branch)
 			}
-			if e.Budget.WallTimeS > 0 || e.Budget.MaxSamples > 0 {
-				w.Textf("budget:       wall_time=%ds max_samples=%d\n", e.Budget.WallTimeS, e.Budget.MaxSamples)
+			if view.Budget.WallTimeS > 0 || view.Budget.MaxSamples > 0 {
+				w.Textf("budget:         wall_time=%ds max_samples=%d\n", view.Budget.WallTimeS, view.Budget.MaxSamples)
 			}
-			w.Textf("author:       %s\n", e.Author)
-			w.Textf("created_at:   %s\n", e.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+			w.Textf("author:         %s\n", view.Author)
+			w.Textf("created_at:     %s\n", view.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 			return nil
 		},
 	}

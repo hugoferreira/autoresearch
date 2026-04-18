@@ -347,3 +347,36 @@ func TestAssessGoalCompletion(t *testing.T) {
 		}
 	})
 }
+
+func TestComputeFrontierFromObservations_CarriesExperimentClassification(t *testing.T) {
+	goal := &entity.Goal{
+		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
+	}
+	concls := []*entity.Conclusion{
+		{
+			ID:           "C-0001",
+			Hypothesis:   "H-0001",
+			Verdict:      entity.VerdictSupported,
+			CandidateExp: "E-0001",
+			Effect:       entity.Effect{Instrument: "host_timing", DeltaFrac: -0.25},
+		},
+	}
+	obsByExp := map[string][]*entity.Observation{
+		"E-0001": {{Instrument: "host_timing", Value: 0.75}},
+	}
+	rows, _ := computeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
+		"E-0001": {
+			Classification:   experimentClassificationDead,
+			HypothesisStatus: entity.StatusSupported,
+		},
+	})
+	if got, want := len(rows), 1; got != want {
+		t.Fatalf("rows len = %d, want %d", got, want)
+	}
+	if got, want := rows[0].Classification, experimentClassificationDead; got != want {
+		t.Fatalf("row classification = %q, want %q", got, want)
+	}
+	if got, want := rows[0].HypothesisStatus, entity.StatusSupported; got != want {
+		t.Fatalf("row hypothesis_status = %q, want %q", got, want)
+	}
+}

@@ -96,6 +96,17 @@ func applyTUICommand(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 	}
 }
 
+func testExperimentView(e *entity.Experiment, classification, hypothesisStatus string) *experimentReadView {
+	if classification == "" {
+		classification = experimentClassificationLive
+	}
+	return &experimentReadView{
+		Experiment:       e,
+		Classification:   classification,
+		HypothesisStatus: hypothesisStatus,
+	}
+}
+
 func TestTUI_DashboardRenders(t *testing.T) {
 	v := newDashboardView(goalScope{All: true})
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
@@ -215,7 +226,10 @@ func TestTUI_HypothesisDetailOpensLinkedEntities(t *testing.T) {
 	obs := []*entity.Observation{{
 		ID: "O-0001", Experiment: "E-0001", Instrument: "host_timing", Value: 1.2, Unit: "s", Samples: 5,
 	}}
-	nv, _ := v.update(hypDetailLoadedMsg{h: h, exps: exps, concls: concls, obs: obs}, nil)
+	annotated := []*experimentReadView{
+		testExperimentView(exps[0], experimentClassificationLive, ""),
+	}
+	nv, _ := v.update(hypDetailLoadedMsg{h: h, exps: annotated, concls: concls, obs: obs}, nil)
 	hv := nv.(*hypothesisDetailView)
 
 	_, cmd := hv.update(tea.KeyMsg{Type: tea.KeyEnter}, nil)
@@ -243,12 +257,26 @@ func TestTUI_HypothesisDetailOpensLinkedEntities(t *testing.T) {
 
 func TestTUI_ExperimentList(t *testing.T) {
 	v := newExperimentListView(goalScope{All: true})
-	es := []*entity.Experiment{
-		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Instruments: []string{"qemu_cycles"}},
+	es := []*experimentReadView{
+		testExperimentView(&entity.Experiment{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpImplemented, Instruments: []string{"qemu_cycles"}}, experimentClassificationLive, ""),
 	}
 	nv, _ := v.update(expListLoadedMsg{list: es}, nil)
 	out := stripANSI(nv.view(100, 20))
 	for _, want := range []string{"1 experiments", "E-0001", "implemented", "qemu_cycles"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("experiment list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ExperimentListShowsDeadClassification(t *testing.T) {
+	v := newExperimentListView(goalScope{All: true})
+	es := []*experimentReadView{
+		testExperimentView(&entity.Experiment{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, Instruments: []string{"qemu_cycles"}}, experimentClassificationDead, entity.StatusSupported),
+	}
+	nv, _ := v.update(expListLoadedMsg{list: es}, nil)
+	out := stripANSI(nv.view(100, 20))
+	for _, want := range []string{"E-0001", "measured", "[dead]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("experiment list missing %q:\n%s", want, out)
 		}
@@ -267,9 +295,26 @@ func TestTUI_ExperimentDetail(t *testing.T) {
 	obs := []*entity.Observation{
 		{ID: "O-0001", Experiment: "E-0007", Instrument: "qemu_cycles", Value: 750000, Unit: "cycles", Samples: 10, CILow: &ciLow, CIHigh: &ciHigh, Pass: &pass},
 	}
-	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs}, nil)
+	nv, _ := v.update(expDetailLoadedMsg{e: testExperimentView(e, experimentClassificationLive, ""), obs: obs}, nil)
 	out := stripANSI(nv.view(120, 40))
 	for _, want := range []string{"E-0007", "measured", "abc123def456", "O-0001", "qemu_cycles=750000", "pass"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("experiment detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUI_ExperimentDetailShowsDeadClassification(t *testing.T) {
+	v := newExperimentDetailView("E-0007")
+	e := &entity.Experiment{
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
+		Instruments: []string{"qemu_cycles"}, Author: "agent:impl",
+	}
+	nv, _ := v.update(expDetailLoadedMsg{
+		e: testExperimentView(e, experimentClassificationDead, entity.StatusSupported),
+	}, nil)
+	out := stripANSI(nv.view(120, 20))
+	for _, want := range []string{"classification", "dead (hypothesis=supported)", "[dead]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("experiment detail missing %q:\n%s", want, out)
 		}
@@ -510,6 +555,24 @@ func TestTUI_FrontierView(t *testing.T) {
 	}
 }
 
+func TestTUI_FrontierViewShowsDeadClassification(t *testing.T) {
+	v := newFrontierView(goalScope{GoalID: "G-0001"})
+	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
+	rows := []frontierRow{{
+		Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25,
+		Classification: experimentClassificationDead, HypothesisStatus: entity.StatusSupported,
+	}}
+	nv, _ := v.update(frontierLoadedMsg{
+		goal:       g,
+		rows:       rows,
+		assessment: frontierGoalAssessment{Mode: "open_ended", RecommendedAction: "continue"},
+	}, nil)
+	out := stripANSI(nv.view(120, 20))
+	if !strings.Contains(out, "[dead]") {
+		t.Fatalf("frontier view missing dead marker:\n%s", out)
+	}
+}
+
 func TestTUI_GoalDetailView(t *testing.T) {
 	v := newGoalDetailView("G-0001")
 	flash := 65536.0
@@ -703,7 +766,7 @@ func TestTUI_ExperimentDetailWithStats(t *testing.T) {
 	summ := map[string]stats.Summary{
 		"qemu_cycles": {N: 5, Mean: 1000, StdDev: 7.07, Min: 990, Max: 1010, CILow: 993, CIHigh: 1007, CIMethod: "bca"},
 	}
-	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs, summ: summ}, nil)
+	nv, _ := v.update(expDetailLoadedMsg{e: testExperimentView(e, experimentClassificationLive, ""), obs: obs, summ: summ}, nil)
 	out := stripANSI(nv.view(130, 40))
 	for _, want := range []string{"E-0007", "Summary (per instrument):", "qemu_cycles", "1000", "bca"} {
 		if !strings.Contains(out, want) {
@@ -1121,6 +1184,6 @@ func TestTUI_ExperimentDetailVisualDump(t *testing.T) {
 		"qemu_cycles": {N: 5, Mean: 1000.42, StdDev: 7.070, Min: 990, Max: 1010, CILow: 992.5, CIHigh: 1007.5, CIMethod: "bca"},
 		"host_test":   {N: 1, Mean: 1, StdDev: 0, Min: 1, Max: 1, CILow: 1, CIHigh: 1, CIMethod: "bca"},
 	}
-	nv, _ := v.update(expDetailLoadedMsg{e: e, obs: obs, summ: summ}, nil)
+	nv, _ := v.update(expDetailLoadedMsg{e: testExperimentView(e, experimentClassificationLive, ""), obs: obs, summ: summ}, nil)
 	t.Log("\n" + nv.view(130, 50))
 }

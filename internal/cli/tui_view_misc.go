@@ -225,7 +225,7 @@ func (v *frontierView) init(s *store.Store) tea.Cmd {
 			return frontierLoadedMsg{err: err}
 		}
 		obsByExp := loadObservationsByExperiment(s)
-		rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp)
+		rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, loadExperimentReadClasses(s))
 		return frontierLoadedMsg{
 			goal:       goal,
 			rows:       rows,
@@ -308,6 +308,9 @@ func (v *frontierView) view(width, height int) string {
 			v.goal.Objective.Instrument,
 			r.Value,
 			r.DeltaFrac)
+		if r.Classification == experimentClassificationDead {
+			rows[i] += "  " + tuiDim.Render(experimentClassificationMarker(r.Classification))
+		}
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)
 }

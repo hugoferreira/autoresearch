@@ -133,6 +133,10 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 		return nil, err
 	}
 	obsByExp := loadObservationsByExperiment(s)
+	expClassByID, err := classifyAllExperimentsForRead(s)
+	if err != nil {
+		return nil, err
+	}
 	if scope.All {
 		goals, err := s.ListGoals()
 		if err != nil {
@@ -144,7 +148,7 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 			if err != nil {
 				return nil, err
 			}
-			rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp)
+			rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
 			out = append(out, goalFrontier{
 				Goal:       goal,
 				Rows:       rows,
@@ -162,7 +166,7 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp)
+	rows, stalled := computeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
 	return []goalFrontier{{
 		Goal:       goal,
 		Rows:       rows,
@@ -189,6 +193,9 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 			w.Textf("%s%s  %s  %s=%.6g", marker, r.Conclusion, r.Hypothesis, f.Goal.Objective.Instrument, r.Value)
 			if r.RescuedBy != "" {
 				w.Textf("  [rescued by %s]", r.RescuedBy)
+			}
+			if r.Classification == experimentClassificationDead {
+				w.Textf("  %s", experimentClassificationMarker(r.Classification))
 			}
 			w.Textln("")
 		}
@@ -222,6 +229,13 @@ type frontierRow struct {
 	Candidate  string  `json:"candidate_experiment"`
 	Value      float64 `json:"value"`
 	DeltaFrac  float64 `json:"delta_frac"`
+	// Classification is a read-time label for the candidate experiment.
+	// "dead" means the experiment's parent hypothesis is already terminal,
+	// so the row is still historically valid but no longer actionable work.
+	Classification string `json:"classification"`
+	// HypothesisStatus records the terminal hypothesis status that caused
+	// Classification=dead. Kept separate from Hypothesis, which is the ID.
+	HypothesisStatus string `json:"hypothesis_status,omitempty"`
 	// RescuedBy is non-empty when the backing conclusion was supported via
 	// a goal rescuer rather than a clean primary win. Renderers display a
 	// "rescued by <instrument>" annotation so the reader cannot mistake a
@@ -252,10 +266,10 @@ type frontierCandidate struct {
 // computeFrontier returns rows in best-first order for the objective and the
 // count of conclusions written since the last frontier improvement.
 func computeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclusion) (rows []frontierRow, stalledFor int) {
-	return computeFrontierFromObservations(goal, concls, loadObservationsByExperiment(s))
+	return computeFrontierFromObservations(goal, concls, loadObservationsByExperiment(s), loadExperimentReadClasses(s))
 }
 
-func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation) (rows []frontierRow, stalledFor int) {
+func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]experimentReadClass) (rows []frontierRow, stalledFor int) {
 	rows = []frontierRow{} // always non-nil so --json emits [] not null
 	requireByInst := frontierRequireConstraints(goal)
 
@@ -264,14 +278,20 @@ func computeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 		if !ok {
 			continue
 		}
+		class := expClassByID[c.CandidateExp]
+		if class.Classification == "" {
+			class.Classification = experimentClassificationLive
+		}
 		rows = append(rows, frontierRow{
-			Conclusion:     c.ID,
-			Hypothesis:     c.Hypothesis,
-			Candidate:      c.CandidateExp,
-			Value:          val,
-			DeltaFrac:      c.Effect.DeltaFrac,
-			RescuedBy:      c.Strict.RescuedBy,
-			TiebreakValues: rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
+			Conclusion:       c.ID,
+			Hypothesis:       c.Hypothesis,
+			Candidate:        c.CandidateExp,
+			Value:            val,
+			DeltaFrac:        c.Effect.DeltaFrac,
+			Classification:   class.Classification,
+			HypothesisStatus: class.HypothesisStatus,
+			RescuedBy:        c.Strict.RescuedBy,
+			TiebreakValues:   rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -460,6 +480,14 @@ func assessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 		}
 	}
 	return assessment
+}
+
+func loadExperimentReadClasses(s *store.Store) map[string]experimentReadClass {
+	classByID, err := classifyAllExperimentsForRead(s)
+	if err != nil {
+		return nil
+	}
+	return classByID
 }
 
 func meetsGoalThreshold(direction string, deltaFrac, threshold float64) bool {

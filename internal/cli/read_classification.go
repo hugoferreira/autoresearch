@@ -1,0 +1,160 @@
+package cli
+
+import (
+	"fmt"
+
+	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/store"
+)
+
+const (
+	experimentClassificationLive = "live"
+	experimentClassificationDead = "dead"
+)
+
+type experimentReadClass struct {
+	Classification   string `json:"classification"`
+	HypothesisStatus string `json:"hypothesis_status,omitempty"`
+}
+
+type experimentReadView struct {
+	*entity.Experiment
+	Classification   string `json:"classification"`
+	HypothesisStatus string `json:"hypothesis_status,omitempty"`
+}
+
+func normalizeExperimentReadClass(class experimentReadClass) experimentReadClass {
+	if class.Classification == "" {
+		class.Classification = experimentClassificationLive
+	}
+	return class
+}
+
+func classifyExperimentsForRead(s *store.Store, exps []*entity.Experiment) (map[string]experimentReadClass, error) {
+	hyps, err := s.ListHypotheses()
+	if err != nil {
+		return nil, err
+	}
+	hypStatus := make(map[string]string, len(hyps))
+	for _, h := range hyps {
+		if h == nil {
+			continue
+		}
+		hypStatus[h.ID] = h.Status
+	}
+	out := make(map[string]experimentReadClass, len(exps))
+	for _, e := range exps {
+		if e == nil {
+			continue
+		}
+		out[e.ID] = classifyExperimentForRead(e, hypStatus)
+	}
+	return out, nil
+}
+
+func annotateExperimentsForRead(s *store.Store, exps []*entity.Experiment) ([]*experimentReadView, error) {
+	classByID, err := classifyExperimentsForRead(s, exps)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*experimentReadView, 0, len(exps))
+	for _, e := range exps {
+		if e == nil {
+			continue
+		}
+		class := normalizeExperimentReadClass(classByID[e.ID])
+		out = append(out, &experimentReadView{
+			Experiment:       e,
+			Classification:   class.Classification,
+			HypothesisStatus: class.HypothesisStatus,
+		})
+	}
+	return out, nil
+}
+
+func annotateExperimentForRead(s *store.Store, e *entity.Experiment) (*experimentReadView, error) {
+	views, err := annotateExperimentsForRead(s, []*entity.Experiment{e})
+	if err != nil {
+		return nil, err
+	}
+	if len(views) == 0 {
+		return nil, nil
+	}
+	return views[0], nil
+}
+
+func readExperimentForRead(s *store.Store, id string) (*experimentReadView, error) {
+	e, err := s.ReadExperiment(id)
+	if err != nil {
+		return nil, err
+	}
+	return annotateExperimentForRead(s, e)
+}
+
+func listScopedExperimentsForRead(s *store.Store, scope goalScope) ([]*experimentReadView, error) {
+	list, err := s.ListExperiments()
+	if err == nil {
+		list, err = newGoalScopeResolver(s, scope).filterExperiments(list)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return annotateExperimentsForRead(s, list)
+}
+
+func listExperimentsForHypothesisForRead(s *store.Store, hypID string) ([]*experimentReadView, error) {
+	list, err := s.ListExperimentsForHypothesis(hypID)
+	if err != nil {
+		return nil, err
+	}
+	return annotateExperimentsForRead(s, list)
+}
+
+func classifyAllExperimentsForRead(s *store.Store) (map[string]experimentReadClass, error) {
+	exps, err := s.ListExperiments()
+	if err != nil {
+		return nil, err
+	}
+	return classifyExperimentsForRead(s, exps)
+}
+
+func classifyExperimentForRead(e *entity.Experiment, hypStatus map[string]string) experimentReadClass {
+	if e == nil {
+		return normalizeExperimentReadClass(experimentReadClass{})
+	}
+	status, ok := hypStatus[e.Hypothesis]
+	if ok && isTerminal(status) {
+		return normalizeExperimentReadClass(experimentReadClass{
+			Classification:   experimentClassificationDead,
+			HypothesisStatus: status,
+		})
+	}
+	return normalizeExperimentReadClass(experimentReadClass{})
+}
+
+func validateExperimentClassificationFilter(classification string) error {
+	switch classification {
+	case "", experimentClassificationLive, experimentClassificationDead:
+		return nil
+	default:
+		return fmt.Errorf("--classification must be %q or %q", experimentClassificationLive, experimentClassificationDead)
+	}
+}
+
+func experimentClassificationSummary(classification, hypothesisStatus string) string {
+	classification = normalizeExperimentReadClass(experimentReadClass{Classification: classification}).Classification
+	if classification != experimentClassificationDead {
+		return classification
+	}
+	if hypothesisStatus == "" {
+		return classification
+	}
+	return fmt.Sprintf("%s (hypothesis=%s)", classification, hypothesisStatus)
+}
+
+func experimentClassificationMarker(classification string) string {
+	if classification == experimentClassificationDead {
+		return "[dead]"
+	}
+	return ""
+}
