@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/store"
 )
 
 // researchHash walks .research/ under dir and returns a content hash over
@@ -98,6 +101,13 @@ func TestDryRun_ShortCircuitsAllMutatingVerbs(t *testing.T) {
 			setup: setupKilledHypothesis,
 			argsTail: func(ids []string) []string {
 				return []string{"hypothesis", "reopen", ids[0], "--reason", "back on"}
+			},
+		},
+		{
+			name:  "conclusion_withdraw",
+			setup: setupSupportedConclusion,
+			argsTail: func(ids []string) []string {
+				return []string{"conclusion", "withdraw", ids[0], "--reason", "bad benchmark"}
 			},
 		},
 		{
@@ -204,6 +214,42 @@ func setupPaused(t *testing.T, dir string) []string {
 		t.Fatalf("setup pause: %v", err)
 	}
 	return nil
+}
+
+func setupSupportedConclusion(t *testing.T, dir string) []string {
+	t.Helper()
+	s, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	now := nowUTC()
+	h := &entity.Hypothesis{
+		ID:        "H-0001",
+		GoalID:    "G-0001",
+		Claim:     "setup hypothesis",
+		Predicts:  entity.Predicts{Instrument: "timing", Target: "fir", Direction: "decrease", MinEffect: 0.05},
+		KillIf:    []string{"tests fail"},
+		Status:    entity.StatusSupported,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h); err != nil {
+		t.Fatalf("write hypothesis: %v", err)
+	}
+	c := &entity.Conclusion{
+		ID:           "C-0001",
+		Hypothesis:   h.ID,
+		Verdict:      entity.VerdictSupported,
+		CandidateExp: "E-0001",
+		Effect:       entity.Effect{Instrument: "timing", DeltaFrac: -0.1},
+		ReviewedBy:   "human:gate",
+		Author:       "agent:analyst",
+		CreatedAt:    now,
+	}
+	if err := s.WriteConclusion(c); err != nil {
+		t.Fatalf("write conclusion: %v", err)
+	}
+	return []string{"C-0001"}
 }
 
 // TestDryRun_NonDryRunStillMutates sanity-checks that the fix didn't

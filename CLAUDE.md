@@ -144,6 +144,8 @@ This is the project's central design idea. Two enforcement points:
    forcibly downgraded from `supported` to `inconclusive` and the reason is
    recorded in `Conclusion.strict`. Critic agents can additionally call
    `conclusion downgrade` to flip a verdict to `inconclusive` with a reason.
+   Main-session authors/orchestrators use `conclusion withdraw` for
+   author-side retractions; don't fake that provenance with the critic verb.
 
 If you're tempted to weaken either path "to make a test pass" — stop and
 rethink. The whole point of the tool is that supported conclusions are hard

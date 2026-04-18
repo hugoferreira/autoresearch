@@ -98,8 +98,8 @@ func (v *conclusionListView) view(width, height int) string {
 	rows := make([]string, len(v.filtered))
 	for i, c := range v.filtered {
 		extras := ""
-		if c.Strict.RequestedFrom != "" {
-			extras = tuiDim.Render("  ↓from " + c.Strict.RequestedFrom)
+		if summary := conclusionAdjustmentSummary(c); summary != "" {
+			extras = tuiDim.Render("  " + summary)
 		} else if c.Strict.RescuedBy != "" {
 			extras = tuiYellow.Render("  ⚕rescued:" + c.Strict.RescuedBy)
 		} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
@@ -178,8 +178,12 @@ func (v *conclusionDetailView) view(width, height int) string {
 		lines = append(lines, tuiDim.Render("candidate=")+c.CandidateExp+"  "+tuiDim.Render("baseline=")+emptyDash(c.BaselineExp))
 	}
 	if c.Strict.RequestedFrom != "" {
+		header := "⚠ downgraded from " + c.Strict.RequestedFrom
+		if conclusionAdjustmentKind(c) == conclusionAdjustmentWith {
+			header = "↺ withdrawn from " + c.Strict.RequestedFrom
+		}
 		lines = append(lines, "")
-		lines = append(lines, tuiBoldYellow.Render("⚠ downgraded from "+c.Strict.RequestedFrom))
+		lines = append(lines, tuiBoldYellow.Render(header))
 		for _, r := range c.Strict.Reasons {
 			lines = append(lines, "  · "+r)
 		}

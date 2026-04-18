@@ -13,9 +13,16 @@ import (
 func conclusionCommands() []*cobra.Command {
 	c := &cobra.Command{
 		Use:   "conclusion",
-		Short: "Inspect and (for the critic) downgrade existing conclusions",
+		Short: "Inspect and revise existing conclusions",
 	}
-	c.AddCommand(conclusionListCmd(), conclusionShowCmd(), conclusionDowngradeCmd(), conclusionAcceptCmd(), conclusionAppealCmd())
+	c.AddCommand(
+		conclusionListCmd(),
+		conclusionShowCmd(),
+		conclusionDowngradeCmd(),
+		conclusionWithdrawCmd(),
+		conclusionAcceptCmd(),
+		conclusionAppealCmd(),
+	)
 	return []*cobra.Command{c}
 }
 
@@ -61,8 +68,8 @@ func conclusionListCmd() *cobra.Command {
 			}
 			for _, c := range filtered {
 				dg := ""
-				if c.Strict.RequestedFrom != "" {
-					dg = fmt.Sprintf("  [downgraded from %s]", c.Strict.RequestedFrom)
+				if summary := conclusionAdjustmentSummary(c); summary != "" {
+					dg = fmt.Sprintf("  [%s]", summary)
 				} else if c.Strict.RescuedBy != "" {
 					dg = fmt.Sprintf("  [rescued by %s]", c.Strict.RescuedBy)
 				} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
@@ -102,7 +109,11 @@ func conclusionShowCmd() *cobra.Command {
 			w.Textf("hypothesis:   %s\n", c.Hypothesis)
 			w.Textf("verdict:      %s\n", c.Verdict)
 			if c.Strict.RequestedFrom != "" {
-				w.Textf("downgraded:   from %q with reasons:\n", c.Strict.RequestedFrom)
+				label := "downgraded"
+				if conclusionAdjustmentKind(c) == conclusionAdjustmentWith {
+					label = "withdrawn"
+				}
+				w.Textf("%s:   from %q with reasons:\n", label, c.Strict.RequestedFrom)
 				for _, r := range c.Strict.Reasons {
 					w.Textf("  - %s\n", r)
 				}
@@ -263,6 +274,109 @@ marked inconclusive.`,
 	return c
 }
 
+func conclusionWithdrawCmd() *cobra.Command {
+	var (
+		reason string
+		author string
+	)
+	c := &cobra.Command{
+		Use:   "withdraw <id>",
+		Short: "Withdraw a decisive conclusion and return the hypothesis to inconclusive",
+		Long: `Withdraw a decisive conclusion when the main session, author, or human
+decides the accepted or pending claim should no longer stand. This flips
+the conclusion from supported/refuted to inconclusive, preserves the
+original verdict in strict_check.downgraded_from, records a withdrawal
+reason, and updates the hypothesis status to inconclusive.
+
+Unlike conclusion downgrade, withdrawal is not a critic-only review
+action. It is the author/orchestrator-side path for retracting a claim
+before re-concluding the hypothesis from new evidence.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			if strings.TrimSpace(reason) == "" {
+				return errors.New("--reason is required")
+			}
+			s, err := openStoreLive()
+			if err != nil {
+				return err
+			}
+			c, err := s.ReadConclusion(args[0])
+			if err != nil {
+				return err
+			}
+			switch c.Verdict {
+			case entity.VerdictSupported, entity.VerdictRefuted:
+			case entity.VerdictInconclusive:
+				return fmt.Errorf("%s is already inconclusive; nothing to withdraw", c.ID)
+			default:
+				return fmt.Errorf("%s has unknown verdict %q", c.ID, c.Verdict)
+			}
+
+			prev := c.Verdict
+			withdrawer := or(author, "agent:orchestrator")
+			if err := dryRun(w, fmt.Sprintf("withdraw %s from %s (%s)", c.ID, prev, reason), map[string]any{"id": c.ID, "from": prev, "reason": reason}); err != nil {
+				return err
+			}
+
+			c.Verdict = entity.VerdictInconclusive
+			if c.Strict.RequestedFrom == "" {
+				c.Strict.RequestedFrom = prev
+			}
+			c.Strict.Passed = false
+			c.Strict.Reasons = append(c.Strict.Reasons, conclusionReasonWithdrawalPrefix+reason)
+			c.Body = entity.AppendMarkdownSection(c.Body, "Withdrawal", fmt.Sprintf("**Withdrawn by:** %s\n\n%s", withdrawer, reason))
+			if err := s.WriteConclusion(c); err != nil {
+				return err
+			}
+
+			hyp, err := s.ReadHypothesis(c.Hypothesis)
+			if err == nil {
+				hyp.Status = entity.StatusInconclusive
+				_ = s.WriteHypothesis(hyp)
+			}
+			lessonChanges, err := syncHypothesisLessons(s, c.Hypothesis, lessonSyncOnWithdraw)
+			if err != nil {
+				return err
+			}
+			for _, change := range lessonChanges {
+				if err := emitEvent(s, lessonEventKindForStatus(change.ToStatus), withdrawer, change.LessonID, map[string]any{
+					"from_status": change.FromStatus,
+					"to_status":   change.ToStatus,
+					"from_source": change.FromSource,
+					"to_source":   change.ToSource,
+					"hypothesis":  c.Hypothesis,
+					"conclusion":  c.ID,
+				}); err != nil {
+					return err
+				}
+			}
+			if err := emitEvent(s, "conclusion.withdraw", withdrawer, c.ID, map[string]any{
+				"from":       prev,
+				"to":         entity.VerdictInconclusive,
+				"reason":     reason,
+				"hypothesis": c.Hypothesis,
+			}); err != nil {
+				return err
+			}
+			return w.Emit(
+				fmt.Sprintf("withdrew %s: %s → inconclusive (%s)", c.ID, prev, reason),
+				map[string]any{
+					"status":     "ok",
+					"id":         c.ID,
+					"from":       prev,
+					"to":         entity.VerdictInconclusive,
+					"reason":     reason,
+					"hypothesis": c.Hypothesis,
+				},
+			)
+		},
+	}
+	c.Flags().StringVar(&reason, "reason", "", "why the conclusion is being withdrawn (required)")
+	addAuthorFlag(c, &author, "")
+	return c
+}
+
 func conclusionAcceptCmd() *cobra.Command {
 	var (
 		reviewedBy string
@@ -404,15 +518,11 @@ verdict should stand.`,
 			if c.Strict.RequestedFrom == "" {
 				return fmt.Errorf("%s was not downgraded (no original verdict recorded) — nothing to appeal", c.ID)
 			}
-			// Only allow appeal of critic downgrades.
-			hasCriticDowngrade := false
-			for _, r := range c.Strict.Reasons {
-				if strings.HasPrefix(r, "critic downgrade:") {
-					hasCriticDowngrade = true
-					break
-				}
-			}
-			if !hasCriticDowngrade {
+			switch conclusionAdjustmentKind(c) {
+			case conclusionAdjustmentCrit:
+			case conclusionAdjustmentWith:
+				return fmt.Errorf("%s was withdrawn, not critic-downgraded — re-conclude the hypothesis once new evidence is ready", c.ID)
+			default:
 				return fmt.Errorf("%s was downgraded by the firewall, not a critic — you cannot appeal statistical evidence; collect better data instead", c.ID)
 			}
 

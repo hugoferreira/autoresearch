@@ -14,6 +14,7 @@ type lessonSyncMode string
 const (
 	lessonSyncOnAccept    lessonSyncMode = "accept"
 	lessonSyncOnDowngrade lessonSyncMode = "downgrade"
+	lessonSyncOnWithdraw  lessonSyncMode = "withdraw"
 	lessonSyncOnAppeal    lessonSyncMode = "appeal"
 )
 

@@ -51,6 +51,7 @@ YAML authoring or file editing. When a human says:
 | "Resume" | ` + "`autoresearch resume`" + ` |
 | "What's the current best?" | ` + "`autoresearch frontier`" + `, summarize |
 | "Show me the writeup for H-0001" | ` + "`autoresearch report H-0001`" + ` |
+| "That conclusion no longer stands" | ` + "`autoresearch conclusion withdraw C-0007 --reason \"...\"`" + ` |
 | "What changed in the winning experiment?" | ` + "`autoresearch hypothesis diff H-0001`" + ` |
 | "Ship that optimization" | ` + "`autoresearch hypothesis apply H-0001`" + ` (cherry-picks the winning experiment) |
 | "Where's the worktree for H-0003?" | ` + "`autoresearch hypothesis worktree H-0003`" + ` |
@@ -106,8 +107,9 @@ by hand, you are lying to future-you — don't.
                      └─> conclude     (status: analyzed)    -- stats firewall applied
                           ├─> hypothesis: unreviewed     (supported/refuted pending gate review)
                           │    ├─ conclusion accept  → hypothesis: supported | refuted
-                          │    └─ conclusion downgrade → hypothesis: inconclusive
-                          │         └─ conclusion appeal → hypothesis: unreviewed (re-review)
+                          │    ├─ conclusion downgrade → hypothesis: inconclusive
+                          │    ├─ conclusion withdraw  → hypothesis: inconclusive
+                          │    └─ conclusion appeal    → hypothesis: unreviewed (critic-only re-review)
                           └─> hypothesis: inconclusive   (no review needed)
 
 Every hypothesis is bound to the goal that was active when it was
@@ -279,11 +281,15 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
     autoresearch conclusion downgrade  <C-id> --reason "..." [--reviewed-by agent:gate-reviewer]
         # Gate reviewer's rejection: flips supported|refuted → inconclusive,
         # preserving the original verdict in strict_check.downgraded_from.
+    autoresearch conclusion withdraw   <C-id> --reason "..." [--author ...]
+        # Main-session / author-side retraction: flips supported|refuted
+        # (or a still-unreviewed decisive claim) back to inconclusive with
+        # explicit withdrawal provenance in the event log and conclusion body.
     autoresearch conclusion appeal     <C-id> --rebuttal "..."
         # Appeal a critic downgrade: restores original verdict, clears
         # reviewed_by, records rebuttal. Only valid for critic downgrades.
 
-Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
+Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If later evidence means the claim should no longer stand, use ` + "`conclusion withdraw`" + ` to move the hypothesis back to ` + "`inconclusive`" + ` before re-concluding. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
 
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--goal G-NNNN|all] [--experiment E-XXXX | --observation O-XXXX]

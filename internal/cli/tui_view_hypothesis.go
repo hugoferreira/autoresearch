@@ -323,8 +323,8 @@ func (v *hypothesisDetailView) renderLines(width int) ([]string, []hypDetailLink
 	} else {
 		for _, c := range v.concls {
 			extras := ""
-			if c.Strict.RequestedFrom != "" {
-				extras = tuiDim.Render("  (downgraded from " + c.Strict.RequestedFrom + ")")
+			if summary := conclusionAdjustmentSummary(c); summary != "" {
+				extras = tuiDim.Render("  (" + summary + ")")
 			} else if c.Strict.RescuedBy != "" {
 				extras = tuiYellow.Render("  (rescued by " + c.Strict.RescuedBy + ")")
 			} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {

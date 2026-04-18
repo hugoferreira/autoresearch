@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,6 +180,95 @@ func TestEventPayload_HypothesisReopenRecordsFromTo(t *testing.T) {
 	}
 	if got := payload["to"]; got != entity.StatusOpen {
 		t.Errorf("data.to = %v, want %q", got, entity.StatusOpen)
+	}
+}
+
+func TestConclusionWithdraw_RecordsAuditTrailAndUpdatesHypothesis(t *testing.T) {
+	saveGlobals(t)
+	dir, s := setupGoalStore(t)
+
+	now := time.Now().UTC()
+	h := &entity.Hypothesis{
+		ID:     "H-0001",
+		GoalID: "G-0001",
+		Claim:  "tighten loop",
+		Predicts: entity.Predicts{
+			Instrument: "timing", Target: "fir", Direction: "decrease", MinEffect: 0.1,
+		},
+		KillIf:    []string{"tests fail"},
+		Status:    entity.StatusSupported,
+		Author:    "human",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h); err != nil {
+		t.Fatal(err)
+	}
+	c := &entity.Conclusion{
+		ID:           "C-0001",
+		Hypothesis:   h.ID,
+		Verdict:      entity.VerdictSupported,
+		CandidateExp: "E-0001",
+		Effect:       entity.Effect{Instrument: "timing", DeltaFrac: -0.2},
+		ReviewedBy:   "human:gate",
+		Author:       "agent:analyst",
+		CreatedAt:    now,
+	}
+	if err := s.WriteConclusion(c); err != nil {
+		t.Fatal(err)
+	}
+
+	root := Root()
+	root.SetArgs([]string{
+		"-C", dir,
+		"conclusion", "withdraw", "C-0001",
+		"--reason", "benchmark setup was invalid",
+		"--author", "agent:orchestrator",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("conclusion withdraw: %v", err)
+	}
+
+	back, err := s.ReadConclusion("C-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := back.Verdict; got != entity.VerdictInconclusive {
+		t.Fatalf("conclusion verdict = %q, want %q", got, entity.VerdictInconclusive)
+	}
+	if got := back.Strict.RequestedFrom; got != entity.VerdictSupported {
+		t.Fatalf("strict.requested_from = %q, want %q", got, entity.VerdictSupported)
+	}
+	if got := back.ReviewedBy; got != "human:gate" {
+		t.Fatalf("reviewed_by = %q, want %q", got, "human:gate")
+	}
+	if !strings.Contains(back.Body, "# Withdrawal") || !strings.Contains(back.Body, "benchmark setup was invalid") {
+		t.Fatalf("withdrawal body missing audit trail:\n%s", back.Body)
+	}
+
+	hyp, err := s.ReadHypothesis("H-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hyp.Status; got != entity.StatusInconclusive {
+		t.Fatalf("hypothesis status = %q, want %q", got, entity.StatusInconclusive)
+	}
+
+	e := findLastEvent(t, s, "conclusion.withdraw")
+	if e == nil {
+		t.Fatal("conclusion.withdraw event not found")
+	}
+	if got := e.Actor; got != "agent:orchestrator" {
+		t.Fatalf("event actor = %q, want %q", got, "agent:orchestrator")
+	}
+	payload := decodePayload(t, e)
+	if got := payload["from"]; got != entity.VerdictSupported {
+		t.Errorf("data.from = %v, want %q", got, entity.VerdictSupported)
+	}
+	if got := payload["to"]; got != entity.VerdictInconclusive {
+		t.Errorf("data.to = %v, want %q", got, entity.VerdictInconclusive)
+	}
+	if got := payload["reason"]; got != "benchmark setup was invalid" {
+		t.Errorf("data.reason = %v, want %q", got, "benchmark setup was invalid")
 	}
 }
 

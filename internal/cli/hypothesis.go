@@ -330,6 +330,16 @@ func hypothesisKillCmd() *cobra.Command {
 			if h.Status == entity.StatusKilled {
 				return fmt.Errorf("%s is already killed", h.ID)
 			}
+			if !hypothesisStatusAllowsKill(h.Status) {
+				switch h.Status {
+				case entity.StatusUnreviewed:
+					return fmt.Errorf("%s is unreviewed — resolve the pending conclusion via `conclusion accept`, `conclusion downgrade`, or `conclusion withdraw` before killing it", h.ID)
+				case entity.StatusSupported, entity.StatusRefuted:
+					return fmt.Errorf("%s is %s — use `conclusion withdraw` or `conclusion downgrade` before killing it", h.ID, h.Status)
+				default:
+					return fmt.Errorf("%s has status %q; kill is only valid for open or inconclusive hypotheses", h.ID, h.Status)
+				}
+			}
 			prev := h.Status
 			h.Status = entity.StatusKilled
 			if err := dryRun(w, fmt.Sprintf("kill %s (%s)", h.ID, reason), map[string]any{"id": h.ID, "reason": reason}); err != nil {
@@ -412,6 +422,10 @@ and logged.`,
 // specific conclusion is used instead of searching. Returns the conclusion,
 // experiment, and any error.
 func resolveWinningExperiment(s *store.Store, hypID, conclusionID string) (*entity.Conclusion, *entity.Experiment, error) {
+	hyp, err := s.ReadHypothesis(hypID)
+	if err != nil {
+		return nil, nil, err
+	}
 	var concl *entity.Conclusion
 	if conclusionID != "" {
 		c, err := s.ReadConclusion(conclusionID)
@@ -427,13 +441,17 @@ func resolveWinningExperiment(s *store.Store, hypID, conclusionID string) (*enti
 		if err != nil {
 			return nil, nil, err
 		}
-		// Pick the best supported conclusion (largest |delta_frac|).
-		for _, c := range all {
-			if c.Verdict != entity.VerdictSupported {
-				continue
-			}
-			if concl == nil || abs(c.Effect.DeltaFrac) > abs(concl.Effect.DeltaFrac) {
-				concl = c
+		if hypothesisStatusAllowsDefaultWinningConclusion(hyp.Status) {
+			// Pick the best supported conclusion (largest |delta_frac|) only
+			// when the hypothesis's current accepted stance is still
+			// supported. Otherwise we fall back to the latest experiment.
+			for _, c := range all {
+				if c.Verdict != entity.VerdictSupported {
+					continue
+				}
+				if concl == nil || abs(c.Effect.DeltaFrac) > abs(concl.Effect.DeltaFrac) {
+					concl = c
+				}
 			}
 		}
 		if concl == nil {
@@ -571,6 +589,13 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if err != nil {
 				return err
 			}
+			hyp, err := s.ReadHypothesis(args[0])
+			if err != nil {
+				return err
+			}
+			if hyp.Status != entity.StatusSupported {
+				return fmt.Errorf("hypothesis %s has status %q — only supported hypotheses can be applied", args[0], hyp.Status)
+			}
 			concl, exp, err := resolveWinningExperiment(s, args[0], conclusionID)
 			if err != nil {
 				return err
@@ -578,13 +603,8 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if concl == nil || concl.Verdict != entity.VerdictSupported {
 				return fmt.Errorf("hypothesis %s has no supported conclusion — nothing to apply", args[0])
 			}
-			// Gate: hypothesis must have been reviewed (not still "unreviewed").
-			hyp, err := s.ReadHypothesis(args[0])
-			if err != nil {
-				return err
-			}
-			if hyp.Status == entity.StatusUnreviewed {
-				return fmt.Errorf("hypothesis %s is unreviewed — dispatch the gate reviewer to review %s first (or self-review with `conclusion accept %s --reviewed-by ...`)", args[0], concl.ID, concl.ID)
+			if concl.ReviewedBy == "" {
+				return fmt.Errorf("conclusion %s is not reviewed — dispatch the gate reviewer to review it before apply", concl.ID)
 			}
 			if exp.Branch == "" {
 				return fmt.Errorf("%s has no branch (status=%s)", exp.ID, exp.Status)

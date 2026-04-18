@@ -254,7 +254,12 @@ func renderReportMarkdown(r *reportData) string {
 			}
 			fmt.Fprintf(&sb, "### %s — %s\n\n", c.ID, heading)
 			if c.Strict.RequestedFrom != "" {
-				fmt.Fprintf(&sb, "> **Downgraded** from `%s` — strict firewall rejected the requested verdict:\n", c.Strict.RequestedFrom)
+				switch conclusionAdjustmentKind(c) {
+				case conclusionAdjustmentWith:
+					fmt.Fprintf(&sb, "> **Withdrawn** from `%s` — the claim was explicitly retracted and moved back to inconclusive:\n", c.Strict.RequestedFrom)
+				default:
+					fmt.Fprintf(&sb, "> **Downgraded** from `%s` — the requested verdict no longer stands:\n", c.Strict.RequestedFrom)
+				}
 				for _, r := range c.Strict.Reasons {
 					fmt.Fprintf(&sb, "> - %s\n", r)
 				}

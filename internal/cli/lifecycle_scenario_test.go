@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -244,6 +245,154 @@ func TestLifecycleScenario_ReadSurfacesStayConsistentAfterAcceptedWinAndLaterSta
 	}
 }
 
+func TestLifecycleScenario_WithdrawnAndRefutedHypothesisDropsOldWinFromCurrentTruthSurfaces(t *testing.T) {
+	saveGlobals(t)
+	dir := gitInitScenarioRepo(t)
+	if _, err := store.Create(dir, store.Config{
+		Build:     store.CommandSpec{Command: "true"},
+		Test:      store.CommandSpec{Command: "true"},
+		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
+	}); err != nil {
+		t.Fatalf("store.Create: %v", err)
+	}
+
+	registerScenarioInstruments(t, dir)
+
+	goal := runCLIJSON[cliIDResponse](t, dir,
+		"goal", "set",
+		"--objective-instrument", "timing",
+		"--objective-target", "kernel",
+		"--objective-direction", "decrease",
+		"--success-threshold", "0.1",
+		"--on-success", "stop",
+		"--constraint-max", "binary_size=1000",
+		"--constraint-require", "host_test=pass",
+	)
+	baseline := runCLIJSON[cliIDResponse](t, dir, "experiment", "baseline")
+
+	hyp := runCLIJSON[cliIDResponse](t, dir,
+		"hypothesis", "add",
+		"--claim", "tighten the hot loop",
+		"--predicts-instrument", "timing",
+		"--predicts-target", "kernel",
+		"--predicts-direction", "decrease",
+		"--predicts-min-effect", "0.1",
+		"--kill-if", "tests fail",
+	)
+	exp1 := runCLIJSON[cliIDResponse](t, dir,
+		"experiment", "design", hyp.ID,
+		"--baseline", "HEAD",
+		"--instruments", "timing,binary_size,host_test",
+	)
+	impl1 := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp1.ID)
+	writeScenarioMetrics(t, impl1.Worktree, "80\n", "900\n")
+	gitCommitAll(t, impl1.Worktree, "improve timing")
+
+	obs1 := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp1.ID, "--all")
+	concl1 := runCLIJSON[cliIDResponse](t, dir,
+		"conclude", hyp.ID,
+		"--verdict", "supported",
+		"--baseline-experiment", baseline.ID,
+		"--observations", observeResultID(t, obs1, "timing"),
+	)
+	runCLIJSON[cliIDResponse](t, dir,
+		"conclusion", "accept", concl1.ID,
+		"--reviewed-by", "human:gate",
+		"--rationale", "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected.",
+	)
+
+	runCLIJSON[cliIDResponse](t, dir,
+		"conclusion", "withdraw", concl1.ID,
+		"--reason", "Follow-up inspection found the earlier benchmark setup was not trustworthy.",
+		"--author", "agent:orchestrator",
+	)
+
+	exp2 := runCLIJSON[cliIDResponse](t, dir,
+		"experiment", "design", hyp.ID,
+		"--baseline", "HEAD",
+		"--instruments", "timing,binary_size,host_test",
+	)
+	impl2 := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp2.ID)
+	writeScenarioMetrics(t, impl2.Worktree, "120\n", "900\n")
+	gitCommitAll(t, impl2.Worktree, "regress timing")
+
+	obs2 := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp2.ID, "--all")
+	concl2 := runCLIJSON[cliIDResponse](t, dir,
+		"conclude", hyp.ID,
+		"--verdict", "refuted",
+		"--baseline-experiment", baseline.ID,
+		"--observations", observeResultID(t, obs2, "timing"),
+	)
+	runCLIJSON[cliIDResponse](t, dir,
+		"conclusion", "accept", concl2.ID,
+		"--reviewed-by", "human:gate",
+		"--rationale", "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected.",
+	)
+
+	frontier := runCLIJSON[cliFrontierResponse](t, dir, "frontier", "--goal", goal.ID)
+	if frontier.ScopeGoalID != goal.ID || frontier.GoalID != goal.ID {
+		t.Fatalf("frontier goal scope mismatch: %+v", frontier)
+	}
+	if frontier.GoalAssessment.Met || frontier.GoalAssessment.MetByConclusion != "" {
+		t.Fatalf("unexpected frontier goal_assessment: %+v", frontier.GoalAssessment)
+	}
+	if got, want := frontier.StalledFor, 0; got != want {
+		t.Fatalf("frontier stalled_for = %d, want %d", got, want)
+	}
+	if got, want := len(frontier.Frontier), 0; got != want {
+		t.Fatalf("frontier rows len = %d, want %d", got, want)
+	}
+
+	dashboard := runCLIJSON[cliDashboardResponse](t, dir, "dashboard", "--goal", goal.ID)
+	if dashboard.ScopeGoalID != goal.ID {
+		t.Fatalf("dashboard scope_goal_id = %q, want %q", dashboard.ScopeGoalID, goal.ID)
+	}
+	if got, want := dashboard.StalledFor, 0; got != want {
+		t.Fatalf("dashboard stalled_for = %d, want %d", got, want)
+	}
+	if got, want := len(dashboard.Frontier), 0; got != want {
+		t.Fatalf("dashboard frontier len = %d, want %d", got, want)
+	}
+	if got, want := dashboard.Counts["hypotheses"], 1; got != want {
+		t.Fatalf("dashboard counts[hypotheses] = %d, want %d", got, want)
+	}
+	if got, want := dashboard.Counts["experiments"], 3; got != want {
+		t.Fatalf("dashboard counts[experiments] = %d, want %d", got, want)
+	}
+	if got, want := dashboard.Counts["observations"], 9; got != want {
+		t.Fatalf("dashboard counts[observations] = %d, want %d", got, want)
+	}
+	if got, want := dashboard.Counts["conclusions"], 2; got != want {
+		t.Fatalf("dashboard counts[conclusions] = %d, want %d", got, want)
+	}
+
+	status := runCLIJSON[cliStatusResponse](t, dir, "status", "--goal", goal.ID)
+	if status.ScopeGoalID != goal.ID {
+		t.Fatalf("status scope_goal_id = %q, want %q", status.ScopeGoalID, goal.ID)
+	}
+	if status.MainCheckoutDirty {
+		t.Fatalf("status reported dirty main checkout for clean scenario")
+	}
+	if got, want := status.Counts["hypotheses"], 1; got != want {
+		t.Fatalf("status counts[hypotheses] = %d, want %d", got, want)
+	}
+	if got, want := status.Counts["experiments"], 3; got != want {
+		t.Fatalf("status counts[experiments] = %d, want %d", got, want)
+	}
+	if got, want := status.Counts["observations"], 9; got != want {
+		t.Fatalf("status counts[observations] = %d, want %d", got, want)
+	}
+	if got, want := status.Counts["conclusions"], 2; got != want {
+		t.Fatalf("status counts[conclusions] = %d, want %d", got, want)
+	}
+
+	if err := runCLIErr(t, dir, "hypothesis", "apply", hyp.ID); err == nil {
+		t.Fatal("expected hypothesis apply to be rejected after refutation")
+	} else if got, want := err.Error(), `only supported hypotheses can be applied`; !strings.Contains(got, want) {
+		t.Fatalf("apply error = %q, want substring %q", got, want)
+	}
+}
+
 func registerScenarioInstruments(t *testing.T, dir string) {
 	t.Helper()
 	runCLI(t, dir,
@@ -373,6 +522,53 @@ func runCLIJSON[T any](t *testing.T, dir string, args ...string) T {
 		t.Fatalf("decode JSON for %q: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return got
+}
+
+func runCLIErr(t *testing.T, dir string, args ...string) error {
+	t.Helper()
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+	outCh := make(chan string, 1)
+	errCh := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(rOut)
+		outCh <- string(data)
+	}()
+	go func() {
+		data, _ := io.ReadAll(rErr)
+		errCh <- string(data)
+	}()
+
+	os.Stdout = wOut
+	os.Stderr = wErr
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+	}()
+
+	root := Root()
+	root.SetArgs(append([]string{"-C", dir}, args...))
+	execErr := root.Execute()
+
+	_ = wOut.Close()
+	_ = wErr.Close()
+	stdout := <-outCh
+	stderr := <-errCh
+	if execErr == nil {
+		return nil
+	}
+	if stdout != "" || stderr != "" {
+		return fmt.Errorf("%w\nstdout:\n%s\nstderr:\n%s", execErr, stdout, stderr)
+	}
+	return execErr
 }
 
 func observeResultID(t *testing.T, resp cliObserveAllResponse, inst string) string {

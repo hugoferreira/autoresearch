@@ -367,7 +367,7 @@ func TestTUI_ConclusionList(t *testing.T) {
 	}
 	nv, _ := v.update(concListLoadedMsg{list: cs}, nil)
 	out := stripANSI(nv.view(120, 20))
-	for _, want := range []string{"2 conclusions", "C-0001", "supported", "C-0002", "↓from supported"} {
+	for _, want := range []string{"2 conclusions", "C-0001", "supported", "C-0002", "downgraded from supported"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("conclusion list missing %q:\n%s", want, out)
 		}
