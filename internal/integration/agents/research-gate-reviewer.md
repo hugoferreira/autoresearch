@@ -26,7 +26,9 @@ positives, which are far more expensive than false negatives.
 2. `autoresearch conclusion show <C-id> --json` — the verdict, effect
    (vs absolute baseline), `incremental_effect` (vs frontier best, if
    present), `strict_check` (firewall's own assessment), interpretation,
-   author, and `observation_artifacts` for every cited observation.
+   author, plus evidence-side join fields for cited observations:
+   `observation_artifacts`, `observation_evidence_failures`, and
+   `observation_read_issues`.
 3. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
    instrument, `min_effect`, `kill_if` clauses.
 4. Recompute the stats yourself:
@@ -52,15 +54,20 @@ the needed flag is genuinely absent from those references.
 
 6. **Verify mechanism claims against evidence artifacts** — the
    conclusion JSON carries `observation_artifacts`, keyed by observation
-   id. Evidence side-artifacts are named `evidence/<name>`. For every
-   mechanism claim in the interpretation, either confirm it is directly
-   visible in the diff or inspect the cited evidence artifact:
+   id. Evidence side-artifacts are named `evidence/<name>`. Use
+   `observation_evidence_failures` to distinguish "evidence capture was
+   configured but failed" from "no evidence was configured", and treat
+   any `observation_read_issues` entry as a broken persisted evidence
+   chain that must be investigated rather than silently ignored. For
+   every mechanism claim in the interpretation, either confirm it is
+   directly visible in the diff or inspect the cited evidence artifact:
 
        autoresearch artifact head <sha> --lines 100
        autoresearch artifact grep <sha> '<pattern>'
 
    Downgrade when a mechanism claim is supported by neither the diff nor
-   an evidence artifact.
+   an evidence artifact. A read issue or capture failure is not positive
+   evidence, and neither should be read as "no evidence was needed".
 
 7. **Review the code change for correctness and gaming** — this is as
    important as the statistics:

@@ -225,6 +225,12 @@ func renderReportMarkdown(r *reportData) string {
 						fmt.Fprintf(&sb, "  pass=%v", *o.Pass)
 					}
 					sb.WriteString("\n")
+					if len(o.EvidenceFailures) > 0 {
+						sb.WriteString("    - Evidence failures:\n")
+						for _, failure := range o.EvidenceFailures {
+							fmt.Fprintf(&sb, "      - %s\n", formatEvidenceFailure(failure))
+						}
+					}
 				}
 			}
 			if design := strings.TrimSpace(entity.ExtractSection(e.Body, "Design notes")); design != "" {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 )
 
@@ -48,6 +49,8 @@ type cliConclusionShowResponse struct {
 		Bytes int64  `json:"bytes"`
 		Mime  string `json:"mime,omitempty"`
 	} `json:"observation_artifacts,omitempty"`
+	ObservationEvidenceFailures map[string][]entity.EvidenceFailure `json:"observation_evidence_failures,omitempty"`
+	ObservationReadIssues       map[string]string                   `json:"observation_read_issues,omitempty"`
 }
 
 type cliExperimentListRow struct {
@@ -366,6 +369,12 @@ func TestLifecycleScenario_EvidenceArtifactsCloseAuditChain(t *testing.T) {
 	writeScenarioMetrics(t, impl2.Worktree, "95\n", "900\n")
 	gitCommitAll(t, impl2.Worktree, "small tweak")
 	obs2 := runCLIJSON[cliIDResponse](t, dir, "observe", exp2.ID, "--instrument", "timing")
+	concl2 := runCLIJSON[cliIDResponse](t, dir,
+		"conclude", hyp2.ID,
+		"--verdict", "inconclusive",
+		"--baseline-experiment", baseline.ID,
+		"--observations", obs2.ID,
+	)
 
 	secondObs, err := s.ReadObservation(obs2.ID)
 	if err != nil {
@@ -376,6 +385,24 @@ func TestLifecycleScenario_EvidenceArtifactsCloseAuditChain(t *testing.T) {
 	}
 	if secondObs.EvidenceFailures[0].Name != "broken" || secondObs.EvidenceFailures[0].ExitCode != 7 {
 		t.Fatalf("unexpected evidence failure: %+v", secondObs.EvidenceFailures[0])
+	}
+	concl2Entity, err := s.ReadConclusion(concl2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concl2Entity.Observations = append(concl2Entity.Observations, "O-9999")
+	if err := s.WriteConclusion(concl2Entity); err != nil {
+		t.Fatal(err)
+	}
+	show2 := runCLIJSON[cliConclusionShowResponse](t, dir, "conclusion", "show", concl2.ID)
+	if got, want := len(show2.ObservationEvidenceFailures[obs2.ID]), 1; got != want {
+		t.Fatalf("conclusion show evidence failures len = %d, want %d", got, want)
+	}
+	if got := show2.ObservationEvidenceFailures[obs2.ID][0]; got.Name != "broken" || got.ExitCode != 7 {
+		t.Fatalf("unexpected conclusion show evidence failure: %+v", got)
+	}
+	if got, want := show2.ObservationReadIssues["O-9999"], "observation not found"; got != want {
+		t.Fatalf("conclusion show read issue = %q, want %q", got, want)
 	}
 	e := findLastEvent(t, s, "observation.record")
 	if e == nil {

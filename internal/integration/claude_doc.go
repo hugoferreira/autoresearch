@@ -285,10 +285,16 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 
 Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
 
-In ` + "`--json`" + ` mode, ` + "`conclusion show`" + ` returns the conclusion plus an
-additive ` + "`observation_artifacts`" + ` map keyed by cited observation id. The values
-are artifact metadata only (` + "`name`" + ` / ` + "`sha`" + ` / ` + "`path`" + ` / ` + "`bytes`" + ` / ` + "`mime`" + `),
-never artifact content.
+In ` + "`--json`" + ` mode, ` + "`conclusion show`" + ` returns the conclusion plus three
+additive maps keyed by cited observation id:
+
+- ` + "`observation_artifacts`" + ` — artifact metadata only (` + "`name`" + ` / ` + "`sha`" + ` / ` + "`path`" + ` / ` + "`bytes`" + ` / ` + "`mime`" + `), never artifact content
+- ` + "`observation_evidence_failures`" + ` — non-fatal evidence-capture failures persisted on readable observations
+- ` + "`observation_read_issues`" + ` — cited observations that could not be read (for example missing or corrupt persisted evidence)
+
+Do not treat ` + "`observation_evidence_failures`" + ` or ` + "`observation_read_issues`" + ` as
+equivalent to "no evidence configured". They mean the evidence chain is
+incomplete and should be reviewed explicitly.
 
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--goal G-NNNN|all] [--experiment E-XXXX | --observation O-XXXX]

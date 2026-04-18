@@ -19,6 +19,8 @@ func TestSharedDocs_EvidenceArtifactGuidance(t *testing.T) {
 		for _, needle := range []string{
 			"--evidence name=cmd",
 			"observation_artifacts",
+			"observation_evidence_failures",
+			"observation_read_issues",
 			"evidence/<name>",
 			"observation.evidence_failures",
 		} {
@@ -59,6 +61,8 @@ func TestEmbeddedAgents_EvidenceArtifactContract(t *testing.T) {
 			},
 			"research-gate-reviewer": {
 				"observation_artifacts",
+				"observation_evidence_failures",
+				"observation_read_issues",
 				"supported by neither the diff nor",
 				"an evidence artifact.",
 				"Unsupported mechanism",

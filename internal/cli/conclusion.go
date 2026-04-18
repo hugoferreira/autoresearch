@@ -21,7 +21,9 @@ func conclusionCommands() []*cobra.Command {
 
 type conclusionShowJSON struct {
 	*entity.Conclusion
-	ObservationArtifacts map[string][]entity.Artifact `json:"observation_artifacts,omitempty"`
+	ObservationArtifacts        map[string][]entity.Artifact        `json:"observation_artifacts,omitempty"`
+	ObservationEvidenceFailures map[string][]entity.EvidenceFailure `json:"observation_evidence_failures,omitempty"`
+	ObservationReadIssues       map[string]string                   `json:"observation_read_issues,omitempty"`
 }
 
 func conclusionListCmd() *cobra.Command {
@@ -103,18 +105,29 @@ func conclusionShowCmd() *cobra.Command {
 			if w.IsJSON() {
 				out := conclusionShowJSON{Conclusion: c}
 				if len(c.Observations) > 0 {
-					obsArts := make(map[string][]entity.Artifact, len(c.Observations))
 					for _, id := range c.Observations {
 						obs, err := s.ReadObservation(id)
 						if err != nil {
+							if out.ObservationReadIssues == nil {
+								out.ObservationReadIssues = make(map[string]string, len(c.Observations))
+							}
+							out.ObservationReadIssues[id] = err.Error()
 							continue
+						}
+						if out.ObservationArtifacts == nil {
+							out.ObservationArtifacts = make(map[string][]entity.Artifact, len(c.Observations))
 						}
 						arts := make([]entity.Artifact, len(obs.Artifacts))
 						copy(arts, obs.Artifacts)
-						obsArts[id] = arts
-					}
-					if len(obsArts) > 0 {
-						out.ObservationArtifacts = obsArts
+						out.ObservationArtifacts[id] = arts
+						if len(obs.EvidenceFailures) > 0 {
+							if out.ObservationEvidenceFailures == nil {
+								out.ObservationEvidenceFailures = make(map[string][]entity.EvidenceFailure, len(c.Observations))
+							}
+							failures := make([]entity.EvidenceFailure, len(obs.EvidenceFailures))
+							copy(failures, obs.EvidenceFailures)
+							out.ObservationEvidenceFailures[id] = failures
+						}
 					}
 				}
 				return w.JSON(out)

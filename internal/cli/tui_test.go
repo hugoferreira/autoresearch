@@ -341,6 +341,11 @@ func TestTUI_ObservationDetail(t *testing.T) {
 		Artifacts: []entity.Artifact{{
 			Name: "primary", SHA: "abcdef1234567890", Path: "artifacts/ab/abcdef1234567890", Bytes: 2048,
 		}},
+		EvidenceFailures: []entity.EvidenceFailure{{
+			Name:     "mechanism",
+			ExitCode: 7,
+			Error:    "profile tool crashed",
+		}},
 		Command:     "make test",
 		ExitCode:    0,
 		Worktree:    "/tmp/wt",
@@ -349,8 +354,12 @@ func TestTUI_ObservationDetail(t *testing.T) {
 		Aux:         map[string]any{"stdev": 0.04, "warm": true},
 	}
 	nv, _ := v.update(obsDetailLoadedMsg{o: o}, nil)
-	out := stripANSI(nv.view(120, 25))
-	for _, want := range []string{"O-0003", "host_timing=1.2 s", "experiment=E-0007", "Artifacts (1):", "make test", "stdev", "warm"} {
+	out := stripANSI(nv.view(120, 40))
+	for _, want := range []string{
+		"O-0003", "host_timing=1.2 s", "experiment=E-0007", "Artifacts (1):",
+		"Evidence failures:", "mechanism (exit 7): profile tool crashed",
+		"make test", "stdev", "warm",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("observation detail missing %q:\n%s", want, out)
 		}
