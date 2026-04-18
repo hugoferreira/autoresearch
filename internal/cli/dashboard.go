@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -100,56 +101,31 @@ output (recommended under ` + "`watch -c autoresearch dashboard`" + `).`,
 // ---- snapshot capture ----
 
 type dashboardSnapshot struct {
-	Project                string              `json:"project"`
-	ScopeGoalID            string              `json:"scope_goal_id,omitempty"`
-	ScopeAll               bool                `json:"scope_all"`
-	Paused                 bool                `json:"paused"`
-	PauseReason            string              `json:"pause_reason,omitempty"`
-	Mode                   string              `json:"mode"`
-	MainCheckoutDirty      bool                `json:"main_checkout_dirty"`
-	MainCheckoutDirtyPaths []string            `json:"main_checkout_dirty_paths"`
-	Goal                   *entity.Goal        `json:"goal,omitempty"`
-	Budgets                dashboardBudgets    `json:"budgets"`
-	Counts                 map[string]int      `json:"counts"`
-	Tree                   []*treeNode         `json:"tree"`
-	Frontier               []frontierRow       `json:"frontier"`
-	StalledFor             int                 `json:"stalled_for"`
-	InFlight               []dashboardInFlight `json:"in_flight"`
-	StaleExperiments       []dashboardStaleExp `json:"stale_experiments,omitempty"`
-	RecentLessons          []*entity.Lesson    `json:"recent_lessons,omitempty"`
+	Project                string                `json:"project"`
+	ScopeGoalID            string                `json:"scope_goal_id,omitempty"`
+	ScopeAll               bool                  `json:"scope_all"`
+	Paused                 bool                  `json:"paused"`
+	PauseReason            string                `json:"pause_reason,omitempty"`
+	Mode                   string                `json:"mode"`
+	MainCheckoutDirty      bool                  `json:"main_checkout_dirty"`
+	MainCheckoutDirtyPaths []string              `json:"main_checkout_dirty_paths"`
+	Goal                   *entity.Goal          `json:"goal,omitempty"`
+	Budgets                dashboardBudgets      `json:"budgets"`
+	Counts                 map[string]int        `json:"counts"`
+	Tree                   []*treeNode           `json:"tree"`
+	Frontier               []frontierRow         `json:"frontier"`
+	StalledFor             int                   `json:"stalled_for"`
+	InFlight               []dashboardInFlight   `json:"in_flight"`
+	StaleExperiments       []staleExperimentView `json:"stale_experiments,omitempty"`
+	RecentLessons          []*entity.Lesson      `json:"recent_lessons,omitempty"`
 	recentLessonAccuracy   map[string]lessonAccuracySummary
 	RecentEvents           []store.Event `json:"recent_events"`
 	CapturedAt             time.Time     `json:"captured_at"`
 }
 
-type dashboardBudgets struct {
-	Limits struct {
-		MaxExperiments int `json:"max_experiments"`
-		MaxWallTimeH   int `json:"max_wall_time_h"`
-		FrontierStallK int `json:"frontier_stall_k"`
-	} `json:"limits"`
-	Usage struct {
-		Experiments int     `json:"experiments"`
-		ElapsedH    float64 `json:"elapsed_h"`
-	} `json:"usage"`
-}
+type dashboardBudgets = readmodel.BudgetSnapshot
 
-type dashboardInFlight struct {
-	ID            string     `json:"id"`
-	Hypothesis    string     `json:"hypothesis"`
-	Status        string     `json:"status"`
-	Instruments   []string   `json:"instruments"`
-	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
-	ElapsedS      float64    `json:"elapsed_s"`
-}
-
-type dashboardStaleExp struct {
-	ID            string  `json:"id"`
-	Hypothesis    string  `json:"hypothesis"`
-	Status        string  `json:"status"`
-	LastEventKind string  `json:"last_event_kind"`
-	StaleMinutes  float64 `json:"stale_minutes"`
-}
+type dashboardInFlight = readmodel.InFlightExperimentView
 
 const dashboardRecentEventsSummaryLimit = 10
 
@@ -223,13 +199,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		}
 	}
 
-	snap.Budgets.Limits.MaxExperiments = cfg.Budgets.MaxExperiments
-	snap.Budgets.Limits.MaxWallTimeH = cfg.Budgets.MaxWallTimeH
-	snap.Budgets.Limits.FrontierStallK = cfg.Budgets.FrontierStallK
-	snap.Budgets.Usage.Experiments = st.Counters["E"]
-	if st.ResearchStartedAt != nil {
-		snap.Budgets.Usage.ElapsedH = time.Since(*st.ResearchStartedAt).Hours()
-	}
+	snap.Budgets = readmodel.BuildBudgetSnapshot(cfg, st, snap.CapturedAt)
 
 	resolver := newGoalScopeResolver(s, scope)
 
@@ -251,12 +221,6 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		return nil, err
 	}
 
-	if snap.Goal != nil {
-		rows, stalled := computeFrontier(s, snap.Goal, concls)
-		snap.Frontier = rows
-		snap.StalledFor = stalled
-	}
-
 	// Load events once — used for both in-flight timestamps and the
 	// recent-events panel (avoids N+1 full reads of events.jsonl).
 	allEvents, err := s.Events(0)
@@ -276,76 +240,12 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	if err != nil {
 		return nil, err
 	}
-	expClassByID, err := classifyExperimentsForRead(s, exps)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range exps {
-		if e.Status != entity.ExpImplemented && e.Status != entity.ExpMeasured {
-			continue
-		}
-		if len(e.ReferencedAsBaselineBy) > 0 {
-			continue
-		}
-		if expClassByID[e.ID].Classification == experimentClassificationDead {
-			continue
-		}
-		row := dashboardInFlight{
-			ID:          e.ID,
-			Hypothesis:  e.Hypothesis,
-			Status:      e.Status,
-			Instruments: append([]string{}, e.Instruments...),
-		}
-		if ts, kind := findLastEventForExperiment(allEvents, e.ID); ts != nil && kind == "experiment.implement" {
-			row.ImplementedAt = ts
-			row.ElapsedS = time.Since(*ts).Seconds()
-		}
-		snap.InFlight = append(snap.InFlight, row)
-	}
-	sort.SliceStable(snap.InFlight, func(i, j int) bool {
-		a, b := snap.InFlight[i].ImplementedAt, snap.InFlight[j].ImplementedAt
-		if a == nil && b == nil {
-			return snap.InFlight[i].ID < snap.InFlight[j].ID
-		}
-		if a == nil {
-			return false
-		}
-		if b == nil {
-			return true
-		}
-		return a.After(*b)
-	})
-
-	// Stale experiment detection: flag non-terminal, non-baseline experiments
-	// whose last event is older than the configured threshold.
+	expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
+	staleThreshold := time.Duration(0)
 	if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
-		threshold := time.Duration(staleMinutes) * time.Minute
-		now := time.Now().UTC()
-		for _, e := range exps {
-			switch e.Status {
-			case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
-			default:
-				continue
-			}
-			if e.IsBaseline {
-				continue
-			}
-			ts, kind := findLastEventForExperiment(allEvents, e.ID)
-			if ts == nil {
-				continue
-			}
-			age := now.Sub(*ts)
-			if age >= threshold {
-				snap.StaleExperiments = append(snap.StaleExperiments, dashboardStaleExp{
-					ID:            e.ID,
-					Hypothesis:    e.Hypothesis,
-					Status:        e.Status,
-					LastEventKind: kind,
-					StaleMinutes:  age.Minutes(),
-				})
-			}
-		}
+		staleThreshold = time.Duration(staleMinutes) * time.Minute
 	}
+	snap.InFlight, snap.StaleExperiments = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, staleThreshold, snap.CapturedAt)
 
 	allObs, err := s.ListObservations()
 	if err != nil {
@@ -354,6 +254,12 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	allObs, err = resolver.filterObservations(allObs)
 	if err != nil {
 		return nil, err
+	}
+
+	if snap.Goal != nil {
+		frontier := readmodel.BuildFrontierSnapshot(snap.Goal, concls, readmodel.GroupObservationsByExperiment(allObs), expClassByID)
+		snap.Frontier = frontier.Rows
+		snap.StalledFor = frontier.StalledFor
 	}
 
 	var lessonCount int
@@ -395,34 +301,13 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		}
 	}
 
-	// Derive counts from already-loaded data instead of calling Counts()
-	// which re-scans every entity directory. Only observations need a
-	// targeted ReadDir because they're loaded inside computeFrontier, not
-	// directly available here.
-	snap.Counts = map[string]int{
-		"hypotheses":   len(hyps),
-		"experiments":  len(exps),
-		"observations": len(allObs),
-		"conclusions":  len(concls),
-		"lessons":      lessonCount,
-	}
+	// Derive counts from already-loaded scoped slices instead of calling
+	// Counts(), which would re-scan every entity directory.
+	snap.Counts = readmodel.BuildCountsWithLessons(len(hyps), len(exps), len(allObs), len(concls), lessonCount)
 
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)
 
 	return snap, nil
-}
-
-// findLastEventForExperiment scans a pre-loaded event list backward for the
-// most recent event referencing expID and returns its timestamp and kind.
-func findLastEventForExperiment(events []store.Event, expID string) (ts *time.Time, kind string) {
-	for i := len(events) - 1; i >= 0; i-- {
-		e := events[i]
-		if e.Subject == expID {
-			t := e.Ts
-			return &t, e.Kind
-		}
-	}
-	return nil, ""
 }
 
 // ---- one-shot + refresh loop ----

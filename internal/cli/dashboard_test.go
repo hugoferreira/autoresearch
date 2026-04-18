@@ -132,10 +132,110 @@ func TestCaptureDashboard_InFlightExcludesDeadExperiments(t *testing.T) {
 		ids[r.ID] = true
 	}
 	if ids["E-0001"] {
-		t.Error("E-0001 belongs to a terminal hypothesis and should not appear in-flight")
+		t.Error("E-0001 belongs to a non-actionable hypothesis and should not appear in-flight")
 	}
 	if !ids["E-0002"] {
 		t.Error("E-0002 belongs to an open hypothesis and should appear in-flight")
+	}
+}
+
+func TestCaptureDashboard_StaleExperimentsExcludeNonActionableWork(t *testing.T) {
+	s := newStoreWithBuiltins(t)
+	now := time.Now().UTC()
+
+	if err := s.UpdateConfig(func(cfg *store.Config) error {
+		cfg.Budgets.StaleExperimentMinutes = 5
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, h := range []*entity.Hypothesis{
+		{
+			ID: "H-0001", GoalID: "G-0001", Claim: "supported and done",
+			Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
+			KillIf:   []string{"tests fail"}, Status: entity.StatusSupported, Author: "human", CreatedAt: now,
+		},
+		{
+			ID: "H-0002", GoalID: "G-0001", Claim: "awaiting review",
+			Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
+			KillIf:   []string{"tests fail"}, Status: entity.StatusUnreviewed, Author: "human", CreatedAt: now,
+		},
+		{
+			ID: "H-0003", GoalID: "G-0001", Claim: "still live",
+			Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
+			KillIf:   []string{"tests fail"}, Status: entity.StatusOpen, Author: "human", CreatedAt: now,
+		},
+	} {
+		if err := s.WriteHypothesis(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, e := range []*entity.Experiment{
+		{
+			ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
+			Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
+			Author: "agent:designer", CreatedAt: now,
+		},
+		{
+			ID: "E-0002", Hypothesis: "H-0002", Status: entity.ExpMeasured,
+			Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
+			Author: "agent:designer", CreatedAt: now,
+		},
+		{
+			ID: "E-0003", Hypothesis: "H-0003", Status: entity.ExpMeasured,
+			Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
+			Author: "agent:designer", CreatedAt: now,
+		},
+	} {
+		if err := s.WriteExperiment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	staleAt := now.Add(-10 * time.Minute)
+	for _, expID := range []string{"E-0001", "E-0002", "E-0003"} {
+		if err := s.AppendEvent(store.Event{
+			Ts:      staleAt,
+			Kind:    "experiment.measure",
+			Subject: expID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snap, err := captureDashboard(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inFlightIDs := make(map[string]bool, len(snap.InFlight))
+	for _, row := range snap.InFlight {
+		inFlightIDs[row.ID] = true
+	}
+	if inFlightIDs["E-0001"] {
+		t.Error("E-0001 should not appear in-flight once its hypothesis is supported")
+	}
+	if inFlightIDs["E-0002"] {
+		t.Error("E-0002 should not appear in-flight while its decisive conclusion is awaiting review")
+	}
+	if !inFlightIDs["E-0003"] {
+		t.Error("E-0003 should remain in-flight while its hypothesis is open")
+	}
+
+	staleIDs := make(map[string]bool, len(snap.StaleExperiments))
+	for _, row := range snap.StaleExperiments {
+		staleIDs[row.ID] = true
+	}
+	if staleIDs["E-0001"] {
+		t.Error("E-0001 should not appear as stale once its hypothesis is supported")
+	}
+	if staleIDs["E-0002"] {
+		t.Error("E-0002 should not appear as stale while its decisive conclusion is awaiting review")
+	}
+	if !staleIDs["E-0003"] {
+		t.Error("E-0003 should appear as stale while its hypothesis is still actionable")
 	}
 }
 

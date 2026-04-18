@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
@@ -133,7 +134,7 @@ func (v *experimentDetailView) title() string { return "Experiment " + v.id }
 func (v *experimentDetailView) init(s *store.Store) tea.Cmd {
 	id := v.id
 	return func() tea.Msg {
-		view, err := readExperimentForRead(s, id)
+		view, err := readmodel.ReadExperimentForRead(s, id)
 		if err != nil {
 			return expDetailLoadedMsg{err: err}
 		}

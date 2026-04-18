@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -188,12 +189,12 @@ func fetchChrome(s *store.Store, scope goalScope) tea.Cmd {
 		// store cache lands it'll be cheap for both paths.
 		if scope.All || scope.GoalID == "" {
 			if counts, err := s.Counts(); err == nil {
-				msg.counts = map[string]int{
-					"hypotheses":   counts["hypotheses"],
-					"experiments":  counts["experiments"],
-					"observations": counts["observations"],
-					"conclusions":  counts["conclusions"],
-				}
+				msg.counts = readmodel.BuildCounts(
+					counts["hypotheses"],
+					counts["experiments"],
+					counts["observations"],
+					counts["conclusions"],
+				)
 			}
 			return msg
 		}
@@ -207,12 +208,7 @@ func fetchChrome(s *store.Store, scope goalScope) tea.Cmd {
 			obs, oerr = resolver.filterObservations(obs)
 			concls, cerr = resolver.filterConclusions(concls)
 			if eerr == nil && oerr == nil && cerr == nil {
-				msg.counts = map[string]int{
-					"hypotheses":   len(resolver.filterHypotheses(hyps)),
-					"experiments":  len(exps),
-					"observations": len(obs),
-					"conclusions":  len(concls),
-				}
+				msg.counts = readmodel.BuildCounts(len(resolver.filterHypotheses(hyps)), len(exps), len(obs), len(concls))
 			}
 		}
 		return msg

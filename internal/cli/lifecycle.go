@@ -4,13 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/integration"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
@@ -450,12 +450,7 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			counts := map[string]int{
-				"hypotheses":   len(hyps),
-				"experiments":  len(exps),
-				"observations": len(obs),
-				"conclusions":  len(concls),
-			}
+			counts := readmodel.BuildCounts(len(hyps), len(exps), len(obs), len(concls))
 
 			payload := mergeGoalScopePayload(map[string]any{
 				"root":                      s.Root(),
@@ -470,46 +465,19 @@ func statusCmd() *cobra.Command {
 				"main_checkout_dirty_paths": mainCheckout.Paths,
 			}, scope)
 
-			// Stale experiment detection.
-			type staleExp struct {
-				ID            string  `json:"id"`
-				Hypothesis    string  `json:"hypothesis"`
-				Status        string  `json:"status"`
-				LastEventKind string  `json:"last_event_kind"`
-				StaleMinutes  float64 `json:"stale_minutes"`
-			}
-			var stale []staleExp
+			// Stale experiment detection: reuse the same read-side
+			// actionability policy as dashboard/frontier instead of open-coding
+			// another "live enough to steer from" definition here.
+			var stale []staleExperimentView
 			if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
 				allEvents, err := s.Events(0)
 				if err != nil {
 					return err
 				}
-				threshold := time.Duration(staleMinutes) * time.Minute
+				expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
 				now := time.Now().UTC()
-				for _, e := range exps {
-					switch e.Status {
-					case entity.ExpDesigned, entity.ExpImplemented, entity.ExpMeasured:
-					default:
-						continue
-					}
-					if e.IsBaseline {
-						continue
-					}
-					ts, kind := findLastEventForExperiment(allEvents, e.ID)
-					if ts == nil {
-						continue
-					}
-					age := now.Sub(*ts)
-					if age >= threshold {
-						stale = append(stale, staleExp{
-							ID:            e.ID,
-							Hypothesis:    e.Hypothesis,
-							Status:        e.Status,
-							LastEventKind: kind,
-							StaleMinutes:  age.Minutes(),
-						})
-					}
-				}
+				threshold := time.Duration(staleMinutes) * time.Minute
+				_, stale = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, threshold, now)
 			}
 			if len(stale) > 0 {
 				payload["stale_experiments"] = stale
@@ -522,17 +490,7 @@ func statusCmd() *cobra.Command {
 			var unobservedInstruments []string
 			if !scope.All && scope.GoalID != "" {
 				if goal, err := s.ReadGoal(scope.GoalID); err == nil {
-					needed := map[string]bool{goal.Objective.Instrument: true}
-					for _, c := range goal.Constraints {
-						needed[c.Instrument] = true
-					}
-					for _, o := range obs {
-						delete(needed, o.Instrument)
-					}
-					for inst := range needed {
-						unobservedInstruments = append(unobservedInstruments, inst)
-					}
-					sort.Strings(unobservedInstruments)
+					unobservedInstruments = readmodel.FindUnobservedGoalInstruments(goal, obs)
 				}
 			}
 			if len(unobservedInstruments) > 0 {

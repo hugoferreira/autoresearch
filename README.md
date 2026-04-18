@@ -107,7 +107,7 @@ The core nouns are:
 | **Observation** | The recorded result of running one instrument on one experiment: value, samples, CI, pass/fail, command, artifacts, and metadata. | This is the evidence layer. Conclusions may cite observations, not anecdotes. |
 | **Conclusion** | A verdict over a hypothesis, derived from observations and compared against the goal baseline. | Records whether the evidence actually supports, refutes, or fails to decide the claim. |
 | **Lesson** | A reusable takeaway extracted from prior work, either tied to a hypothesis chain or scoped to the system as a whole. | Prevents later cycles from rediscovering the same dead ends or overestimating future gains. |
-| **Frontier** | A derived view of the best supported conclusions for the current goal. | Shows whether the search is still improving or has stalled. |
+| **Frontier** | A derived view of the best supported conclusions for the current goal, annotated for current loop actionability. | Shows whether the search is still improving or has stalled without hiding historically important wins. |
 | **Instrument** | A command plus parser that turns program behavior into a number or pass/fail result. | Makes optimization targets measurable and repeatable. |
 | **Artifact** | Content-addressed captured output attached to an observation. | Preserves the exact evidence a reviewer or human needs to audit a measurement. |
 
@@ -419,6 +419,14 @@ When `stale_experiment_minutes` is configured (via `budget set`), both
 `status` and `dashboard` flag experiments idle beyond the threshold — a
 signal that a coder helper may have crashed or the orchestrator got
 distracted.
+
+Read surfaces such as `experiment list`, `frontier`, `dashboard`, and
+`dashboard tui` also derive a `live` / `dead` label for experiments and
+frontier rows. `dead` means "not actionable for steering right now"; it does
+not mean the result stopped mattering. A historically best accepted win can
+still appear on the frontier as `dead`, can still satisfy the goal threshold,
+and later non-improving conclusions still advance the reported stall count
+until a new frontier improvement appears.
 
 ### `dashboard tui`
 
