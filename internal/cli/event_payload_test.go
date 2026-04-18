@@ -272,6 +272,87 @@ func TestConclusionWithdraw_RecordsAuditTrailAndUpdatesHypothesis(t *testing.T) 
 	}
 }
 
+func TestConclusionDowngrade_UsesReviewerAsLessonEventActor(t *testing.T) {
+	saveGlobals(t)
+	dir, s := setupGoalStore(t)
+	now := time.Now().UTC()
+
+	h := &entity.Hypothesis{
+		ID:        "H-0001",
+		GoalID:    "G-0001",
+		Claim:     "tighten loop",
+		Predicts:  entity.Predicts{Instrument: "timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
+		KillIf:    []string{"tests fail"},
+		Status:    entity.StatusUnreviewed,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}
+	if err := s.WriteHypothesis(h); err != nil {
+		t.Fatal(err)
+	}
+	c := &entity.Conclusion{
+		ID:         "C-0001",
+		Hypothesis: h.ID,
+		Verdict:    entity.VerdictSupported,
+		Author:     "agent:analyst",
+		CreatedAt:  now,
+	}
+	if err := s.WriteConclusion(c); err != nil {
+		t.Fatal(err)
+	}
+	l := &entity.Lesson{
+		ID:         "L-0001",
+		Claim:      "the loop shape is promising",
+		Scope:      entity.LessonScopeHypothesis,
+		Subjects:   []string{h.ID, c.ID},
+		Status:     entity.LessonStatusProvisional,
+		Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceUnreviewedDecisive},
+		Author:     "agent:analyst",
+		CreatedAt:  now,
+	}
+	if err := s.WriteLesson(l); err != nil {
+		t.Fatal(err)
+	}
+
+	root := Root()
+	root.SetArgs([]string{
+		"-C", dir,
+		"conclusion", "downgrade", "C-0001",
+		"--reason", "benchmark setup was invalid",
+		"--reviewed-by", "human:alice",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("conclusion downgrade: %v", err)
+	}
+
+	lessonEvent := findLastEvent(t, s, "lesson.invalidate")
+	if lessonEvent == nil {
+		t.Fatal("lesson.invalidate event not found")
+	}
+	if got := lessonEvent.Actor; got != "human:alice" {
+		t.Fatalf("lesson.invalidate actor = %q, want %q", got, "human:alice")
+	}
+	lessonPayload := decodePayload(t, lessonEvent)
+	if got := lessonPayload["hypothesis"]; got != h.ID {
+		t.Errorf("lesson payload hypothesis = %v, want %q", got, h.ID)
+	}
+	if got := lessonPayload["conclusion"]; got != c.ID {
+		t.Errorf("lesson payload conclusion = %v, want %q", got, c.ID)
+	}
+
+	conclusionEvent := findLastEvent(t, s, "conclusion.critic_downgrade")
+	if conclusionEvent == nil {
+		t.Fatal("conclusion.critic_downgrade event not found")
+	}
+	if got := conclusionEvent.Actor; got != "agent:critic" {
+		t.Fatalf("conclusion.critic_downgrade actor = %q, want %q", got, "agent:critic")
+	}
+	payload := decodePayload(t, conclusionEvent)
+	if got := payload["reviewed_by"]; got != "human:alice" {
+		t.Errorf("conclusion payload reviewed_by = %v, want %q", got, "human:alice")
+	}
+}
+
 func TestEventPayload_InstrumentRegisterEmitsFieldMap(t *testing.T) {
 	saveGlobals(t)
 	dir := t.TempDir()

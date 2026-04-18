@@ -49,8 +49,27 @@ func setupWinningExperimentStore(t *testing.T, hypStatus string) *store.Store {
 	return s
 }
 
-func TestResolveWinningExperiment_UsesSupportedWinnerWhenHypothesisIsCurrentlySupported(t *testing.T) {
-	s := setupWinningExperimentStore(t, entity.StatusSupported)
+func TestResolveWinningExperiment_UsesSupportedWinnerWhenHypothesisCurrentTruthStillPointsAtIt(t *testing.T) {
+	for _, status := range []string{entity.StatusSupported, entity.StatusUnreviewed} {
+		t.Run(status, func(t *testing.T) {
+			s := setupWinningExperimentStore(t, status)
+
+			concl, exp, err := resolveWinningExperiment(s, "H-0001", "")
+			if err != nil {
+				t.Fatalf("resolveWinningExperiment: %v", err)
+			}
+			if concl == nil || concl.ID != "C-0001" {
+				t.Fatalf("conclusion = %+v, want C-0001", concl)
+			}
+			if exp == nil || exp.ID != "E-0001" {
+				t.Fatalf("experiment = %+v, want E-0001", exp)
+			}
+		})
+	}
+}
+
+func TestResolveWinningExperiment_LegacyKilledHypothesisKeepsHistoricalSupportedWinner(t *testing.T) {
+	s := setupWinningExperimentStore(t, entity.StatusKilled)
 
 	concl, exp, err := resolveWinningExperiment(s, "H-0001", "")
 	if err != nil {
@@ -64,8 +83,8 @@ func TestResolveWinningExperiment_UsesSupportedWinnerWhenHypothesisIsCurrentlySu
 	}
 }
 
-func TestResolveWinningExperiment_FallsBackToLatestExperimentWhenHypothesisIsNotCurrentlySupported(t *testing.T) {
-	for _, status := range []string{entity.StatusRefuted, entity.StatusKilled, entity.StatusInconclusive, entity.StatusUnreviewed} {
+func TestResolveWinningExperiment_FallsBackToLatestExperimentWhenHypothesisDoesNotRetainSupportedWinner(t *testing.T) {
+	for _, status := range []string{entity.StatusRefuted, entity.StatusInconclusive} {
 		t.Run(status, func(t *testing.T) {
 			s := setupWinningExperimentStore(t, status)
 

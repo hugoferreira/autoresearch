@@ -8,6 +8,7 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
@@ -441,10 +442,11 @@ func resolveWinningExperiment(s *store.Store, hypID, conclusionID string) (*enti
 		if err != nil {
 			return nil, nil, err
 		}
-		if hypothesisStatusAllowsDefaultWinningConclusion(hyp.Status) {
-			// Pick the best supported conclusion (largest |delta_frac|) only
-			// when the hypothesis's current accepted stance is still
-			// supported. Otherwise we fall back to the latest experiment.
+		if readmodel.SupportedConclusionCountsForReadSurface(hyp.Status) {
+			// Pick the best supported conclusion (largest |delta_frac|) when
+			// the hypothesis's read-side status still preserves that supported
+			// result (including pending review and the legacy killed back-compat
+			// case). Otherwise we fall back to the latest experiment.
 			for _, c := range all {
 				if c.Verdict != entity.VerdictSupported {
 					continue

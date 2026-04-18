@@ -19,7 +19,3 @@ func hypothesisStatusAllowsKill(status string) bool {
 		return false
 	}
 }
-
-func hypothesisStatusAllowsDefaultWinningConclusion(status string) bool {
-	return status == entity.StatusSupported
-}

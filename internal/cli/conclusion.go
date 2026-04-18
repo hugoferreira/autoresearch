@@ -19,6 +19,7 @@ type conclusionInconclusiveTransition struct {
 	ReasonPrefix string
 	ReasonLabel  string
 	Actor        string
+	LessonActor  string
 	ReviewedBy   string
 	LessonMode   lessonSyncMode
 	BodySection  string
@@ -227,6 +228,7 @@ marked inconclusive.`,
 				ReasonPrefix: conclusionReasonCriticDowngradePrefix,
 				ReasonLabel:  "downgrade",
 				Actor:        "agent:critic",
+				LessonActor:  or(reviewedBy, "agent:critic"),
 				ReviewedBy:   reviewedBy,
 				LessonMode:   lessonSyncOnDowngrade,
 				EventExtra: map[string]any{
@@ -501,7 +503,7 @@ func transitionConclusionToInconclusive(w *output.Writer, s *store.Store, c *ent
 	if err := setHypothesisStatusIfPresent(s, c.Hypothesis, entity.StatusInconclusive); err != nil {
 		return err
 	}
-	if err := emitHypothesisLessonSyncEvents(s, c.Hypothesis, c.ID, spec.LessonMode, spec.Actor); err != nil {
+	if err := emitHypothesisLessonSyncEvents(s, c.Hypothesis, c.ID, spec.LessonMode, or(spec.LessonActor, spec.Actor)); err != nil {
 		return err
 	}
 	eventData := map[string]any{

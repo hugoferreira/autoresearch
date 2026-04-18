@@ -196,7 +196,7 @@ func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 			continue
 		}
 		class := ExperimentReadClassForID(expClassByID, c.CandidateExp)
-		if !supportedConclusionCountsForCurrentTruth(class.HypothesisStatus) {
+		if !SupportedConclusionCountsForReadSurface(class.HypothesisStatus) {
 			continue
 		}
 		obs := obsByExp[c.CandidateExp]
@@ -306,27 +306,13 @@ func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obsByExp ma
 	if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
 		return 0, false
 	}
-	if !supportedConclusionCountsForCurrentTruth(class.HypothesisStatus) {
+	if !SupportedConclusionCountsForReadSurface(class.HypothesisStatus) {
 		return 0, false
 	}
 	if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
 		return 0, false
 	}
 	return candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
-}
-
-func supportedConclusionCountsForCurrentTruth(status string) bool {
-	switch status {
-	case "", entity.StatusSupported, entity.StatusUnreviewed:
-		return true
-	case entity.StatusKilled:
-		// Back-compat: older stores may still contain supported->killed
-		// histories. Preserve those accepted wins on read-only historical
-		// surfaces even though new lifecycle guards stop producing them.
-		return true
-	default:
-		return false
-	}
 }
 
 func betterFrontierValue(direction string, candidate, incumbent float64) bool {
