@@ -146,12 +146,12 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 			if err != nil {
 				return nil, err
 			}
-			rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+			frontier := readmodel.BuildFrontierSnapshot(goal, concls, obsByExp, expClassByID)
 			out = append(out, goalFrontier{
 				Goal:       goal,
-				Rows:       rows,
-				Assessment: readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
-				StalledFor: stalled,
+				Rows:       frontier.Rows,
+				Assessment: frontier.Assessment,
+				StalledFor: frontier.StalledFor,
 			})
 		}
 		return out, nil
@@ -164,12 +164,12 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+	frontier := readmodel.BuildFrontierSnapshot(goal, concls, obsByExp, expClassByID)
 	return []goalFrontier{{
 		Goal:       goal,
-		Rows:       rows,
-		Assessment: readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
-		StalledFor: stalled,
+		Rows:       frontier.Rows,
+		Assessment: frontier.Assessment,
+		StalledFor: frontier.StalledFor,
 	}}, nil
 }
 

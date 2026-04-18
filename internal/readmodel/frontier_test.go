@@ -106,3 +106,40 @@ func TestComputeFrontierFromObservations_StalledForIgnoresDeadRows(t *testing.T)
 		t.Fatalf("best row classification = %q, want %q", got, want)
 	}
 }
+
+func TestBuildFrontierSnapshot_ComposesRowsAssessmentAndStall(t *testing.T) {
+	goal := &entity.Goal{
+		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
+		Completion: &entity.Completion{
+			Threshold:   0.1,
+			OnThreshold: entity.GoalOnThresholdStop,
+		},
+	}
+	concls := []*entity.Conclusion{
+		{
+			ID:           "C-0001",
+			Hypothesis:   "H-0001",
+			Verdict:      entity.VerdictSupported,
+			ReviewedBy:   "agent:gate",
+			CandidateExp: "E-0001",
+			Effect:       entity.Effect{Instrument: "host_timing", DeltaFrac: -0.15},
+		},
+	}
+	obs := []*entity.Observation{
+		{Experiment: "E-0001", Instrument: "host_timing", Value: 85},
+	}
+
+	got := BuildFrontierSnapshot(goal, concls, GroupObservationsByExperiment(obs), nil)
+	if got.StalledFor != 0 {
+		t.Fatalf("stalled_for = %d, want 0", got.StalledFor)
+	}
+	if len(got.Rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(got.Rows))
+	}
+	if got.Rows[0].Candidate != "E-0001" {
+		t.Fatalf("best row candidate = %q, want %q", got.Rows[0].Candidate, "E-0001")
+	}
+	if !got.Assessment.Met || got.Assessment.MetByConclusion != "C-0001" {
+		t.Fatalf("unexpected assessment: %+v", got.Assessment)
+	}
+}

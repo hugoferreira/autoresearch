@@ -44,6 +44,13 @@ type FrontierGoalAssessment struct {
 	RecommendedAction string  `json:"recommended_action"`
 }
 
+// FrontierSnapshot is the shared read projection for frontier surfaces.
+type FrontierSnapshot struct {
+	Rows       []FrontierRow          `json:"rows"`
+	Assessment FrontierGoalAssessment `json:"assessment"`
+	StalledFor int                    `json:"stalled_for"`
+}
+
 type frontierCandidate struct {
 	Conclusion *entity.Conclusion
 	Value      float64
@@ -52,7 +59,25 @@ type frontierCandidate struct {
 // ComputeFrontier returns rows in best-first order for the objective and the
 // count of conclusions written since the last frontier improvement.
 func ComputeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclusion) (rows []FrontierRow, stalledFor int) {
-	return ComputeFrontierFromObservations(goal, concls, LoadObservationsByExperiment(s), LoadExperimentReadClasses(s))
+	snap := ComputeFrontierSnapshot(s, goal, concls)
+	return snap.Rows, snap.StalledFor
+}
+
+// ComputeFrontierSnapshot loads the read-side context needed to build a full
+// frontier projection from store-backed entities.
+func ComputeFrontierSnapshot(s *store.Store, goal *entity.Goal, concls []*entity.Conclusion) FrontierSnapshot {
+	return BuildFrontierSnapshot(goal, concls, LoadObservationsByExperiment(s), LoadExperimentReadClasses(s))
+}
+
+// BuildFrontierSnapshot composes the frontier rows, goal assessment, and
+// stalled-for counter from already-loaded read-side inputs.
+func BuildFrontierSnapshot(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) FrontierSnapshot {
+	rows, stalled := ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+	return FrontierSnapshot{
+		Rows:       rows,
+		Assessment: AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
+		StalledFor: stalled,
+	}
 }
 
 func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) (rows []FrontierRow, stalledFor int) {
@@ -211,8 +236,17 @@ func LoadObservationsByExperiment(s *store.Store) map[string][]*entity.Observati
 	if err != nil {
 		return nil
 	}
+	return GroupObservationsByExperiment(all)
+}
+
+// GroupObservationsByExperiment buckets already-loaded observations by their
+// experiment ID for frontier and status projections.
+func GroupObservationsByExperiment(all []*entity.Observation) map[string][]*entity.Observation {
 	m := make(map[string][]*entity.Observation, len(all))
 	for _, o := range all {
+		if o == nil {
+			continue
+		}
 		m[o.Experiment] = append(m[o.Experiment], o)
 	}
 	return m

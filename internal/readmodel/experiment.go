@@ -67,11 +67,9 @@ func ExperimentReadClassForID(classByID map[string]ExperimentReadClass, expID st
 	return normalizeExperimentReadClass(classByID[expID])
 }
 
-func ClassifyExperimentsForRead(s *store.Store, exps []*entity.Experiment) (map[string]ExperimentReadClass, error) {
-	hyps, err := s.ListHypotheses()
-	if err != nil {
-		return nil, err
-	}
+// BuildHypothesisStatusIndex indexes hypotheses by ID for read-side
+// experiment classification and other projections that only need status.
+func BuildHypothesisStatusIndex(hyps []*entity.Hypothesis) map[string]string {
 	hypStatus := make(map[string]string, len(hyps))
 	for _, h := range hyps {
 		if h == nil {
@@ -79,14 +77,21 @@ func ClassifyExperimentsForRead(s *store.Store, exps []*entity.Experiment) (map[
 		}
 		hypStatus[h.ID] = h.Status
 	}
-	out := make(map[string]ExperimentReadClass, len(exps))
-	for _, e := range exps {
-		if e == nil {
-			continue
-		}
-		out[e.ID] = classifyExperimentForRead(e, hypStatus)
+	return hypStatus
+}
+
+// ClassifyExperimentsForReadFromHypotheses derives read-time experiment
+// classification from already-loaded hypotheses, avoiding another store read.
+func ClassifyExperimentsForReadFromHypotheses(exps []*entity.Experiment, hyps []*entity.Hypothesis) map[string]ExperimentReadClass {
+	return classifyExperimentsForRead(exps, BuildHypothesisStatusIndex(hyps))
+}
+
+func ClassifyExperimentsForRead(s *store.Store, exps []*entity.Experiment) (map[string]ExperimentReadClass, error) {
+	hyps, err := s.ListHypotheses()
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return ClassifyExperimentsForReadFromHypotheses(exps, hyps), nil
 }
 
 func AnnotateExperimentsForRead(s *store.Store, exps []*entity.Experiment) ([]*ExperimentReadView, error) {
@@ -161,6 +166,17 @@ func classifyExperimentForRead(e *entity.Experiment, hypStatus map[string]string
 		return normalizeExperimentReadClass(ExperimentReadClass{})
 	}
 	return ClassifyHypothesisStatusForExperimentRead(hypStatus[e.Hypothesis])
+}
+
+func classifyExperimentsForRead(exps []*entity.Experiment, hypStatus map[string]string) map[string]ExperimentReadClass {
+	out := make(map[string]ExperimentReadClass, len(exps))
+	for _, e := range exps {
+		if e == nil {
+			continue
+		}
+		out[e.ID] = classifyExperimentForRead(e, hypStatus)
+	}
+	return out
 }
 
 func BuildExperimentActivity(exps []*entity.Experiment, classByID map[string]ExperimentReadClass, events []store.Event, staleThreshold time.Duration, now time.Time) (inFlight []InFlightExperimentView, stale []StaleExperimentView) {

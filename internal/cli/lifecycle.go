@@ -474,10 +474,7 @@ func statusCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				expClassByID, err := readmodel.ClassifyExperimentsForRead(s, exps)
-				if err != nil {
-					return err
-				}
+				expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
 				now := time.Now().UTC()
 				threshold := time.Duration(staleMinutes) * time.Minute
 				_, stale = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, threshold, now)

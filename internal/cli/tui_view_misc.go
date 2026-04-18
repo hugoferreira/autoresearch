@@ -227,12 +227,12 @@ func (v *frontierView) init(s *store.Store) tea.Cmd {
 		}
 		obsByExp := readmodel.LoadObservationsByExperiment(s)
 		expClassByID := readmodel.LoadExperimentReadClasses(s)
-		rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+		frontier := readmodel.BuildFrontierSnapshot(goal, concls, obsByExp, expClassByID)
 		return frontierLoadedMsg{
 			goal:       goal,
-			rows:       rows,
-			assessment: readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
-			stalled:    stalled,
+			rows:       frontier.Rows,
+			assessment: frontier.Assessment,
+			stalled:    frontier.StalledFor,
 		}
 	}
 }

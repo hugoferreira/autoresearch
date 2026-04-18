@@ -221,12 +221,6 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		return nil, err
 	}
 
-	if snap.Goal != nil {
-		rows, stalled := readmodel.ComputeFrontier(s, snap.Goal, concls)
-		snap.Frontier = rows
-		snap.StalledFor = stalled
-	}
-
 	// Load events once — used for both in-flight timestamps and the
 	// recent-events panel (avoids N+1 full reads of events.jsonl).
 	allEvents, err := s.Events(0)
@@ -246,10 +240,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	if err != nil {
 		return nil, err
 	}
-	expClassByID, err := readmodel.ClassifyExperimentsForRead(s, exps)
-	if err != nil {
-		return nil, err
-	}
+	expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
 	staleThreshold := time.Duration(0)
 	if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
 		staleThreshold = time.Duration(staleMinutes) * time.Minute
@@ -263,6 +254,12 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	allObs, err = resolver.filterObservations(allObs)
 	if err != nil {
 		return nil, err
+	}
+
+	if snap.Goal != nil {
+		frontier := readmodel.BuildFrontierSnapshot(snap.Goal, concls, readmodel.GroupObservationsByExperiment(allObs), expClassByID)
+		snap.Frontier = frontier.Rows
+		snap.StalledFor = frontier.StalledFor
 	}
 
 	var lessonCount int
@@ -304,10 +301,8 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 		}
 	}
 
-	// Derive counts from already-loaded data instead of calling Counts()
-	// which re-scans every entity directory. Only observations need a
-	// targeted ReadDir because they're loaded inside computeFrontier, not
-	// directly available here.
+	// Derive counts from already-loaded scoped slices instead of calling
+	// Counts(), which would re-scan every entity directory.
 	snap.Counts = readmodel.BuildCountsWithLessons(len(hyps), len(exps), len(allObs), len(concls), lessonCount)
 
 	snap.RecentEvents, _ = readDashboardRecentEvents(allEvents, 0, dashboardRecentEventsSummaryLimit)

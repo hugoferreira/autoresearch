@@ -41,6 +41,32 @@ func TestClassifyHypothesisStatusForExperimentRead(t *testing.T) {
 	}
 }
 
+func TestClassifyExperimentsForReadFromHypotheses(t *testing.T) {
+	hyps := []*entity.Hypothesis{
+		{ID: "H-0001", Status: entity.StatusSupported},
+		{ID: "H-0002", Status: entity.StatusOpen},
+	}
+	exps := []*entity.Experiment{
+		{ID: "E-0001", Hypothesis: "H-0001"},
+		{ID: "E-0002", Hypothesis: "H-0002"},
+		{ID: "E-0003"},
+	}
+
+	got := ClassifyExperimentsForReadFromHypotheses(exps, hyps)
+	if got["E-0001"].Classification != ExperimentClassificationDead {
+		t.Fatalf("E-0001 classification = %q, want %q", got["E-0001"].Classification, ExperimentClassificationDead)
+	}
+	if got["E-0001"].HypothesisStatus != entity.StatusSupported {
+		t.Fatalf("E-0001 hypothesis_status = %q, want %q", got["E-0001"].HypothesisStatus, entity.StatusSupported)
+	}
+	if got["E-0002"].Classification != ExperimentClassificationLive {
+		t.Fatalf("E-0002 classification = %q, want %q", got["E-0002"].Classification, ExperimentClassificationLive)
+	}
+	if got["E-0003"].Classification != ExperimentClassificationLive {
+		t.Fatalf("baseline-like experiment classification = %q, want %q", got["E-0003"].Classification, ExperimentClassificationLive)
+	}
+}
+
 func TestFindStaleExperimentsForRead_ExcludesNonActionableWork(t *testing.T) {
 	now := time.Date(2026, 4, 18, 20, 0, 0, 0, time.UTC)
 	exps := []*entity.Experiment{
