@@ -91,8 +91,8 @@ func conclusionListCmd() *cobra.Command {
 				} else if c.Strict.Directional && c.Verdict == entity.VerdictSupported {
 					dg = "  [directional]"
 				}
-				w.Textf("  %-8s  %-12s  hyp=%-8s  delta_frac=%+.4f  p=%.4g%s\n",
-					c.ID, c.Verdict, c.Hypothesis, c.Effect.DeltaFrac, c.Effect.PValue, dg)
+				w.Textf("  %-8s  %-12s  hyp=%-8s  delta_frac=%s  p=%.4g%s\n",
+					c.ID, c.Verdict, c.Hypothesis, fmtSignedNumber(c.Effect.DeltaFrac), c.Effect.PValue, dg)
 			}
 			return nil
 		},
@@ -149,8 +149,8 @@ func conclusionShowCmd() *cobra.Command {
 						status = "pass"
 					}
 					if cc.Effect != nil {
-						w.Textf("  - %s (%s) %s: delta_frac=%+.4f  CI [%+.4f, %+.4f]\n",
-							cc.Instrument, cc.Role, status, cc.Effect.DeltaFrac, cc.Effect.CILowFrac, cc.Effect.CIHighFrac)
+						w.Textf("  - %s (%s) %s: delta_frac=%s  CI %s\n",
+							cc.Instrument, cc.Role, status, fmtSignedNumber(cc.Effect.DeltaFrac), fmtSignedRange(cc.Effect.CILowFrac, cc.Effect.CIHighFrac))
 					} else {
 						w.Textf("  - %s (%s) %s\n", cc.Instrument, cc.Role, status)
 					}
@@ -164,14 +164,14 @@ func conclusionShowCmd() *cobra.Command {
 				w.Textf("baseline:     %s  (n=%d)\n", c.BaselineExp, c.Effect.NBaseline)
 			}
 			w.Textf("effect on %s:\n", c.Effect.Instrument)
-			w.Textf("  delta_frac: %+.4f  95%% CI [%+.4f, %+.4f]\n", c.Effect.DeltaFrac, c.Effect.CILowFrac, c.Effect.CIHighFrac)
-			w.Textf("  delta_abs:  %+.6g  95%% CI [%+.6g, %+.6g]\n", c.Effect.DeltaAbs, c.Effect.CILowAbs, c.Effect.CIHighAbs)
+			w.Textf("  delta_frac: %s  95%% CI %s\n", fmtSignedNumber(c.Effect.DeltaFrac), fmtSignedRange(c.Effect.CILowFrac, c.Effect.CIHighFrac))
+			w.Textf("  delta_abs:  %s  95%% CI %s\n", fmtSignedNumber(c.Effect.DeltaAbs), fmtSignedRange(c.Effect.CILowAbs, c.Effect.CIHighAbs))
 			w.Textf("  p-value:    %.4g  (%s)\n", c.Effect.PValue, c.StatTest)
 			if c.IncrementalExp != "" && c.IncrementalEffect != nil {
 				ie := c.IncrementalEffect
 				w.Textf("incremental:  %s  (vs frontier best)\n", c.IncrementalExp)
-				w.Textf("  delta_frac: %+.4f  95%% CI [%+.4f, %+.4f]\n", ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac)
-				w.Textf("  delta_abs:  %+.6g  95%% CI [%+.6g, %+.6g]\n", ie.DeltaAbs, ie.CILowAbs, ie.CIHighAbs)
+				w.Textf("  delta_frac: %s  95%% CI %s\n", fmtSignedNumber(ie.DeltaFrac), fmtSignedRange(ie.CILowFrac, ie.CIHighFrac))
+				w.Textf("  delta_abs:  %s  95%% CI %s\n", fmtSignedNumber(ie.DeltaAbs), fmtSignedRange(ie.CILowAbs, ie.CIHighAbs))
 				w.Textf("  p-value:    %.4g\n", ie.PValue)
 			}
 			w.Textf("author:       %s\n", c.Author)

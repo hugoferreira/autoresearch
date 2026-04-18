@@ -66,7 +66,7 @@ func (v *observationDetailView) view(width, height int) string {
 	}
 	o := v.o
 	lines := []string{}
-	lines = append(lines, tuiBold.Render(o.ID)+"  "+tuiCyan.Render(o.Instrument)+"="+fmt.Sprintf("%.6g %s", o.Value, o.Unit))
+	lines = append(lines, tuiBold.Render(o.ID)+"  "+tuiCyan.Render(o.Instrument)+"="+fmtValue(o.Value, o.Unit))
 	lines = append(lines, tuiDim.Render("experiment=")+o.Experiment+"  "+tuiDim.Render("author=")+o.Author)
 	lines = append(lines, tuiDim.Render("measured_at=")+o.MeasuredAt.UTC().Format(time.RFC3339))
 	lines = append(lines, "")
@@ -76,7 +76,7 @@ func (v *observationDetailView) view(width, height int) string {
 		{"exit", fmt.Sprintf("%d", o.ExitCode)},
 	}
 	if o.CILow != nil && o.CIHigh != nil {
-		kv = append(kv, [2]string{"ci", fmt.Sprintf("[%.6g, %.6g] (%s)", *o.CILow, *o.CIHigh, emptyDash(o.CIMethod))})
+		kv = append(kv, [2]string{"ci", fmt.Sprintf("%s (%s)", fmtValueRange(*o.CILow, *o.CIHigh, o.Unit), emptyDash(o.CIMethod))})
 	}
 	if o.Pass != nil {
 		pass := tuiRed.Render("fail")

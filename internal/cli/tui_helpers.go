@@ -49,53 +49,6 @@ func truncLines(lines []string, width int) []string {
 	return out
 }
 
-// fmtValue formats a numeric value with a compact unit suffix.
-// Seconds are scaled to ns/us/ms/s; bytes shortened to B; everything
-// else gets 2 decimal places + the raw unit.
-func fmtValue(v float64, unit string) string {
-	switch unit {
-	case "seconds", "s":
-		switch {
-		case v == 0:
-			return "0s"
-		case v < 1e-6:
-			return fmt.Sprintf("%.2fns", v*1e9)
-		case v < 1e-3:
-			return fmt.Sprintf("%.2fus", v*1e6)
-		case v < 1:
-			return fmt.Sprintf("%.2fms", v*1e3)
-		default:
-			return fmt.Sprintf("%.2fs", v)
-		}
-	case "bytes":
-		if v >= 1024*1024 {
-			return fmt.Sprintf("%.1fMB", v/(1024*1024))
-		}
-		if v >= 1024 {
-			return fmt.Sprintf("%.1fKB", v/1024)
-		}
-		return fmt.Sprintf("%.0fB", v)
-	default:
-		if v == float64(int64(v)) {
-			return fmt.Sprintf("%d%s", int64(v), shortUnit(unit))
-		}
-		return fmt.Sprintf("%.2f%s", v, shortUnit(unit))
-	}
-}
-
-func shortUnit(u string) string {
-	switch u {
-	case "cycles":
-		return "cyc"
-	case "instructions":
-		return "ins"
-	case "pass":
-		return ""
-	default:
-		return u
-	}
-}
-
 // padRight right-pads s with spaces to the given *visible* width. Shorter
 // strings are extended; longer ones are returned unchanged (truncate first
 // if you need a hard cap).
@@ -407,11 +360,11 @@ func tuiMeterColor(used, limit float64, s string) string {
 // ---- shared formatting ----
 
 // formatPredictedEffect renders a PredictedEffect as a human-readable string
-// like "decrease host_timing by ≥0.0500 (up to 0.1000)".
+// like "decrease host_timing by ≥0.05 (up to 0.1)".
 func formatPredictedEffect(pe *entity.PredictedEffect) string {
-	s := fmt.Sprintf("%s %s by ≥%.4f", pe.Direction, pe.Instrument, pe.MinEffect)
+	s := fmt.Sprintf("%s %s by ≥%s", pe.Direction, pe.Instrument, fmtNumber(pe.MinEffect))
 	if pe.MaxEffect > 0 {
-		s += fmt.Sprintf(" (up to %.4f)", pe.MaxEffect)
+		s += fmt.Sprintf(" (up to %s)", fmtNumber(pe.MaxEffect))
 	}
 	return s
 }

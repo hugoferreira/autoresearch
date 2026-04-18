@@ -468,8 +468,8 @@ may be exhausted.`,
 					if r.Linked {
 						link = " (linked via inspired_by)"
 					}
-					w.Textf("    %s (%s): actual delta_frac=%+.4f  %s%s\n",
-						r.ConclusionID, r.HypothesisID, r.ActualDelta, r.Classification, link)
+					w.Textf("    %s (%s): actual delta_frac=%s  %s%s\n",
+						r.ConclusionID, r.HypothesisID, fmtSignedNumber(r.ActualDelta), r.Classification, link)
 				}
 				w.Textln("")
 			}

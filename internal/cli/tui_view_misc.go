@@ -286,7 +286,7 @@ func (v *frontierView) view(width, height int) string {
 	assessment := ""
 	switch v.assessment.Mode {
 	case "threshold":
-		assessment = fmt.Sprintf("threshold=%g -> %s", v.assessment.Threshold, v.assessment.OnThreshold)
+		assessment = fmt.Sprintf("threshold=%s -> %s", fmtNumber(v.assessment.Threshold), v.assessment.OnThreshold)
 		if v.assessment.Met {
 			assessment += " (met)"
 		}
@@ -303,13 +303,13 @@ func (v *frontierView) view(width, height int) string {
 		if i == 0 {
 			marker = tuiBoldYellow.Render("* ")
 		}
-		rows[i] = fmt.Sprintf("%s%s  %s  %s=%.6g  Δfrac=%+.4f",
+		rows[i] = fmt.Sprintf("%s%s  %s  %s=%s  Δfrac=%s",
 			marker,
 			tuiCyan.Render(r.Conclusion),
 			tuiCyan.Render(r.Hypothesis),
 			v.goal.Objective.Instrument,
-			r.Value,
-			r.DeltaFrac)
+			fmtNumber(r.Value),
+			fmtSignedNumber(r.DeltaFrac))
 		if r.Classification == experimentClassificationDead {
 			rows[i] += "  " + tuiDim.Render(experimentClassificationMarker(r.Classification))
 		}

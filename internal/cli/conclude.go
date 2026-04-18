@@ -360,13 +360,14 @@ downgraded since there is no comparator).`,
 				w.Textf("  baseline:    %s  (n=%d)\n", baselineExp, effect.NBaseline)
 			}
 			if cmp != nil {
-				w.Textf("  delta_frac:  %+.4f  95%% CI [%+.4f, %+.4f]  (vs absolute baseline)\n", effect.DeltaFrac, effect.CILowFrac, effect.CIHighFrac)
+				w.Textf("  delta_frac:  %s  95%% CI %s  (vs absolute baseline)\n",
+					fmtSignedNumber(effect.DeltaFrac), fmtSignedRange(effect.CILowFrac, effect.CIHighFrac))
 				w.Textf("  p-value:     %.4g  (%s)\n", effect.PValue, concl.StatTest)
 			}
 			if concl.IncrementalEffect != nil {
 				ie := concl.IncrementalEffect
-				w.Textf("  incremental: %s  delta_frac=%+.4f  CI [%+.4f, %+.4f]  (vs frontier best)\n",
-					incrementalExp, ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac)
+				w.Textf("  incremental: %s  delta_frac=%s  CI %s  (vs frontier best)\n",
+					incrementalExp, fmtSignedNumber(ie.DeltaFrac), fmtSignedRange(ie.CILowFrac, ie.CIHighFrac))
 			}
 			if len(decision.Reasons) > 0 && !decision.Downgraded {
 				w.Textln("  notes:")

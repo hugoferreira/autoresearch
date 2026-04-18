@@ -109,7 +109,7 @@ observation firewall, made physical.`,
 				}
 				w.Textf("observed %d instruments on %s\n", len(results), expID)
 				for _, r := range results {
-					w.Textf("  %-16s %s = %g %s\n", r.ID, r.Inst, r.Value, r.Unit)
+					w.Textf("  %-16s %s = %s\n", r.ID, r.Inst, fmtValue(r.Value, r.Unit))
 				}
 				return nil
 			}
@@ -155,9 +155,9 @@ observation firewall, made physical.`,
 			}
 			w.Textf("recorded %s\n", obs.ID)
 			w.Textf("  instrument:  %s\n", instName)
-			w.Textf("  value:       %g %s\n", obs.Value, obs.Unit)
+			w.Textf("  value:       %s\n", fmtValue(obs.Value, obs.Unit))
 			if obs.Samples > 1 && obs.CILow != nil && obs.CIHigh != nil {
-				w.Textf("  samples:     %d (95%% CI [%g, %g], %s)\n", obs.Samples, *obs.CILow, *obs.CIHigh, obs.CIMethod)
+				w.Textf("  samples:     %d (95%% CI %s, %s)\n", obs.Samples, fmtValueRange(*obs.CILow, *obs.CIHigh, obs.Unit), obs.CIMethod)
 			}
 			if obs.Pass != nil {
 				w.Textf("  pass:        %v (exit=%d)\n", *obs.Pass, obs.ExitCode)

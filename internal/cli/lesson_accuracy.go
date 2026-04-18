@@ -175,7 +175,7 @@ func classifyLessonAccuracy(pe *entity.PredictedEffect, c *entity.Conclusion) st
 
 func formatPredictedEffectRange(pe *entity.PredictedEffect) string {
 	if pe.MaxEffect > 0 {
-		return fmt.Sprintf("%.4f–%.4f", pe.MinEffect, pe.MaxEffect)
+		return fmt.Sprintf("%s–%s", fmtNumber(pe.MinEffect), fmtNumber(pe.MaxEffect))
 	}
-	return fmt.Sprintf("%.4f", pe.MinEffect)
+	return fmtNumber(pe.MinEffect)
 }

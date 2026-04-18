@@ -188,7 +188,7 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 			if i == 0 {
 				marker = "* "
 			}
-			w.Textf("%s%s  %s  %s=%.6g", marker, r.Conclusion, r.Hypothesis, f.Goal.Objective.Instrument, r.Value)
+			w.Textf("%s%s  %s  %s=%s", marker, r.Conclusion, r.Hypothesis, f.Goal.Objective.Instrument, fmtNumber(r.Value))
 			if r.RescuedBy != "" {
 				w.Textf("  [rescued by %s]", r.RescuedBy)
 			}
@@ -201,7 +201,7 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 	}
 	switch f.Assessment.Mode {
 	case "threshold":
-		w.Textf("goal_assessment: threshold=%g -> %s", f.Assessment.Threshold, f.Assessment.OnThreshold)
+		w.Textf("goal_assessment: threshold=%s -> %s", fmtNumber(f.Assessment.Threshold), f.Assessment.OnThreshold)
 		if f.Assessment.Met {
 			w.Textf(" (met by %s; recommended=%s)\n", f.Assessment.MetByConclusion, f.Assessment.RecommendedAction)
 		} else {

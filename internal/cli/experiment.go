@@ -436,7 +436,7 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			w.Textf("  worktree: %s\n", wtPath)
 			w.Textln("  observations:")
 			for _, r := range results {
-				w.Textf("    %-16s %s = %g %s\n", r.ID, r.Inst, r.Value, r.Unit)
+				w.Textf("    %-16s %s = %s\n", r.ID, r.Inst, fmtValue(r.Value, r.Unit))
 			}
 			return nil
 		},

@@ -187,7 +187,7 @@ func renderReportMarkdown(r *reportData) string {
 	fmt.Fprintf(&sb, "- **Instrument**: `%s`\n", h.Predicts.Instrument)
 	fmt.Fprintf(&sb, "- **Target**: `%s`\n", h.Predicts.Target)
 	fmt.Fprintf(&sb, "- **Direction**: %s\n", h.Predicts.Direction)
-	fmt.Fprintf(&sb, "- **Minimum effect**: %.4f (fractional)\n", h.Predicts.MinEffect)
+	fmt.Fprintf(&sb, "- **Minimum effect**: %s (fractional)\n", fmtNumber(h.Predicts.MinEffect))
 	sb.WriteString("- **Kill criteria**:\n")
 	for _, k := range h.KillIf {
 		fmt.Fprintf(&sb, "  - %s\n", k)
@@ -217,9 +217,9 @@ func renderReportMarkdown(r *reportData) string {
 			if len(blk.Observations) > 0 {
 				sb.WriteString("- **Observations**:\n")
 				for _, o := range blk.Observations {
-					fmt.Fprintf(&sb, "  - %s `%s` = %.6g %s", o.ID, o.Instrument, o.Value, o.Unit)
+					fmt.Fprintf(&sb, "  - %s `%s` = %s", o.ID, o.Instrument, fmtValue(o.Value, o.Unit))
 					if o.Samples > 1 && o.CILow != nil && o.CIHigh != nil {
-						fmt.Fprintf(&sb, "  [%.6g, %.6g]  n=%d", *o.CILow, *o.CIHigh, o.Samples)
+						fmt.Fprintf(&sb, "  %s  n=%d", fmtValueRange(*o.CILow, *o.CIHigh, o.Unit), o.Samples)
 					}
 					if o.Pass != nil {
 						fmt.Fprintf(&sb, "  pass=%v", *o.Pass)
@@ -277,9 +277,9 @@ func renderReportMarkdown(r *reportData) string {
 			if c.BaselineExp != "" {
 				fmt.Fprintf(&sb, "- **Baseline experiment**: %s\n", c.BaselineExp)
 			}
-			fmt.Fprintf(&sb, "- **Effect on `%s`**: %+.4f (fractional)", c.Effect.Instrument, c.Effect.DeltaFrac)
+			fmt.Fprintf(&sb, "- **Effect on `%s`**: %s (fractional)", c.Effect.Instrument, fmtSignedNumber(c.Effect.DeltaFrac))
 			if c.Effect.CILowFrac != 0 || c.Effect.CIHighFrac != 0 {
-				fmt.Fprintf(&sb, "  95%% CI [%+.4f, %+.4f]", c.Effect.CILowFrac, c.Effect.CIHighFrac)
+				fmt.Fprintf(&sb, "  95%% CI %s", fmtSignedRange(c.Effect.CILowFrac, c.Effect.CIHighFrac))
 			}
 			sb.WriteString("\n")
 			if c.Effect.PValue > 0 {

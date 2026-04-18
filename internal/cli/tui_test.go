@@ -350,7 +350,7 @@ func TestTUI_ObservationDetail(t *testing.T) {
 	}
 	nv, _ := v.update(obsDetailLoadedMsg{o: o}, nil)
 	out := stripANSI(nv.view(120, 25))
-	for _, want := range []string{"O-0003", "host_timing=1.2 s", "experiment=E-0007", "Artifacts (1):", "make test", "stdev", "warm"} {
+	for _, want := range []string{"O-0003", "host_timing=1.2s", "experiment=E-0007", "Artifacts (1):", "make test", "stdev", "warm"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("observation detail missing %q:\n%s", want, out)
 		}

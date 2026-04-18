@@ -439,12 +439,12 @@ func (v *dashboardView) renderFrontierPanel(width, height int) string {
 		if i == 0 {
 			marker = tuiBoldYellow.Render("* ")
 		}
-		line := fmt.Sprintf("%s%s  %s  %s=%.6g",
+		line := fmt.Sprintf("%s%s  %s  %s=%s",
 			marker,
 			tuiCyan.Render(r.Conclusion),
 			tuiCyan.Render(r.Hypothesis),
 			snap.Goal.Objective.Instrument,
-			r.Value)
+			fmtNumber(r.Value))
 		if r.Classification == experimentClassificationDead {
 			line += "  " + tuiDim.Render(experimentClassificationMarker(r.Classification))
 		}
