@@ -232,8 +232,10 @@ func (m *tuiModel) pop() {
 // If v's kind already exists anywhere in the stack, the stack is truncated
 // to that existing view (preserving its cursor/filter state). Otherwise the
 // stack is reset to [dashboard, v] so every top-level view sits at a stable
-// 2-deep breadcrumb. Returns the init command for the new view (or nil if
-// we jumped back to an existing one).
+// 2-deep breadcrumb. The existing dashboard instance is preserved so jumping
+// away and back doesn't drop its loaded snapshot/cursor state on the floor.
+// Returns the init command for the new view (or nil if we jumped back to an
+// existing one).
 func (m *tuiModel) jumpTo(v tuiView, s *store.Store) tea.Cmd {
 	k := v.kind()
 	for i, existing := range m.stack {
@@ -242,7 +244,14 @@ func (m *tuiModel) jumpTo(v tuiView, s *store.Store) tea.Cmd {
 			return nil
 		}
 	}
-	m.stack = []tuiView{newDashboardView(m.scope), v}
+	dashboard := tuiView(newDashboardView(m.scope))
+	for _, existing := range m.stack {
+		if existing.kind() == kindDashboard {
+			dashboard = existing
+			break
+		}
+	}
+	m.stack = []tuiView{dashboard, v}
 	return v.init(s)
 }
 
@@ -333,6 +342,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "backspace":
 			if len(m.stack) > 1 {
 				m.pop()
+				// The dashboard sits hidden under every top-level view and
+				// does not receive refresh messages while off-screen. When it
+				// becomes visible again, force a reload so it never stays on
+				// a stale or uninitialized snapshot.
+				if m.store != nil && m.top().kind() == kindDashboard {
+					return m, m.top().init(m.store)
+				}
 				return m, nil
 			}
 		case "H":

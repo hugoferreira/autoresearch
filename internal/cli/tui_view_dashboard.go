@@ -69,10 +69,17 @@ func (v *dashboardView) title() string { return "Dashboard" }
 
 func (v *dashboardView) init(s *store.Store) tea.Cmd {
 	v.eventsLoading = true
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		loadDashboardSnapshotCmd(s, v.scope),
 		loadDashboardEventsCmd(s, v.scope, 0, dashboardRecentEventsPageSize, true),
-	)
+	}
+	// If the user returns to the dashboard with a compact drill-down still
+	// open, refresh that detail too so the right column stays in sync with
+	// the freshly reloaded snapshot.
+	if s != nil && v.rightOverlay != nil {
+		cmds = append(cmds, v.rightOverlay.init(s))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {

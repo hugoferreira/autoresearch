@@ -72,6 +72,30 @@ func lineContaining(s, needle string) string {
 	return ""
 }
 
+func applyTUICommand(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case nil:
+		return m
+	case tea.BatchMsg:
+		for _, sub := range msg {
+			m = applyTUICommand(t, m, sub)
+		}
+		return m
+	default:
+		updated, next := m.Update(msg)
+		nm, ok := updated.(tuiModel)
+		if !ok {
+			t.Fatalf("expected tuiModel back, got %T", updated)
+		}
+		return applyTUICommand(t, nm, next)
+	}
+}
+
 func TestTUI_DashboardRenders(t *testing.T) {
 	v := newDashboardView(goalScope{All: true})
 	nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
@@ -726,6 +750,58 @@ func TestTUI_JumpToCanonicalizes(t *testing.T) {
 	m.jumpTo(newHypothesisListViewForReport(goalScope{All: true}), nil)
 	if got := len(m.stack); got != 2 || m.top().kind() != kindHypothesisReport {
 		t.Errorf("R after E: depth=%d top=%s", got, m.top().kind())
+	}
+}
+
+func TestTUI_JumpToPreservesDashboardState(t *testing.T) {
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
+	dash := newDashboardView(goalScope{All: true})
+	nv, _ := dash.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+	dash = nv.(*dashboardView)
+	dash.focus = dashFocusEvents
+	dash.cursors[dashFocusEvents] = 1
+	m.stack = []tuiView{dash}
+
+	m.jumpTo(newHypothesisListView(goalScope{All: true}), nil)
+	got, ok := m.stack[0].(*dashboardView)
+	if !ok {
+		t.Fatalf("stack[0] = %T, want *dashboardView", m.stack[0])
+	}
+	if got != dash {
+		t.Fatal("jumpTo replaced the dashboard instead of preserving the loaded instance")
+	}
+
+	m.pop()
+	out := stripANSI(m.top().view(140, 40))
+	if strings.Contains(out, "loading…") {
+		t.Fatalf("dashboard lost its loaded snapshot after jump/pop:\n%s", out)
+	}
+	if got.cursors[dashFocusEvents] != 1 {
+		t.Fatalf("dashboard cursor state was not preserved: got %d want 1", got.cursors[dashFocusEvents])
+	}
+}
+
+func TestTUI_PopBackToDashboardReloadsHiddenDashboard(t *testing.T) {
+	s := newStoreWithBuiltins(t)
+	m := newTuiModel(s, goalScope{All: true}, 2*time.Second)
+	m.stack = []tuiView{
+		newDashboardView(goalScope{All: true}),
+		newHypothesisListView(goalScope{All: true}),
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(tuiModel)
+	if got := m.top().kind(); got != kindDashboard {
+		t.Fatalf("top after Esc = %s, want dashboard", got)
+	}
+	if cmd == nil {
+		t.Fatal("returning to dashboard should trigger a reload command")
+	}
+
+	m = applyTUICommand(t, m, cmd)
+	out := stripANSI(m.top().view(140, 40))
+	if strings.Contains(out, "loading…") {
+		t.Fatalf("dashboard remained stuck loading after reload:\n%s", out)
 	}
 }
 
