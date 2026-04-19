@@ -44,8 +44,8 @@ type observeExecution struct {
 
 type observeScope struct {
 	Attempt      int
+	CandidateRef string
 	CandidateSHA string
-	DirtyPaths   []string
 }
 
 type observeAllExecution struct {
@@ -100,35 +100,69 @@ func buildObserveSampleCheck(cfg *store.Config, expID, instName string, requeste
 	return check, nil
 }
 
-func resolveObserveScope(exp *entity.Experiment) (observeScope, error) {
+func resolveObserveScope(exp *entity.Experiment, candidateRef string) (observeScope, error) {
 	if exp == nil {
 		return observeScope{}, fmt.Errorf("experiment is required")
 	}
 	if strings.TrimSpace(exp.Worktree) == "" {
 		return observeScope{}, fmt.Errorf("experiment %s has no worktree; run `autoresearch experiment implement %s` first", exp.ID, exp.ID)
 	}
-	sha, err := worktree.ResolveRef(exp.Worktree, "HEAD")
-	if err != nil {
-		return observeScope{}, fmt.Errorf("resolve candidate HEAD for %s: %w", exp.ID, err)
-	}
 	dirtyPaths, err := observeScopeDirtyPaths(exp.Worktree)
 	if err != nil {
 		return observeScope{}, fmt.Errorf("inspect candidate dirtiness for %s: %w", exp.ID, err)
 	}
+
+	headSHA, err := worktree.ResolveRef(exp.Worktree, "HEAD")
+	if err != nil {
+		return observeScope{}, fmt.Errorf("resolve candidate HEAD for %s: %w", exp.ID, err)
+	}
+	if exp.IsBaseline {
+		if strings.TrimSpace(candidateRef) != "" {
+			return observeScope{}, fmt.Errorf("--candidate-ref is only valid for non-baseline experiments")
+		}
+		if len(dirtyPaths) > 0 {
+			return observeScope{}, fmt.Errorf(
+				"baseline experiment %s worktree has uncommitted changes (%s); observe requires a clean checkout",
+				exp.ID, formatObserveDirtyPaths(dirtyPaths),
+			)
+		}
+		return observeScope{
+			Attempt:      exp.Attempt,
+			CandidateSHA: headSHA,
+		}, nil
+	}
+
+	normRef, err := normalizeObserveCandidateRef(exp, candidateRef)
+	if err != nil {
+		return observeScope{}, err
+	}
+	if len(dirtyPaths) > 0 {
+		return observeScope{}, fmt.Errorf(
+			"experiment %s worktree has uncommitted changes (%s); observe requires a clean checkout that matches --candidate-ref %s",
+			exp.ID, formatObserveDirtyPaths(dirtyPaths), normRef,
+		)
+	}
+	refSHA, err := worktree.ResolveRef(exp.Worktree, normRef)
+	if err != nil {
+		return observeScope{}, fmt.Errorf("resolve candidate ref %q for %s: %w", normRef, exp.ID, err)
+	}
+	if headSHA != refSHA {
+		return observeScope{}, fmt.Errorf(
+			"experiment %s worktree HEAD %s does not match --candidate-ref %s (%s)",
+			exp.ID, shortSHA(headSHA), normRef, shortSHA(refSHA),
+		)
+	}
 	return observeScope{
 		Attempt:      exp.Attempt,
-		CandidateSHA: sha,
-		DirtyPaths:   dirtyPaths,
+		CandidateRef: normRef,
+		CandidateSHA: headSHA,
 	}, nil
 }
 
-func loadCurrentObservations(s *store.Store, exp *entity.Experiment) (observeScope, []*entity.Observation, error) {
-	scope, err := resolveObserveScope(exp)
+func loadCurrentObservations(s *store.Store, exp *entity.Experiment, candidateRef string) (observeScope, []*entity.Observation, error) {
+	scope, err := resolveObserveScope(exp, candidateRef)
 	if err != nil {
 		return observeScope{}, nil, err
-	}
-	if !scope.reuseEnabled() {
-		return scope, nil, nil
 	}
 	all, err := s.ListObservationsForExperiment(exp.ID)
 	if err != nil {
@@ -156,8 +190,35 @@ func observeScopeDirtyPaths(worktreeDir string) ([]string, error) {
 	return filtered, nil
 }
 
-func (s observeScope) reuseEnabled() bool {
-	return len(s.DirtyPaths) == 0
+func normalizeObserveCandidateRef(exp *entity.Experiment, candidateRef string) (string, error) {
+	ref := strings.TrimSpace(candidateRef)
+	if ref == "" {
+		return "", fmt.Errorf(
+			"experiment %s requires --candidate-ref <ref>; create a unique reviewable git ref for the measured candidate (for example `git -C %s branch <name> HEAD`) and rerun observe",
+			exp.ID, exp.Worktree,
+		)
+	}
+	sym, err := worktree.SymbolicFullName(exp.Worktree, ref)
+	if err != nil {
+		return "", fmt.Errorf("resolve candidate ref %q for %s: %w", ref, exp.ID, err)
+	}
+	if !strings.HasPrefix(sym, "refs/") {
+		return "", fmt.Errorf(
+			"candidate ref %q is not a named git ref; create a branch or tag for the measured candidate and rerun observe with --candidate-ref <ref>",
+			ref,
+		)
+	}
+	return sym, nil
+}
+
+func formatObserveDirtyPaths(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	if len(paths) <= 3 {
+		return strings.Join(paths, ", ")
+	}
+	return fmt.Sprintf("%s (+%d more)", strings.Join(paths[:3], ", "), len(paths)-3)
 }
 
 func filterObservationsByScope(observations []*entity.Observation, scope observeScope) []*entity.Observation {
@@ -174,10 +235,19 @@ func observationInScope(o *entity.Observation, scope observeScope) bool {
 	if o == nil {
 		return false
 	}
-	if !scope.reuseEnabled() {
+	if o.Attempt != scope.Attempt {
 		return false
 	}
-	if o.Attempt != scope.Attempt {
+	if scope.CandidateRef != "" {
+		if strings.TrimSpace(o.CandidateRef) != scope.CandidateRef {
+			return false
+		}
+		if scope.CandidateSHA == "" || o.CandidateSHA == "" {
+			return false
+		}
+		return o.CandidateSHA == scope.CandidateSHA
+	}
+	if strings.TrimSpace(o.CandidateRef) != "" {
 		return false
 	}
 	if scope.CandidateSHA == "" || o.CandidateSHA == "" {
@@ -512,6 +582,7 @@ func runAndRecordObservation(
 		ExitCode:         result.ExitCode,
 		Worktree:         exp.Worktree,
 		Attempt:          scope.Attempt,
+		CandidateRef:     scope.CandidateRef,
 		CandidateSHA:     scope.CandidateSHA,
 		BaselineSHA:      exp.Baseline.SHA,
 		Author:           or(author, "agent:observer"),
@@ -534,6 +605,7 @@ func runAndRecordObservation(
 		"samples":       result.SamplesN,
 		"artifact_shas": artShas,
 		"attempt":       scope.Attempt,
+		"candidate_ref": scope.CandidateRef,
 		"candidate_sha": scope.CandidateSHA,
 	}
 	if result.Pass != nil {
@@ -581,15 +653,13 @@ func observeAll(
 	s *store.Store,
 	cfg *store.Config,
 	exp *entity.Experiment,
+	scope observeScope,
+	priorObs []*entity.Observation,
 	instruments []string,
 	samples int,
 	appendMode bool,
 	author string,
 ) (observeAllExecution, error) {
-	scope, priorObs, err := loadCurrentObservations(s, exp)
-	if err != nil {
-		return observeAllExecution{}, err
-	}
 	var results []observationResult
 	var newObs []*entity.Observation
 	recordedAny := false

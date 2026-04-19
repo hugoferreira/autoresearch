@@ -30,6 +30,7 @@ func TestObservationRoundTrip(t *testing.T) {
 		Command:      "./a.out",
 		ExitCode:     0,
 		Attempt:      2,
+		CandidateRef: "refs/heads/candidate/E-0001-a2",
 		CandidateSHA: "0123456789abcdef0123456789abcdef01234567",
 		Author:       "agent:observer",
 	}
@@ -49,6 +50,9 @@ func TestObservationRoundTrip(t *testing.T) {
 	}
 	if back.Attempt != 2 {
 		t.Errorf("attempt round trip: got %d, want 2", back.Attempt)
+	}
+	if back.CandidateRef != "refs/heads/candidate/E-0001-a2" {
+		t.Errorf("candidate_ref round trip: %q", back.CandidateRef)
 	}
 	if back.CandidateSHA != "0123456789abcdef0123456789abcdef01234567" {
 		t.Errorf("candidate_sha round trip: %q", back.CandidateSHA)

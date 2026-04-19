@@ -31,6 +31,8 @@ type concludeResolution struct {
 	UsedObservations      []string                     `json:"used_observations"`
 	IgnoredObservations   []concludeIgnoredObservation `json:"ignored_observations,omitempty"`
 	CandidateExperiment   string                       `json:"candidate_experiment"`
+	CandidateRef          string                       `json:"candidate_ref,omitempty"`
+	CandidateSHA          string                       `json:"candidate_sha,omitempty"`
 	CandidateSource       string                       `json:"candidate_source"`
 	BaselineExperiment    string                       `json:"baseline_experiment,omitempty"`
 	BaselineSource        string                       `json:"baseline_source"`
@@ -105,7 +107,7 @@ output report which baseline source was used and any fallback note.`,
 				return err
 			}
 
-			requestedObsIDs, candObs, ignoredObs, candExp, err := resolveConcludeObservations(s, hyp, obsList)
+			requestedObsIDs, candObs, ignoredObs, candExp, candProv, err := resolveConcludeObservations(s, hyp, obsList)
 			if err != nil {
 				return err
 			}
@@ -119,6 +121,8 @@ output report which baseline source was used and any fallback note.`,
 				UsedObservations:      observationIDs(candObs),
 				IgnoredObservations:   ignoredObs,
 				CandidateExperiment:   candExp,
+				CandidateRef:          candProv.Ref,
+				CandidateSHA:          candProv.SHA,
 				CandidateSource:       concludeCandidateSourceObservations,
 				BaselineSource:        concludeBaselineSourceNone,
 			}
@@ -253,6 +257,8 @@ output report which baseline source was used and any fallback note.`,
 				Verdict:         decision.FinalVerdict,
 				Observations:    resolution.UsedObservations,
 				CandidateExp:    candExp,
+				CandidateRef:    candProv.Ref,
+				CandidateSHA:    candProv.SHA,
 				BaselineExp:     baselineExp,
 				Effect:          effect,
 				IncrementalExp:  incrementalExp,
@@ -327,6 +333,8 @@ output report which baseline source was used and any fallback note.`,
 				"downgraded":       decision.Downgraded,
 				"reasons":          decision.Reasons,
 				"candidate":        candExp,
+				"candidate_ref":    candProv.Ref,
+				"candidate_sha":    candProv.SHA,
 				"candidate_source": resolution.CandidateSource,
 				"baseline":         baselineExp,
 				"baseline_source":  resolution.BaselineSource,
@@ -396,6 +404,12 @@ output report which baseline source was used and any fallback note.`,
 			w.Textf("wrote %s\n", id)
 			w.Textf("  hypothesis:  %s (now %s)\n", hypID, hyp.Status)
 			w.Textf("  candidate:   %s  (source=%s, n=%d)\n", candExp, resolution.CandidateSource, effect.NCandidate)
+			if resolution.CandidateRef != "" {
+				w.Textf("  candidate ref: %s\n", resolution.CandidateRef)
+			}
+			if resolution.CandidateSHA != "" {
+				w.Textf("  candidate sha: %s\n", resolution.CandidateSHA)
+			}
 			w.Textf("  observations: %s\n", strings.Join(resolution.UsedObservations, ", "))
 			if !slices.Equal(resolution.RequestedObservations, resolution.UsedObservations) {
 				w.Textf("  requested:   %s\n", strings.Join(resolution.RequestedObservations, ", "))
@@ -485,21 +499,22 @@ func goalForHypothesis(s *store.Store, hyp *entity.Hypothesis) (*entity.Goal, er
 	return goal, err
 }
 
-func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs []string) ([]string, []*entity.Observation, []concludeIgnoredObservation, string, error) {
+func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs []string) ([]string, []*entity.Observation, []concludeIgnoredObservation, string, observationProvenance, error) {
 	requested := normalizeObservationIDs(rawIDs)
 	if len(requested) == 0 {
-		return nil, nil, nil, "", errors.New("--observations is required (at least one observation id)")
+		return nil, nil, nil, "", observationProvenance{}, errors.New("--observations is required (at least one observation id)")
 	}
 
 	var (
-		used    []*entity.Observation
-		ignored []concludeIgnoredObservation
-		candExp string
+		used     []*entity.Observation
+		ignored  []concludeIgnoredObservation
+		candExp  string
+		candProv observationProvenance
 	)
 	for _, oid := range requested {
 		o, err := s.ReadObservation(oid)
 		if err != nil {
-			return nil, nil, nil, "", err
+			return nil, nil, nil, "", observationProvenance{}, err
 		}
 		if o.Instrument != hyp.Predicts.Instrument {
 			ignored = append(ignored, concludeIgnoredObservation{
@@ -511,8 +526,12 @@ func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs 
 		}
 		if candExp == "" {
 			candExp = o.Experiment
+			candProv = observationProvenanceFromObservation(o)
 		} else if candExp != o.Experiment {
-			return nil, nil, nil, "", fmt.Errorf("observations belong to different experiments (%s and %s); pass only observations from a single candidate", candExp, o.Experiment)
+			return nil, nil, nil, "", observationProvenance{}, fmt.Errorf("observations belong to different experiments (%s and %s); pass only observations from a single candidate", candExp, o.Experiment)
+		}
+		if err := validateObservationProvenance(candProv, o); err != nil {
+			return nil, nil, nil, "", observationProvenance{}, err
 		}
 		used = append(used, o)
 	}
@@ -522,11 +541,47 @@ func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs 
 			ignoredIDs = append(ignoredIDs, ignoredObs.ID)
 		}
 		if len(ignoredIDs) > 0 {
-			return nil, nil, nil, "", fmt.Errorf("none of the requested observations use predicted instrument %q; ignored: %s", hyp.Predicts.Instrument, strings.Join(ignoredIDs, ", "))
+			return nil, nil, nil, "", observationProvenance{}, fmt.Errorf("none of the requested observations use predicted instrument %q; ignored: %s", hyp.Predicts.Instrument, strings.Join(ignoredIDs, ", "))
 		}
-		return nil, nil, nil, "", fmt.Errorf("none of the requested observations use predicted instrument %q", hyp.Predicts.Instrument)
+		return nil, nil, nil, "", observationProvenance{}, fmt.Errorf("none of the requested observations use predicted instrument %q", hyp.Predicts.Instrument)
 	}
-	return requested, used, ignored, candExp, nil
+	return requested, used, ignored, candExp, candProv, nil
+}
+
+func observationProvenanceFromObservation(o *entity.Observation) observationProvenance {
+	if o == nil {
+		return observationProvenance{}
+	}
+	return observationProvenance{
+		Ref: strings.TrimSpace(o.CandidateRef),
+		SHA: strings.TrimSpace(o.CandidateSHA),
+	}
+}
+
+func validateObservationProvenance(expected observationProvenance, o *entity.Observation) error {
+	actual := observationProvenanceFromObservation(o)
+	if actual == expected {
+		return nil
+	}
+	return fmt.Errorf(
+		"observations mix candidate provenance: expected %s, got %s on %s",
+		formatSingleObservationProvenance(expected),
+		formatSingleObservationProvenance(actual),
+		o.ID,
+	)
+}
+
+func formatSingleObservationProvenance(p observationProvenance) string {
+	switch {
+	case p.Ref != "" && p.SHA != "":
+		return fmt.Sprintf("%s@%s", p.Ref, shortSHA(p.SHA))
+	case p.Ref != "":
+		return p.Ref
+	case p.SHA != "":
+		return shortSHA(p.SHA)
+	default:
+		return "(legacy)"
+	}
 }
 
 func normalizeObservationIDs(rawIDs []string) []string {

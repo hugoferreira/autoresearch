@@ -20,6 +20,8 @@ type concludeResolutionJSON struct {
 		Reason string `json:"reason"`
 	} `json:"ignored_observations"`
 	CandidateExperiment string `json:"candidate_experiment"`
+	CandidateRef        string `json:"candidate_ref,omitempty"`
+	CandidateSHA        string `json:"candidate_sha,omitempty"`
 	CandidateSource     string `json:"candidate_source"`
 	BaselineExperiment  string `json:"baseline_experiment,omitempty"`
 	BaselineSource      string `json:"baseline_source"`
@@ -43,6 +45,8 @@ type concludeFixture struct {
 	ancestorConclusion  string
 	currentHypothesis   string
 	candidateExperiment string
+	candidateRef        string
+	candidateSHA        string
 	timingObservation   string
 	sizeObservation     string
 }
@@ -156,18 +160,20 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 		}
 	}
 
-	writeObservation := func(id, expID, instrument string, value float64, perSample []float64) {
+	writeObservation := func(id, expID, instrument string, value float64, perSample []float64, candidateRef, candidateSHA string) {
 		t.Helper()
 		o := &entity.Observation{
-			ID:         id,
-			Experiment: expID,
-			Instrument: instrument,
-			MeasuredAt: now,
-			Value:      value,
-			Samples:    len(perSample),
-			PerSample:  perSample,
-			Unit:       "ns",
-			Author:     "agent:observer",
+			ID:           id,
+			Experiment:   expID,
+			Instrument:   instrument,
+			MeasuredAt:   now,
+			Value:        value,
+			Samples:      len(perSample),
+			PerSample:    perSample,
+			Unit:         "ns",
+			CandidateRef: candidateRef,
+			CandidateSHA: candidateSHA,
+			Author:       "agent:observer",
 		}
 		if instrument == "binary_size" {
 			o.Unit = "bytes"
@@ -176,10 +182,14 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 			t.Fatal(err)
 		}
 	}
-	writeObservation("O-0001", goalBaseline.ID, "binary_size", 900, []float64{900, 900, 900, 900, 900})
-	writeObservation("O-0002", ancestorExp.ID, "timing", 100.4, []float64{100, 101, 99, 100, 102})
-	writeObservation("O-0003", candidateExp.ID, "timing", 70.4, []float64{70, 71, 69, 72, 70})
-	writeObservation("O-0004", candidateExp.ID, "binary_size", 860, []float64{860, 860, 860, 860, 860})
+	ancestorRef := "refs/heads/candidate/E-0002-a1"
+	ancestorSHA := "1111111111111111111111111111111111111111"
+	candidateRef := "refs/heads/candidate/E-0003-a1"
+	candidateSHA := "2222222222222222222222222222222222222222"
+	writeObservation("O-0001", goalBaseline.ID, "binary_size", 900, []float64{900, 900, 900, 900, 900}, "", "")
+	writeObservation("O-0002", ancestorExp.ID, "timing", 100.4, []float64{100, 101, 99, 100, 102}, ancestorRef, ancestorSHA)
+	writeObservation("O-0003", candidateExp.ID, "timing", 70.4, []float64{70, 71, 69, 72, 70}, candidateRef, candidateSHA)
+	writeObservation("O-0004", candidateExp.ID, "binary_size", 860, []float64{860, 860, 860, 860, 860}, candidateRef, candidateSHA)
 
 	ancestorConcl := &entity.Conclusion{
 		ID:           "C-0001",
@@ -187,6 +197,8 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 		Verdict:      entity.VerdictSupported,
 		Observations: []string{"O-0002"},
 		CandidateExp: ancestorExp.ID,
+		CandidateRef: ancestorRef,
+		CandidateSHA: ancestorSHA,
 		BaselineExp:  goalBaseline.ID,
 		Effect: entity.Effect{
 			Instrument: "timing",
@@ -235,6 +247,8 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 		ancestorConclusion:  ancestorConcl.ID,
 		currentHypothesis:   currentHyp.ID,
 		candidateExperiment: candidateExp.ID,
+		candidateRef:        candidateRef,
+		candidateSHA:        candidateSHA,
 		timingObservation:   "O-0003",
 		sizeObservation:     "O-0004",
 	}
@@ -253,8 +267,20 @@ func TestConclude_JSONSurfacesResolutionAndEventAudit(t *testing.T) {
 	if resp.Conclusion.CandidateExp != fx.candidateExperiment {
 		t.Fatalf("candidate_experiment = %q, want %q", resp.Conclusion.CandidateExp, fx.candidateExperiment)
 	}
+	if resp.Conclusion.CandidateRef != fx.candidateRef {
+		t.Fatalf("candidate_ref = %q, want %q", resp.Conclusion.CandidateRef, fx.candidateRef)
+	}
+	if resp.Conclusion.CandidateSHA != fx.candidateSHA {
+		t.Fatalf("candidate_sha = %q, want %q", resp.Conclusion.CandidateSHA, fx.candidateSHA)
+	}
 	if got, want := resp.Conclusion.Observations, []string{fx.timingObservation}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("stored observations = %v, want %v", got, want)
+	}
+	if resp.Resolution.CandidateRef != fx.candidateRef {
+		t.Fatalf("resolution candidate_ref = %q, want %q", resp.Resolution.CandidateRef, fx.candidateRef)
+	}
+	if resp.Resolution.CandidateSHA != fx.candidateSHA {
+		t.Fatalf("resolution candidate_sha = %q, want %q", resp.Resolution.CandidateSHA, fx.candidateSHA)
 	}
 	if resp.Resolution.CandidateSource != concludeCandidateSourceObservations {
 		t.Fatalf("candidate_source = %q, want %q", resp.Resolution.CandidateSource, concludeCandidateSourceObservations)
@@ -307,6 +333,12 @@ func TestConclude_JSONSurfacesResolutionAndEventAudit(t *testing.T) {
 	if got := payload["candidate_source"]; got != concludeCandidateSourceObservations {
 		t.Fatalf("payload candidate_source = %v, want %q", got, concludeCandidateSourceObservations)
 	}
+	if got := payload["candidate_ref"]; got != fx.candidateRef {
+		t.Fatalf("payload candidate_ref = %v, want %q", got, fx.candidateRef)
+	}
+	if got := payload["candidate_sha"]; got != fx.candidateSHA {
+		t.Fatalf("payload candidate_sha = %v, want %q", got, fx.candidateSHA)
+	}
 	if got := payload["baseline_source"]; got != readmodel.BaselineSourceAncestorSupported {
 		t.Fatalf("payload baseline_source = %v, want %q", got, readmodel.BaselineSourceAncestorSupported)
 	}
@@ -348,6 +380,12 @@ func TestConclude_TextOutputSurfacesFallback(t *testing.T) {
 	if !strings.Contains(out, "candidate:   "+fx.candidateExperiment+"  (source=observations") {
 		t.Fatalf("output missing candidate source:\n%s", out)
 	}
+	if !strings.Contains(out, "candidate ref: "+fx.candidateRef) {
+		t.Fatalf("output missing candidate ref:\n%s", out)
+	}
+	if !strings.Contains(out, "candidate sha: "+fx.candidateSHA) {
+		t.Fatalf("output missing candidate sha:\n%s", out)
+	}
 	if !strings.Contains(out, "ignored:     "+fx.sizeObservation+" (instrument \"binary_size\" does not match predicted instrument \"timing\")") {
 		t.Fatalf("output missing ignored observation audit:\n%s", out)
 	}
@@ -374,6 +412,43 @@ func TestConclude_ExplicitBaselineRemainsStrict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "baseline experiment "+fx.goalBaseline+" has no observations on instrument \"timing\"") {
 		t.Fatalf("error = %q, want missing instrument failure", err)
+	}
+}
+
+func TestConclude_RefusesMixedCandidateProvenance(t *testing.T) {
+	saveGlobals(t)
+	fx := setupConcludeFallbackFixture(t)
+
+	s, err := store.Open(fx.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteObservation(&entity.Observation{
+		ID:           "O-0005",
+		Experiment:   fx.candidateExperiment,
+		Instrument:   "timing",
+		MeasuredAt:   time.Date(2026, 4, 19, 12, 1, 0, 0, time.UTC),
+		Value:        69.8,
+		Samples:      5,
+		PerSample:    []float64{70, 70, 69, 70, 70},
+		Unit:         "ns",
+		CandidateRef: "refs/heads/candidate/E-0003-a2",
+		CandidateSHA: "3333333333333333333333333333333333333333",
+		Author:       "agent:observer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = runCLIResult(t, fx.dir,
+		"conclude", fx.currentHypothesis,
+		"--verdict", "supported",
+		"--observations", strings.Join([]string{fx.timingObservation, "O-0005"}, ","),
+	)
+	if err == nil {
+		t.Fatal("conclude unexpectedly succeeded with mixed candidate provenance")
+	}
+	if !strings.Contains(err.Error(), "mix candidate provenance") {
+		t.Fatalf("unexpected mixed provenance error: %v", err)
 	}
 }
 

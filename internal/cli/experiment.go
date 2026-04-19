@@ -420,7 +420,11 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			}
 
 			// --- Phase 3: Observe all instruments ---
-			exec, err := observeAll(s, cfg, e, instruments, 0, false, or(author, "system"))
+			scope, priorObs, err := loadCurrentObservations(s, e, "")
+			if err != nil {
+				return err
+			}
+			exec, err := observeAll(s, cfg, e, scope, priorObs, instruments, 0, false, or(author, "system"))
 			if err != nil {
 				return err
 			}

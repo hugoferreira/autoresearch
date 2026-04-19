@@ -137,8 +137,9 @@ For the routine optimization loop, the canonical command spine is:
     autoresearch hypothesis add ... --author agent:orchestrator --json
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
     autoresearch experiment implement <E-id> --impl-notes "..." --json
-    autoresearch observe <E-id> --all --json
-    autoresearch analyze <E-id> [--baseline <baseline-exp-id>] --json
+    # create a unique reviewable git ref for the measured candidate, then:
+    autoresearch observe <E-id> --all --candidate-ref <ref> --json
+    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline <baseline-exp-id>] --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield with review pending so the parent/main session can dispatch research-gate-reviewer
@@ -258,18 +259,21 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 ` + "`observe --force`" + ` to bypass the dependency gate when you know what you're doing.
 
 ` + "`observe`" + ` is idempotent by default for the current implementation attempt
-and candidate snapshot: if enough samples already exist in that scope it
-no-ops, and if some exist but not enough it tops up to the requested total.
-Dirty worktrees disable reuse until the candidate is clean or committed again.
-Use ` + "`observe check`" + ` as the cheap probe before rerunning an expensive
-measurement. Use ` + "`observe --append`" + ` only when you intentionally want
-another fresh run even though the target is already met.
+and measured candidate provenance: if enough samples already exist for the same
+attempt + candidate ref + candidate SHA, it no-ops, and if some exist but not
+enough it tops up to the requested total. For non-baseline experiments you must
+pass ` + "`--candidate-ref`" + ` and the worktree must be clean with ` + "`HEAD`" + `
+matching that ref. The CLI records candidate provenance; it does not create git
+refs for you. Use normal git to create a unique reviewable candidate ref before
+measuring. Use ` + "`observe check`" + ` as the cheap probe before rerunning an
+expensive measurement. Use ` + "`observe --append`" + ` only when you
+intentionally want another fresh run even though the target is already met.
 
 ### Observations and analysis
-    autoresearch observe  check <exp-id> --instrument NAME [--samples N]  # read-only sample probe
-    autoresearch observe  <exp-id> --instrument NAME [--samples N] [--append]
-    autoresearch observe  <exp-id> --all [--samples N] [--append]         # all instruments in dependency order
-    autoresearch analyze  <exp-id> [--baseline <baseline-exp-id>] [--instrument NAME] [--iters N]
+    autoresearch observe  check <exp-id> --instrument NAME --candidate-ref REF [--samples N]  # required for non-baseline experiments
+    autoresearch observe  <exp-id> --instrument NAME --candidate-ref REF [--samples N] [--append]
+    autoresearch observe  <exp-id> --all --candidate-ref REF [--samples N] [--append]         # all instruments in dependency order
+    autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>] [--instrument NAME] [--iters N]
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
         --observations O-XXXX,O-YYYY \
@@ -299,6 +303,7 @@ Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provision
 In ` + "`--json`" + ` mode, ` + "`conclusion show`" + ` returns the conclusion plus three
 additive maps keyed by cited observation id:
 
+- ` + "`candidate_ref`" + ` / ` + "`candidate_sha`" + ` on the conclusion identify the measured candidate's named git ref and resolved commit at observe time
 - ` + "`observation_artifacts`" + ` — artifact metadata only (` + "`name`" + ` / ` + "`sha`" + ` / ` + "`path`" + ` / ` + "`bytes`" + ` / ` + "`mime`" + `), never artifact content
 - ` + "`observation_evidence_failures`" + ` — non-fatal evidence-capture failures persisted on readable observations
 - ` + "`observation_read_issues`" + ` — cited observations that could not be read (for example missing or corrupt persisted evidence)

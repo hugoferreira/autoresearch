@@ -19,6 +19,7 @@ func observeCommands() []*cobra.Command {
 		appendMode     bool
 		allowUnchanged bool
 		all            bool
+		candidateRef   string
 	)
 	c := &cobra.Command{
 		Use:   "observe <exp-id>",
@@ -36,11 +37,15 @@ the artifact is guaranteed to exist on disk. This is the speculation/
 observation firewall, made physical.
 
 By default, observe is idempotent for the current implementation attempt
-and candidate snapshot:
-if enough samples already exist for the current implementation attempt and
-candidate snapshot, it no-ops; if some exist but not enough, it tops up to
-the requested total. Dirty worktrees disable reuse until the candidate is
-clean or committed again. Pass --append to force another run.`,
+and measured candidate provenance: if enough samples already exist for the
+current implementation attempt and candidate ref/SHA, it no-ops; if some
+exist but not enough, it tops up to the requested total.
+
+For non-baseline experiments, observe requires --candidate-ref. The CLI
+does not create candidate commits or refs for you: use normal git to
+create a clean, reviewable ref for the commit you want to measure, then
+pass that ref to observe. The worktree must be clean and HEAD must match
+the candidate ref. Pass --append to force another run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
@@ -75,16 +80,18 @@ clean or committed again. Pass --append to force another run.`,
 			// commit any changes.
 			if !allowUnchanged && !exp.IsBaseline && exp.Branch != "" && exp.Baseline.SHA != "" {
 				if hasCommits, err := worktree.HasCommitsAbove(globalProjectDir, exp.Branch, exp.Baseline.SHA); err == nil && !hasCommits {
-					inst := instName
+					proceedArgs := "--all"
 					if all {
-						inst = "--all"
+						proceedArgs = "--all"
+					} else {
+						proceedArgs = fmt.Sprintf("--instrument %s", instName)
 					}
 					return fmt.Errorf(
 						"experiment %s branch %s has no commits above baseline %s — "+
 							"the implementation may not have succeeded\n"+
 							"  reset:   autoresearch experiment reset %s --reason \"...\"\n"+
-							"  proceed: autoresearch observe %s --instrument %s --allow-unchanged",
-						expID, exp.Branch, exp.Baseline.SHA[:12], expID, expID, inst)
+							"  proceed: autoresearch observe %s %s --candidate-ref <ref> --allow-unchanged",
+						expID, exp.Branch, exp.Baseline.SHA[:12], expID, expID, proceedArgs)
 				}
 			}
 
@@ -93,11 +100,20 @@ clean or committed again. Pass --append to force another run.`,
 				if len(exp.Instruments) == 0 {
 					return fmt.Errorf("experiment %s declares no instruments", expID)
 				}
-				if err := dryRun(w, fmt.Sprintf("observe all %d instruments on %s", len(exp.Instruments), expID), map[string]any{"instruments": exp.Instruments, "worktree": exp.Worktree}); err != nil {
+				scope, priorObs, err := loadCurrentObservations(s, exp, candidateRef)
+				if err != nil {
+					return err
+				}
+				payload := map[string]any{"instruments": exp.Instruments, "worktree": exp.Worktree}
+				if scope.CandidateRef != "" {
+					payload["candidate_ref"] = scope.CandidateRef
+					payload["candidate_sha"] = scope.CandidateSHA
+				}
+				if err := dryRun(w, fmt.Sprintf("observe all %d instruments on %s", len(exp.Instruments), expID), payload); err != nil {
 					return err
 				}
 
-				exec, err := observeAll(s, cfg, exp, exp.Instruments, samples, appendMode, or(author, "agent:observer"))
+				exec, err := observeAll(s, cfg, exp, scope, priorObs, exp.Instruments, samples, appendMode, or(author, "agent:observer"))
 				if err != nil {
 					return err
 				}
@@ -137,7 +153,7 @@ clean or committed again. Pass --append to force another run.`,
 			if err := firewall.CheckObservationRequest(instName, samples, exp, cfg, strict); err != nil {
 				return err
 			}
-			scope, priorObs, err := loadCurrentObservations(s, exp)
+			scope, priorObs, err := loadCurrentObservations(s, exp, candidateRef)
 			if err != nil {
 				return err
 			}
@@ -163,6 +179,10 @@ clean or committed again. Pass --append to force another run.`,
 				}
 			}
 			actionText, actionPayload := describeObserveAction(exp, check, appendMode)
+			if scope.CandidateRef != "" {
+				actionPayload["candidate_ref"] = scope.CandidateRef
+				actionPayload["candidate_sha"] = scope.CandidateSHA
+			}
 			if err := dryRun(w, actionText, actionPayload); err != nil {
 				return err
 			}
@@ -207,14 +227,16 @@ clean or committed again. Pass --append to force another run.`,
 	c.Flags().BoolVar(&force, "force", false, "bypass instrument dependency checks")
 	c.Flags().BoolVar(&appendMode, "append", false, "force another observation run even when enough samples already exist")
 	c.Flags().BoolVar(&allowUnchanged, "allow-unchanged", false, "proceed even when the experiment branch has no commits above baseline")
+	c.Flags().StringVar(&candidateRef, "candidate-ref", "", "reviewable git ref naming the clean candidate being measured (required for non-baseline experiments)")
 	c.AddCommand(observeCheckCommand())
 	return []*cobra.Command{c}
 }
 
 func observeCheckCommand() *cobra.Command {
 	var (
-		instName string
-		samples  int
+		instName     string
+		samples      int
+		candidateRef string
 	)
 	c := &cobra.Command{
 		Use:   "check <exp-id>",
@@ -239,7 +261,7 @@ func observeCheckCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, priorObs, err := loadCurrentObservations(s, exp)
+			_, priorObs, err := loadCurrentObservations(s, exp, candidateRef)
 			if err != nil {
 				return err
 			}
@@ -260,5 +282,6 @@ func observeCheckCommand() *cobra.Command {
 	}
 	c.Flags().StringVar(&instName, "instrument", "", "registered instrument name")
 	c.Flags().IntVar(&samples, "samples", 0, "desired total sample count to check; 0 uses instrument min_samples or parser default")
+	c.Flags().StringVar(&candidateRef, "candidate-ref", "", "reviewable git ref naming the clean candidate whose observations should be checked (required for non-baseline experiments)")
 	return c
 }

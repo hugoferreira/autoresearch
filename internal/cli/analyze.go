@@ -3,10 +3,12 @@ package cli
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/stats"
+	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -16,9 +18,10 @@ func analyzeCommands() []*cobra.Command {
 
 func analyzeCmd() *cobra.Command {
 	var (
-		baselineExp string
-		instName    string
-		iters       int
+		baselineExp  string
+		instName     string
+		iters        int
+		candidateRef string
 	)
 	c := &cobra.Command{
 		Use:   "analyze <exp-id>",
@@ -31,13 +34,20 @@ the baseline experiment's samples for the same instrument using percentile
 bootstrap (for the delta CI) and Mann–Whitney U (for p-value).
 
 analyze is read-only: no store writes, no state transitions. Use conclude
-to persist a verdict.`,
+to persist a verdict.
+
+For non-baseline experiments that have observations on multiple candidate
+refs, pass --candidate-ref to analyze the specific measured candidate.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			expID := args[0]
 
 			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			exp, err := s.ReadExperiment(expID)
 			if err != nil {
 				return err
 			}
@@ -48,6 +58,25 @@ to persist a verdict.`,
 			}
 			if len(candObs) == 0 {
 				return fmt.Errorf("experiment %s has no observations", expID)
+			}
+			if !exp.IsBaseline {
+				if strings.TrimSpace(candidateRef) != "" {
+					ref, err := normalizeAnalyzeCandidateRef(exp, candidateRef)
+					if err != nil {
+						return err
+					}
+					candObs, err = filterAnalyzeObservationsByCandidateRef(candObs, ref)
+					if err != nil {
+						return fmt.Errorf("experiment %s: %w", expID, err)
+					}
+				} else {
+					if provs := distinctObservationProvenances(candObs); len(provs) > 1 {
+						return fmt.Errorf(
+							"experiment %s has observations for multiple candidate refs/shas (%s); rerun analyze with --candidate-ref <ref>",
+							expID, formatObservationProvenances(provs),
+						)
+					}
+				}
 			}
 
 			// Optional baseline.
@@ -141,7 +170,97 @@ to persist a verdict.`,
 	c.Flags().StringVar(&baselineExp, "baseline", "", "baseline experiment id to compare against")
 	c.Flags().StringVar(&instName, "instrument", "", "only analyze this instrument")
 	c.Flags().IntVar(&iters, "iters", 0, "bootstrap iterations (0 uses default 2000)")
+	c.Flags().StringVar(&candidateRef, "candidate-ref", "", "for non-baseline experiments, restrict analysis to observations recorded on this candidate ref")
 	return c
+}
+
+type observationProvenance struct {
+	Ref string
+	SHA string
+}
+
+func normalizeAnalyzeCandidateRef(exp *entity.Experiment, candidateRef string) (string, error) {
+	ref := strings.TrimSpace(candidateRef)
+	if ref == "" {
+		return "", fmt.Errorf("--candidate-ref is required")
+	}
+	repoDir := exp.Worktree
+	if strings.TrimSpace(repoDir) == "" {
+		repoDir = globalProjectDir
+	}
+	sym, err := worktree.SymbolicFullName(repoDir, ref)
+	if err != nil {
+		return "", fmt.Errorf("resolve candidate ref %q for %s: %w", ref, exp.ID, err)
+	}
+	if !strings.HasPrefix(sym, "refs/") {
+		return "", fmt.Errorf("candidate ref %q is not a named git ref", ref)
+	}
+	return sym, nil
+}
+
+func filterAnalyzeObservationsByCandidateRef(obs []*entity.Observation, candidateRef string) ([]*entity.Observation, error) {
+	filtered := make([]*entity.Observation, 0, len(obs))
+	for _, o := range obs {
+		if o == nil {
+			continue
+		}
+		if strings.TrimSpace(o.CandidateRef) == candidateRef {
+			filtered = append(filtered, o)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no observations recorded for candidate ref %s", candidateRef)
+	}
+	if provs := distinctObservationProvenances(filtered); len(provs) > 1 {
+		return nil, fmt.Errorf(
+			"candidate ref %s maps to multiple recorded SHAs (%s); use a unique candidate ref per measured candidate",
+			candidateRef, formatObservationProvenances(provs),
+		)
+	}
+	return filtered, nil
+}
+
+func distinctObservationProvenances(obs []*entity.Observation) []observationProvenance {
+	seen := map[observationProvenance]struct{}{}
+	out := make([]observationProvenance, 0)
+	for _, o := range obs {
+		if o == nil {
+			continue
+		}
+		p := observationProvenance{
+			Ref: strings.TrimSpace(o.CandidateRef),
+			SHA: strings.TrimSpace(o.CandidateSHA),
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Ref == out[j].Ref {
+			return out[i].SHA < out[j].SHA
+		}
+		return out[i].Ref < out[j].Ref
+	})
+	return out
+}
+
+func formatObservationProvenances(provs []observationProvenance) string {
+	parts := make([]string, 0, len(provs))
+	for _, p := range provs {
+		switch {
+		case p.Ref != "" && p.SHA != "":
+			parts = append(parts, fmt.Sprintf("%s@%s", p.Ref, shortSHA(p.SHA)))
+		case p.Ref != "":
+			parts = append(parts, p.Ref)
+		case p.SHA != "":
+			parts = append(parts, shortSHA(p.SHA))
+		default:
+			parts = append(parts, "(legacy)")
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func groupByInstrument(obs []*entity.Observation) map[string][]*entity.Observation {
@@ -173,4 +292,3 @@ func sortedKeys(m map[string][]*entity.Observation) []string {
 	sort.Strings(out)
 	return out
 }
-

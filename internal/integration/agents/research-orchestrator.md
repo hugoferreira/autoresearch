@@ -131,8 +131,8 @@ before you reach for `--help`:
     autoresearch hypothesis add ... --author agent:orchestrator --json
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
     autoresearch experiment implement <E-id> --impl-notes "..." --json
-    autoresearch observe <E-id> --all --json
-    autoresearch analyze <E-id> [--baseline <baseline-exp-id>] --json
+    autoresearch observe <E-id> --all --candidate-ref <ref> --json
+    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline <baseline-exp-id>] --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield to the main session with review pending so it can dispatch research-gate-reviewer
@@ -289,7 +289,10 @@ Spawn Agent:
     2. Test: <test command from config>
     3. If both pass, commit:
        git commit -am 'E-NNNN: <one-line summary>'
-    4. Report: commit SHA, changed files, build/test status, anything
+    4. Create a unique reviewable candidate ref for the commit you want
+       to measure, for example:
+       git branch autoresearch/candidate/<exp-id>-<shortsha> HEAD
+    5. Report: commit SHA, candidate ref, changed files, build/test status, anything
        surprising you noticed.
 
     If the build or tests fail and you can't fix it, report the
@@ -308,7 +311,7 @@ Run all instruments in one shot — the CLI resolves dependency order
 automatically:
 
 ```sh
-autoresearch observe <exp-id> --all --json
+autoresearch observe <exp-id> --all --candidate-ref <candidate-ref> --json
 ```
 
 This runs every instrument declared on the experiment, respecting
@@ -320,20 +323,24 @@ recorded by this invocation.
 Before re-running an expensive single instrument, use the cheap probe:
 
 ```sh
-autoresearch observe check <exp-id> --instrument <name> --json
+autoresearch observe check <exp-id> --instrument <name> --candidate-ref <candidate-ref> --json
 ```
 
 `observe` is idempotent by default for the current implementation
-attempt and candidate snapshot: if enough samples already exist in that
-scope it no-ops, and if some exist but not enough it tops up to the
-target. Dirty worktrees disable reuse until the candidate is clean or
-committed again. Use `--append` only when you intentionally want
-another fresh run even though the target is already met.
+attempt and measured candidate provenance: if enough samples already
+exist for the same attempt + candidate ref + candidate SHA, it no-ops,
+and if some exist but not enough it tops up to the target. For
+non-baseline experiments you must pass `--candidate-ref`, and the
+worktree must be clean with `HEAD` matching that ref. The CLI records
+candidate provenance; it does not create git refs for you. Use a unique
+reviewable candidate ref per measured commit. Use `--append` only when
+you intentionally want another fresh run even though the target is
+already met.
 
 To run a single instrument instead:
 
 ```sh
-autoresearch observe <exp-id> --instrument <name> --json
+autoresearch observe <exp-id> --instrument <name> --candidate-ref <candidate-ref> --json
 ```
 
 If an instrument fails, stop and report — do not retry or fix.
@@ -341,7 +348,7 @@ If an instrument fails, stop and report — do not retry or fix.
 ### 5. Analyze and conclude
 
 ```sh
-autoresearch analyze <exp-id> --baseline <baseline-exp-id> --json
+autoresearch analyze <exp-id> --candidate-ref <candidate-ref> --baseline <baseline-exp-id> --json
 ```
 
 Read the `comparison` object: `delta_frac`, `ci_low_frac`,

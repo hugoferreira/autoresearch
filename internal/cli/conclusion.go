@@ -140,6 +140,12 @@ func conclusionShowCmd() *cobra.Command {
 				}
 			}
 			w.Textf("candidate:    %s  (n=%d)\n", c.CandidateExp, c.Effect.NCandidate)
+			if c.CandidateRef != "" {
+				w.Textf("candidate_ref: %s\n", c.CandidateRef)
+			}
+			if c.CandidateSHA != "" {
+				w.Textf("candidate_sha: %s\n", c.CandidateSHA)
+			}
 			if c.BaselineExp != "" {
 				w.Textf("baseline:     %s  (n=%d)\n", c.BaselineExp, c.Effect.NBaseline)
 			}

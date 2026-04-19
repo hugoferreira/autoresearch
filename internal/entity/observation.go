@@ -50,6 +50,7 @@ type Observation struct {
 	ExitCode     int            `json:"exit_code"`
 	Worktree     string         `json:"worktree,omitempty"`
 	Attempt      int            `json:"attempt,omitempty"`
+	CandidateRef string         `json:"candidate_ref,omitempty"`
 	CandidateSHA string         `json:"candidate_sha,omitempty"`
 	BaselineSHA  string         `json:"baseline_sha,omitempty"`
 	Author       string         `json:"author"`
