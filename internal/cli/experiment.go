@@ -80,6 +80,7 @@ func experimentDesignCmd() *cobra.Command {
 			}
 
 			e := &entity.Experiment{
+				GoalID:      h.GoalID,
 				Hypothesis:  hypID,
 				Status:      entity.ExpDesigned,
 				Baseline:    entity.Baseline{Ref: baseline},
@@ -346,6 +347,7 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			}
 
 			e := &entity.Experiment{
+				GoalID:      goal.ID,
 				IsBaseline:  true,
 				Status:      entity.ExpDesigned,
 				Baseline:    entity.Baseline{Ref: baseline, SHA: sha},
@@ -549,6 +551,9 @@ func experimentShowCmd() *cobra.Command {
 				return w.JSON(view)
 			}
 			w.Textf("id:             %s\n", view.ID)
+			if view.GoalID != "" {
+				w.Textf("goal:           %s\n", view.GoalID)
+			}
 			w.Textf("hypothesis:     %s\n", view.Hypothesis)
 			w.Textf("status:         %s\n", view.Status)
 			w.Textf("classification: %s\n", experimentClassificationSummary(view.Classification, view.HypothesisStatus))

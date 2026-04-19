@@ -16,17 +16,23 @@ const (
 )
 
 type Experiment struct {
-	ID                    string    `yaml:"id"                                  json:"id"`
-	Hypothesis            string    `yaml:"hypothesis"                          json:"hypothesis"`
-	IsBaseline            bool      `yaml:"is_baseline,omitempty"               json:"is_baseline,omitempty"`
-	Status                string    `yaml:"status"                              json:"status"`
-	Baseline              Baseline  `yaml:"baseline"                            json:"baseline"`
-	Instruments           []string  `yaml:"instruments"                         json:"instruments"`
-	Worktree              string    `yaml:"worktree,omitempty"                  json:"worktree,omitempty"`
-	Branch                string    `yaml:"branch,omitempty"                    json:"branch,omitempty"`
-	Budget                Budget    `yaml:"budget,omitempty"                    json:"budget,omitempty"`
-	Author                string    `yaml:"author"                              json:"author"`
-	CreatedAt             time.Time `yaml:"created_at"                          json:"created_at"`
+	ID string `yaml:"id"                                  json:"id"`
+	// GoalID is durable goal provenance for the experiment. For baseline
+	// experiments it is the only ownership link; for hypothesis-backed
+	// experiments it denormalizes the parent hypothesis's GoalID so read
+	// surfaces can scope experiments without replaying history or joining
+	// through hypotheses on every path.
+	GoalID      string    `yaml:"goal_id,omitempty"                   json:"goal_id,omitempty"`
+	Hypothesis  string    `yaml:"hypothesis"                          json:"hypothesis"`
+	IsBaseline  bool      `yaml:"is_baseline,omitempty"               json:"is_baseline,omitempty"`
+	Status      string    `yaml:"status"                              json:"status"`
+	Baseline    Baseline  `yaml:"baseline"                            json:"baseline"`
+	Instruments []string  `yaml:"instruments"                         json:"instruments"`
+	Worktree    string    `yaml:"worktree,omitempty"                  json:"worktree,omitempty"`
+	Branch      string    `yaml:"branch,omitempty"                    json:"branch,omitempty"`
+	Budget      Budget    `yaml:"budget,omitempty"                    json:"budget,omitempty"`
+	Author      string    `yaml:"author"                              json:"author"`
+	CreatedAt   time.Time `yaml:"created_at"                          json:"created_at"`
 	// ReferencedAsBaselineBy lists conclusion IDs that used this experiment
 	// as a baseline. Populated by `conclude` when it writes a new
 	// conclusion. Non-empty → this experiment has finished its job as a

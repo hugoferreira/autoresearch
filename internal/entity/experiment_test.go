@@ -10,6 +10,7 @@ import (
 func TestExperimentRoundTrip(t *testing.T) {
 	e := &entity.Experiment{
 		ID:         "E-0001",
+		GoalID:     "G-0001",
 		Hypothesis: "H-0001",
 		Status:     entity.ExpDesigned,
 		Baseline: entity.Baseline{
@@ -36,6 +37,9 @@ func TestExperimentRoundTrip(t *testing.T) {
 	}
 	if back.ID != "E-0001" || back.Hypothesis != "H-0001" {
 		t.Errorf("round trip mismatch: %+v", back)
+	}
+	if back.GoalID != "G-0001" {
+		t.Errorf("goal_id round-trip: got %q, want G-0001", back.GoalID)
 	}
 	if len(back.Instruments) != 3 {
 		t.Errorf("instruments: got %d, want 3", len(back.Instruments))

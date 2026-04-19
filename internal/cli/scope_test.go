@@ -65,19 +65,19 @@ func scopedFixtureStore(t *testing.T) *store.Store {
 	}
 
 	base := &entity.Experiment{
-		ID: "E-0001", IsBaseline: true, Status: entity.ExpMeasured,
+		ID: "E-0001", GoalID: g1.ID, IsBaseline: true, Status: entity.ExpMeasured,
 		Baseline:    entity.Baseline{Ref: "HEAD", SHA: "abc123"},
 		Instruments: []string{"host_timing"},
 		Author:      "system", CreatedAt: now,
 	}
 	e1 := &entity.Experiment{
-		ID: "E-0002", Hypothesis: h1.ID, Status: entity.ExpMeasured,
+		ID: "E-0002", GoalID: g1.ID, Hypothesis: h1.ID, Status: entity.ExpMeasured,
 		Baseline:    entity.Baseline{Ref: "HEAD", SHA: "abc123"},
 		Instruments: []string{"host_timing"},
 		Author:      "system", CreatedAt: now,
 	}
 	e2 := &entity.Experiment{
-		ID: "E-0003", Hypothesis: h2.ID, Status: entity.ExpMeasured,
+		ID: "E-0003", GoalID: g2.ID, Hypothesis: h2.ID, Status: entity.ExpMeasured,
 		Baseline:    entity.Baseline{Ref: "HEAD", SHA: "def456"},
 		Instruments: []string{"qemu_cycles"},
 		Author:      "system", CreatedAt: now,
@@ -138,7 +138,7 @@ func scopedFixtureStore(t *testing.T) *store.Store {
 		{Ts: now, Kind: "goal.new", Actor: "human", Subject: g2.ID},
 		{Ts: now, Kind: "hypothesis.add", Actor: "human", Subject: h1.ID},
 		{Ts: now, Kind: "hypothesis.add", Actor: "human", Subject: h2.ID},
-		{Ts: now, Kind: "experiment.baseline", Actor: "system", Subject: base.ID, Data: jsonRaw(map[string]any{"goal": g1.ID})},
+		{Ts: now, Kind: "experiment.baseline", Actor: "system", Subject: base.ID, Data: jsonRaw(map[string]any{"note": "legacy payload ignored once experiment.goal_id is present"})},
 		{Ts: now, Kind: "observation.record", Actor: "system", Subject: "O-0001"},
 		{Ts: now, Kind: "lesson.add", Actor: "agent:analyst", Subject: l1.ID},
 		{Ts: now, Kind: "lesson.add", Actor: "agent:analyst", Subject: l2.ID},

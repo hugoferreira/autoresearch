@@ -162,6 +162,7 @@ func TestValidateHypothesis_NoKillIf(t *testing.T) {
 
 func TestValidateExperiment_Happy(t *testing.T) {
 	e := &entity.Experiment{
+		GoalID:      "G-0001",
 		Hypothesis:  "H-0001",
 		Instruments: []string{"qemu_cycles"},
 		Baseline:    entity.Baseline{Ref: "HEAD"},
@@ -173,6 +174,7 @@ func TestValidateExperiment_Happy(t *testing.T) {
 
 func TestValidateExperiment_UnregisteredInstrument(t *testing.T) {
 	e := &entity.Experiment{
+		GoalID:      "G-0001",
 		Hypothesis:  "H-0001",
 		Instruments: []string{"ghost_instrument"},
 		Baseline:    entity.Baseline{Ref: "HEAD"},
