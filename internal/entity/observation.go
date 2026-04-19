@@ -46,12 +46,14 @@ type Observation struct {
 	RawArtifact string `json:"raw_artifact,omitempty"`
 	RawSHA      string `json:"raw_sha,omitempty"`
 
-	Command     string         `json:"command"`
-	ExitCode    int            `json:"exit_code"`
-	Worktree    string         `json:"worktree,omitempty"`
-	BaselineSHA string         `json:"baseline_sha,omitempty"`
-	Author      string         `json:"author"`
-	Aux         map[string]any `json:"aux,omitempty"`
+	Command      string         `json:"command"`
+	ExitCode     int            `json:"exit_code"`
+	Worktree     string         `json:"worktree,omitempty"`
+	Attempt      int            `json:"attempt,omitempty"`
+	CandidateSHA string         `json:"candidate_sha,omitempty"`
+	BaselineSHA  string         `json:"baseline_sha,omitempty"`
+	Author       string         `json:"author"`
+	Aux          map[string]any `json:"aux,omitempty"`
 }
 
 func ParseObservation(data []byte) (*Observation, error) {

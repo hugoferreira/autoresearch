@@ -9,6 +9,7 @@ import (
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/instrument"
 	"github.com/bytter/autoresearch/internal/store"
+	"github.com/bytter/autoresearch/internal/worktree"
 )
 
 const (
@@ -41,9 +42,22 @@ type observeExecution struct {
 	Latest       *entity.Observation
 }
 
+type observeScope struct {
+	Attempt      int
+	CandidateSHA string
+}
+
+type observeAllExecution struct {
+	Results             []observationResult
+	CurrentObservations []*entity.Observation
+	NewObservations     []*entity.Observation
+}
+
 type observeResultSummary struct {
 	Action        string
+	CurrentIDs    []string
 	RecordedIDs   []string
+	ReusedIDs     []string
 	RecordedCount int
 	SkippedCount  int
 }
@@ -67,7 +81,7 @@ func buildObserveSampleCheck(cfg *store.Config, expID, instName string, requeste
 		return observeSampleCheck{}, fmt.Errorf("instrument %q is not registered in config.yaml", instName)
 	}
 	plan := instrument.PlanSamples(inst, requestedSamples)
-	current := samplesForObservedInstrument(observations, instName)
+	current := samplesForObservedInstrument(inst, observations, instName)
 	check := observeSampleCheck{
 		Experiment:        expID,
 		Instrument:        instName,
@@ -85,15 +99,80 @@ func buildObserveSampleCheck(cfg *store.Config, expID, instName string, requeste
 	return check, nil
 }
 
-func samplesForObservedInstrument(observations []*entity.Observation, instName string) int {
+func resolveObserveScope(exp *entity.Experiment) (observeScope, error) {
+	if exp == nil {
+		return observeScope{}, fmt.Errorf("experiment is required")
+	}
+	if strings.TrimSpace(exp.Worktree) == "" {
+		return observeScope{}, fmt.Errorf("experiment %s has no worktree; run `autoresearch experiment implement %s` first", exp.ID, exp.ID)
+	}
+	sha, err := worktree.ResolveRef(exp.Worktree, "HEAD")
+	if err != nil {
+		return observeScope{}, fmt.Errorf("resolve candidate HEAD for %s: %w", exp.ID, err)
+	}
+	return observeScope{
+		Attempt:      exp.Attempt,
+		CandidateSHA: sha,
+	}, nil
+}
+
+func loadCurrentObservations(s *store.Store, exp *entity.Experiment) (observeScope, []*entity.Observation, error) {
+	scope, err := resolveObserveScope(exp)
+	if err != nil {
+		return observeScope{}, nil, err
+	}
+	all, err := s.ListObservationsForExperiment(exp.ID)
+	if err != nil {
+		return observeScope{}, nil, err
+	}
+	return scope, filterObservationsByScope(all, scope), nil
+}
+
+func filterObservationsByScope(observations []*entity.Observation, scope observeScope) []*entity.Observation {
+	out := make([]*entity.Observation, 0, len(observations))
+	for _, o := range observations {
+		if observationInScope(o, scope) {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+func observationInScope(o *entity.Observation, scope observeScope) bool {
+	if o == nil {
+		return false
+	}
+	if o.Attempt != scope.Attempt {
+		return false
+	}
+	if scope.CandidateSHA == "" || o.CandidateSHA == "" {
+		return false
+	}
+	return o.CandidateSHA == scope.CandidateSHA
+}
+
+func samplesForObservedInstrument(inst store.Instrument, observations []*entity.Observation, instName string) int {
 	total := 0
 	for _, o := range observations {
 		if o == nil || o.Instrument != instName {
 			continue
 		}
+		if !observationCountsTowardTarget(inst, o) {
+			continue
+		}
 		total += observationSampleCount(o)
 	}
 	return total
+}
+
+func observationCountsTowardTarget(inst store.Instrument, o *entity.Observation) bool {
+	if o == nil {
+		return false
+	}
+	if inst.Parser != "builtin:passfail" {
+		return true
+	}
+	return o.Pass != nil && *o.Pass
 }
 
 func observationSampleCount(o *entity.Observation) int {
@@ -139,13 +218,14 @@ func collectObservationRuns(
 	s *store.Store,
 	cfg *store.Config,
 	exp *entity.Experiment,
+	scope observeScope,
 	instName string,
 	check observeSampleCheck,
 	appendMode bool,
 	author string,
 ) ([]*entity.Observation, error) {
 	if appendMode {
-		obs, err := runAndRecordObservation(s, cfg, exp, instName, check.TargetSamples, author)
+		obs, err := runAndRecordObservation(s, cfg, exp, scope, instName, check.TargetSamples, author)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +236,7 @@ func collectObservationRuns(
 	}
 	plan := instrument.PlanSamples(cfg.Instruments[instName], 0)
 	if plan.MultiSample {
-		obs, err := runAndRecordObservation(s, cfg, exp, instName, check.AdditionalSamples, author)
+		obs, err := runAndRecordObservation(s, cfg, exp, scope, instName, check.AdditionalSamples, author)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +245,7 @@ func collectObservationRuns(
 
 	out := make([]*entity.Observation, 0, check.AdditionalSamples)
 	for i := 0; i < check.AdditionalSamples; i++ {
-		obs, err := runAndRecordObservation(s, cfg, exp, instName, 1, author)
+		obs, err := runAndRecordObservation(s, cfg, exp, scope, instName, 1, author)
 		if err != nil {
 			return out, err
 		}
@@ -183,7 +263,7 @@ func buildSkippedObservationResult(check observeSampleCheck) observationResult {
 	}
 }
 
-func buildRecordedObservationResult(check observeSampleCheck, observations []*entity.Observation) (observeExecution, error) {
+func buildRecordedObservationResult(check observeSampleCheck, observations []*entity.Observation, currentSamples int) (observeExecution, error) {
 	last := latestObservation(observations)
 	if last == nil {
 		return observeExecution{}, fmt.Errorf("instrument %s produced no observation", check.Instrument)
@@ -201,7 +281,7 @@ func buildRecordedObservationResult(check observeSampleCheck, observations []*en
 			Unit:           last.Unit,
 			Action:         observeActionRecorded,
 			Samples:        added,
-			CurrentSamples: check.CurrentSamples + added,
+			CurrentSamples: currentSamples,
 			TargetSamples:  check.TargetSamples,
 		},
 	}, nil
@@ -211,15 +291,22 @@ func executeObservationRun(
 	s *store.Store,
 	cfg *store.Config,
 	exp *entity.Experiment,
+	scope observeScope,
+	currentObservations []*entity.Observation,
 	check observeSampleCheck,
 	appendMode bool,
 	author string,
 ) (observeExecution, error) {
-	observations, err := collectObservationRuns(s, cfg, exp, check.Instrument, check, appendMode, author)
+	observations, err := collectObservationRuns(s, cfg, exp, scope, check.Instrument, check, appendMode, author)
 	if err != nil {
 		return observeExecution{}, err
 	}
-	return buildRecordedObservationResult(check, observations)
+	currentSamples := samplesForObservedInstrument(
+		cfg.Instruments[check.Instrument],
+		append(append([]*entity.Observation(nil), currentObservations...), observations...),
+		check.Instrument,
+	)
+	return buildRecordedObservationResult(check, observations, currentSamples)
 }
 
 func describeObserveAction(exp *entity.Experiment, check observeSampleCheck, appendMode bool) (string, map[string]any) {
@@ -257,6 +344,30 @@ func summarizeObserveResults(results []observationResult) observeResultSummary {
 	if summary.RecordedCount == 0 && summary.SkippedCount > 0 {
 		summary.Action = observeActionSkipped
 	}
+	return summary
+}
+
+func buildObserveResultSummary(results []observationResult, currentObservations, newObservations []*entity.Observation) observeResultSummary {
+	summary := summarizeObserveResults(results)
+	summary.CurrentIDs = observationIDs(currentObservations)
+	summary.RecordedIDs = observationIDs(newObservations)
+	reused := make([]*entity.Observation, 0, len(currentObservations))
+	recorded := make(map[string]struct{}, len(newObservations))
+	for _, o := range newObservations {
+		if o != nil {
+			recorded[o.ID] = struct{}{}
+		}
+	}
+	for _, o := range currentObservations {
+		if o == nil {
+			continue
+		}
+		if _, ok := recorded[o.ID]; ok {
+			continue
+		}
+		reused = append(reused, o)
+	}
+	summary.ReusedIDs = observationIDs(reused)
 	return summary
 }
 
@@ -313,6 +424,7 @@ func runAndRecordObservation(
 	s *store.Store,
 	cfg *store.Config,
 	exp *entity.Experiment,
+	scope observeScope,
 	instName string,
 	samples int,
 	author string,
@@ -372,6 +484,8 @@ func runAndRecordObservation(
 		Command:          result.Command,
 		ExitCode:         result.ExitCode,
 		Worktree:         exp.Worktree,
+		Attempt:          scope.Attempt,
+		CandidateSHA:     scope.CandidateSHA,
 		BaselineSHA:      exp.Baseline.SHA,
 		Author:           or(author, "agent:observer"),
 		Aux:              result.Aux,
@@ -392,6 +506,8 @@ func runAndRecordObservation(
 		"unit":          unit,
 		"samples":       result.SamplesN,
 		"artifact_shas": artShas,
+		"attempt":       scope.Attempt,
+		"candidate_sha": scope.CandidateSHA,
 	}
 	if result.Pass != nil {
 		eventData["pass"] = *result.Pass
@@ -442,16 +558,14 @@ func observeAll(
 	samples int,
 	appendMode bool,
 	author string,
-) ([]observationResult, error) {
-	var results []observationResult
-	var priorObs []*entity.Observation
-	recordedAny := false
-
-	// Seed with any existing observations on this experiment so that
-	// partially-observed experiments can resume.
-	if existing, err := s.ListObservationsForExperiment(exp.ID); err == nil {
-		priorObs = existing
+) (observeAllExecution, error) {
+	scope, priorObs, err := loadCurrentObservations(s, exp)
+	if err != nil {
+		return observeAllExecution{}, err
 	}
+	var results []observationResult
+	var newObs []*entity.Observation
+	recordedAny := false
 
 	remaining := make([]string, len(instruments))
 	copy(remaining, instruments)
@@ -462,7 +576,7 @@ func observeAll(
 		for _, instName := range remaining {
 			check, err := buildObserveSampleCheck(cfg, exp.ID, instName, samples, priorObs)
 			if err != nil {
-				return results, err
+				return observeAllExecution{}, err
 			}
 			if !appendMode && check.TargetSatisfied {
 				results = append(results, buildSkippedObservationResult(check))
@@ -474,17 +588,18 @@ func observeAll(
 				continue
 			}
 
-			exec, err := executeObservationRun(s, cfg, exp, check, appendMode, author)
+			exec, err := executeObservationRun(s, cfg, exp, scope, priorObs, check, appendMode, author)
 			if err != nil {
-				return results, err
+				return observeAllExecution{}, err
 			}
 			priorObs = append(priorObs, exec.Observations...)
+			newObs = append(newObs, exec.Observations...)
 			recordedAny = true
 			results = append(results, exec.Result)
 			progress = true
 		}
 		if !progress {
-			return results, fmt.Errorf("stuck: instruments %v have unsatisfied dependencies", deferred)
+			return observeAllExecution{}, fmt.Errorf("stuck: instruments %v have unsatisfied dependencies", deferred)
 		}
 		remaining = deferred
 	}
@@ -492,9 +607,13 @@ func observeAll(
 	// Bump experiment status to measured if this was the first observation.
 	if recordedAny {
 		if err := markExperimentMeasuredIfNeeded(s, exp); err != nil {
-			return results, err
+			return observeAllExecution{}, err
 		}
 	}
 
-	return results, nil
+	return observeAllExecution{
+		Results:             results,
+		CurrentObservations: priorObs,
+		NewObservations:     newObs,
+	}, nil
 }

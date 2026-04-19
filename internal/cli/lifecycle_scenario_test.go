@@ -23,9 +23,15 @@ type cliImplementResponse struct {
 }
 
 type cliObserveAllResponse struct {
-	Results []struct {
-		ID   string `json:"id"`
-		Inst string `json:"instrument"`
+	Action             string   `json:"action"`
+	Observations       []string `json:"observations"`
+	NewObservations    []string `json:"new_observations"`
+	ReusedObservations []string `json:"reused_observations"`
+	Results            []struct {
+		ID     string   `json:"id"`
+		IDs    []string `json:"ids"`
+		Inst   string   `json:"instrument"`
+		Action string   `json:"action"`
 	} `json:"results"`
 }
 

@@ -313,7 +313,9 @@ autoresearch observe <exp-id> --all --json
 
 This runs every instrument declared on the experiment, respecting
 `--requires` edges (e.g. compile before test before timing). Capture
-the `.observations` array from the response.
+the `.observations` array from the response; it is the authoritative
+current-scope observation set. `.new_observations` contains only the ids
+recorded by this invocation.
 
 Before re-running an expensive single instrument, use the cheap probe:
 
@@ -321,10 +323,11 @@ Before re-running an expensive single instrument, use the cheap probe:
 autoresearch observe check <exp-id> --instrument <name> --json
 ```
 
-`observe` is idempotent by default: if enough samples already exist it
-no-ops, and if some exist but not enough it tops up to the target. Use
-`--append` only when you intentionally want another fresh run even
-though the target is already met.
+`observe` is idempotent by default for the current implementation
+attempt and candidate commit: if enough samples already exist in that
+scope it no-ops, and if some exist but not enough it tops up to the
+target. Use `--append` only when you intentionally want another fresh
+run even though the target is already met.
 
 To run a single instrument instead:
 

@@ -35,9 +35,11 @@ Observations are never hand-authored — the CLI is the sole writer and
 the artifact is guaranteed to exist on disk. This is the speculation/
 observation firewall, made physical.
 
-By default, observe is idempotent on the (experiment, instrument) pair:
-if enough samples already exist, it no-ops; if some exist but not enough,
-it tops up to the requested total. Pass --append to force another run.`,
+By default, observe is idempotent for the current implementation attempt
+and candidate commit:
+if enough samples already exist for the current implementation attempt and
+candidate commit, it no-ops; if some exist but not enough, it tops up to
+the requested total. Pass --append to force another run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
@@ -94,19 +96,21 @@ it tops up to the requested total. Pass --append to force another run.`,
 					return err
 				}
 
-				results, err := observeAll(s, cfg, exp, exp.Instruments, samples, appendMode, or(author, "agent:observer"))
+				exec, err := observeAll(s, cfg, exp, exp.Instruments, samples, appendMode, or(author, "agent:observer"))
 				if err != nil {
 					return err
 				}
-				summary := summarizeObserveResults(results)
+				summary := buildObserveResultSummary(exec.Results, exec.CurrentObservations, exec.NewObservations)
 
 				if w.IsJSON() {
 					return w.JSON(map[string]any{
-						"status":       "ok",
-						"experiment":   expID,
-						"action":       summary.Action,
-						"observations": summary.RecordedIDs,
-						"results":      results,
+						"status":              "ok",
+						"experiment":          expID,
+						"action":              summary.Action,
+						"observations":        summary.CurrentIDs,
+						"new_observations":    summary.RecordedIDs,
+						"reused_observations": summary.ReusedIDs,
+						"results":             exec.Results,
 					})
 				}
 				switch {
@@ -117,7 +121,7 @@ it tops up to the requested total. Pass --append to force another run.`,
 				default:
 					w.Textf("observed %d instrument(s) on %s; skipped %d already satisfied instrument(s)\n", summary.RecordedCount, expID, summary.SkippedCount)
 				}
-				for _, r := range results {
+				for _, r := range exec.Results {
 					if r.skipped() {
 						w.Textf("  %-16s already satisfied (have %d, target %d)\n", r.Inst, r.CurrentSamples, r.TargetSamples)
 						continue
@@ -132,7 +136,7 @@ it tops up to the requested total. Pass --append to force another run.`,
 			if err := firewall.CheckObservationRequest(instName, samples, exp, cfg, strict); err != nil {
 				return err
 			}
-			priorObs, err := s.ListObservationsForExperiment(expID)
+			scope, priorObs, err := loadCurrentObservations(s, exp)
 			if err != nil {
 				return err
 			}
@@ -161,7 +165,7 @@ it tops up to the requested total. Pass --append to force another run.`,
 			if err := dryRun(w, actionText, actionPayload); err != nil {
 				return err
 			}
-			exec, err := executeObservationRun(s, cfg, exp, check, appendMode, or(author, "agent:observer"))
+			exec, err := executeObservationRun(s, cfg, exp, scope, priorObs, check, appendMode, or(author, "agent:observer"))
 			if err != nil {
 				return err
 			}
@@ -230,10 +234,11 @@ func observeCheckCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := s.ReadExperiment(expID); err != nil {
+			exp, err := s.ReadExperiment(expID)
+			if err != nil {
 				return err
 			}
-			priorObs, err := s.ListObservationsForExperiment(expID)
+			_, priorObs, err := loadCurrentObservations(s, exp)
 			if err != nil {
 				return err
 			}

@@ -332,4 +332,10 @@ func TestEventPayload_ObservationRecordIncludesEvidenceFailures(t *testing.T) {
 	if failure["exit_code"] != float64(7) {
 		t.Fatalf("failure exit_code = %v, want 7", failure["exit_code"])
 	}
+	if got := payload["attempt"]; got != float64(1) {
+		t.Fatalf("data.attempt = %v, want 1", got)
+	}
+	if got, ok := payload["candidate_sha"].(string); !ok || got == "" {
+		t.Fatalf("data.candidate_sha = %#v, want non-empty string", payload["candidate_sha"])
+	}
 }

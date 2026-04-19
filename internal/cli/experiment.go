@@ -180,6 +180,7 @@ func experimentImplementCmd() *cobra.Command {
 
 			e.Worktree = wtPath
 			e.Branch = branch
+			e.Attempt++
 			e.Status = entity.ExpImplemented
 			e.Body = entity.AppendMarkdownSection(e.Body, "Implementation notes", implNotes)
 			if err := s.WriteExperiment(e); err != nil {
@@ -195,6 +196,7 @@ func experimentImplementCmd() *cobra.Command {
 				"to":       entity.ExpImplemented,
 				"worktree": wtPath,
 				"branch":   branch,
+				"attempt":  e.Attempt,
 			}
 			if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
 				eventData["impl_notes"] = snippet
@@ -398,6 +400,7 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 
 			e.Worktree = wtPath
 			e.Branch = branch
+			e.Attempt++
 			e.Status = entity.ExpImplemented
 			if err := s.WriteExperiment(e); err != nil {
 				return err
@@ -411,33 +414,30 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 				"to":       entity.ExpImplemented,
 				"worktree": wtPath,
 				"branch":   branch,
+				"attempt":  e.Attempt,
 			}); err != nil {
 				return err
 			}
 
 			// --- Phase 3: Observe all instruments ---
-			results, err := observeAll(s, cfg, e, instruments, 0, false, or(author, "system"))
+			exec, err := observeAll(s, cfg, e, instruments, 0, false, or(author, "system"))
 			if err != nil {
 				return err
 			}
 
 			// Output.
 			if w.IsJSON() {
-				obsIDs := make([]string, 0, len(results))
-				for _, r := range results {
-					obsIDs = append(obsIDs, r.ID)
-				}
 				return w.JSON(map[string]any{
 					"status":       "ok",
 					"id":           id,
 					"experiment":   e,
-					"observations": obsIDs,
+					"observations": observationIDs(exec.CurrentObservations),
 				})
 			}
 			w.Textf("created baseline %s (ref=%s, sha=%s)\n", id, baseline, sha[:12])
 			w.Textf("  worktree: %s\n", wtPath)
 			w.Textln("  observations:")
-			for _, r := range results {
+			for _, r := range exec.Results {
 				w.Textf("    %-16s %s = %g %s\n", r.ID, r.Inst, r.Value, r.Unit)
 			}
 			return nil

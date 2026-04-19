@@ -30,6 +30,7 @@ type Experiment struct {
 	Instruments []string  `yaml:"instruments"                         json:"instruments"`
 	Worktree    string    `yaml:"worktree,omitempty"                  json:"worktree,omitempty"`
 	Branch      string    `yaml:"branch,omitempty"                    json:"branch,omitempty"`
+	Attempt     int       `yaml:"attempt,omitempty"                   json:"attempt,omitempty"`
 	Budget      Budget    `yaml:"budget,omitempty"                    json:"budget,omitempty"`
 	Author      string    `yaml:"author"                              json:"author"`
 	CreatedAt   time.Time `yaml:"created_at"                          json:"created_at"`
