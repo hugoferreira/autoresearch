@@ -42,7 +42,10 @@ func ResolveInferredBaseline(s *store.Store, hyp *entity.Hypothesis, candidate *
 		return nil, nil
 	}
 
-	obsByExp := LoadObservationsByExperiment(s)
+	obsByExp, err := loadObservationsByExperimentStrict(s)
+	if err != nil {
+		return nil, err
+	}
 	var notes []string
 
 	if expID := strings.TrimSpace(candidate.Baseline.Experiment); expID != "" {
@@ -116,36 +119,37 @@ func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, in
 		}
 
 		accepted := acceptedByHyp[parentID]
-		var usable []*entity.Conclusion
+		usableByExp := map[string]*entity.Conclusion{}
 		for _, c := range accepted {
 			ok, _, err := experimentHasInstrumentData(s, obsByExp, c.CandidateExp, instrument, "accepted supported ancestor candidate")
 			if err != nil {
 				return nil, "", err
 			}
 			if ok {
-				usable = append(usable, c)
+				usableByExp[c.CandidateExp] = preferAncestorConclusion(usableByExp[c.CandidateExp], c)
 			}
 		}
 
-		switch len(usable) {
+		switch len(usableByExp) {
 		case 0:
 			if len(accepted) > 0 {
 				notes = appendNote(notes, fmt.Sprintf("accepted supported ancestor %s has no candidate with observations on instrument %q", parentID, instrument))
 			}
 		case 1:
+			chosen := onlyAncestorConclusion(usableByExp)
 			return &BaselineResolution{
-				ExperimentID:       usable[0].CandidateExp,
+				ExperimentID:       chosen.CandidateExp,
 				Source:             BaselineSourceAncestorSupported,
 				AncestorHypothesis: parentID,
-				AncestorConclusion: usable[0].ID,
+				AncestorConclusion: chosen.ID,
 			}, joinNotes(notes...), nil
 		default:
-			ids := make([]string, 0, len(usable))
-			for _, c := range usable {
-				ids = append(ids, c.ID)
+			expIDs := make([]string, 0, len(usableByExp))
+			for expID := range usableByExp {
+				expIDs = append(expIDs, expID)
 			}
-			sort.Strings(ids)
-			return nil, "", fmt.Errorf("ancestor %s has multiple accepted supported conclusions with observations on instrument %q: %s; pass --baseline-experiment explicitly", parentID, instrument, strings.Join(ids, ", "))
+			sort.Strings(expIDs)
+			return nil, "", fmt.Errorf("ancestor %s has multiple accepted supported candidate experiments with observations on instrument %q: %s; pass --baseline-experiment explicitly", parentID, instrument, strings.Join(expIDs, ", "))
 		}
 
 		parentID = strings.TrimSpace(parent.Parent)
@@ -228,6 +232,14 @@ func goalBaselineExperimentIDs(s *store.Store, goalID string) ([]string, error) 
 	return ids, nil
 }
 
+func loadObservationsByExperimentStrict(s *store.Store) (map[string][]*entity.Observation, error) {
+	all, err := s.ListObservations()
+	if err != nil {
+		return nil, err
+	}
+	return GroupObservationsByExperiment(all), nil
+}
+
 func experimentHasInstrumentData(s *store.Store, obsByExp map[string][]*entity.Observation, expID, instrument, label string) (bool, string, error) {
 	if _, err := s.ReadExperiment(expID); err != nil {
 		if errors.Is(err, store.ErrExperimentNotFound) {
@@ -241,6 +253,29 @@ func experimentHasInstrumentData(s *store.Store, obsByExp map[string][]*entity.O
 		}
 	}
 	return false, fmt.Sprintf("%s %s has no observations on instrument %q", label, expID, instrument), nil
+}
+
+func preferAncestorConclusion(cur, next *entity.Conclusion) *entity.Conclusion {
+	if cur == nil {
+		return next
+	}
+	if next == nil {
+		return cur
+	}
+	if next.CreatedAt.After(cur.CreatedAt) {
+		return next
+	}
+	if next.CreatedAt.Equal(cur.CreatedAt) && next.ID > cur.ID {
+		return next
+	}
+	return cur
+}
+
+func onlyAncestorConclusion(m map[string]*entity.Conclusion) *entity.Conclusion {
+	for _, c := range m {
+		return c
+	}
+	return nil
 }
 
 func appendNote(notes []string, note string) []string {

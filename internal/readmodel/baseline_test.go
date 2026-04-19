@@ -2,6 +2,8 @@ package readmodel
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -217,6 +219,39 @@ func TestResolveInferredBaseline_PrefersNearestAcceptedSupportedAncestor(t *test
 	}
 }
 
+func TestResolveInferredBaseline_DedupesSupportedConclusionsOnSameAncestorExperiment(t *testing.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+
+	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
+
+	ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", false)
+	f.writeObservation(t, "O-0001", ancestorExp.ID, "timing")
+	f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
+	f.now = f.now.Add(time.Minute)
+	f.writeConclusion(t, "C-0002", parent.ID, ancestorExp.ID, true)
+
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", false)
+
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != ancestorExp.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, ancestorExp.ID)
+	}
+	if got.Source != BaselineSourceAncestorSupported {
+		t.Fatalf("source = %q, want %q", got.Source, BaselineSourceAncestorSupported)
+	}
+	if got.AncestorConclusion != "C-0002" {
+		t.Fatalf("ancestor conclusion = %q, want %q", got.AncestorConclusion, "C-0002")
+	}
+}
+
 func TestResolveInferredBaseline_UsesGoalScopedBaselineMapping(t *testing.T) {
 	f := newBaselineFixture(t)
 	f.writeGoal(t, "G-0001")
@@ -267,5 +302,25 @@ func TestResolveInferredBaseline_ErrorsOnAmbiguousGoalBaseline(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "multiple baseline experiments") {
 		t.Fatalf("error = %q, want multiple baseline experiments", err)
+	}
+}
+
+func TestResolveInferredBaseline_PropagatesObservationReadErrors(t *testing.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	candidate := f.writeExperiment(t, "E-0001", current.ID, "", false)
+
+	badPath := filepath.Join(f.s.ObservationsDir(), "O-9999.json")
+	if err := os.WriteFile(badPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err == nil {
+		t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "parse observation") {
+		t.Fatalf("error = %q, want parse observation", err)
 	}
 }
