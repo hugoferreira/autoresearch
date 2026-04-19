@@ -125,6 +125,7 @@ type conclusionDetailView struct {
 	c       *entity.Conclusion
 	compact bool
 	err     error
+	pager   pagerState
 }
 
 type concDetailLoadedMsg struct {
@@ -154,11 +155,23 @@ func (v *conclusionDetailView) update(msg tea.Msg, s *store.Store) (tuiView, tea
 		return v, nil
 	case storeChangedMsg:
 		return v, v.init(s)
+	case tea.KeyMsg:
+		if v.compact {
+			return v, nil
+		}
+		return v, v.pager.handleKey(msg)
+	case tea.MouseMsg:
+		return v, v.pager.handleMouse(msg)
 	}
 	return v, nil
 }
 
-func (v *conclusionDetailView) hints() []tuiHint { return nil }
+func (v *conclusionDetailView) hints() []tuiHint {
+	if v.compact {
+		return nil
+	}
+	return []tuiHint{{"g/G", "top/bot"}, {"↑↓/PgUp/PgDn", "scroll"}}
+}
 
 func (v *conclusionDetailView) view(width, height int) string {
 	if v.err != nil {
@@ -232,5 +245,11 @@ func (v *conclusionDetailView) view(width, height int) string {
 		body := strings.TrimSpace(c.Body)
 		lines = append(lines, strings.TrimRight(renderMarkdown(width, body), "\n"))
 	}
-	return clampLines(strings.Join(lines, "\n"), height, width)
+	content := strings.Join(lines, "\n")
+	if v.compact {
+		return clampLines(content, height, width)
+	}
+	v.pager.ensureSize(width, height)
+	v.pager.setContent(content)
+	return v.pager.view()
 }
