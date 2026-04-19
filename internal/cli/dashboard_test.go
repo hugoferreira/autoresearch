@@ -418,6 +418,27 @@ func TestRenderDashboard_StatusGlyphs(t *testing.T) {
 	}
 }
 
+func TestRenderDashboard_FrontierUsesHypothesisStatusMarker(t *testing.T) {
+	snap := baseSnapshot()
+	snap.Goal = &entity.Goal{
+		Objective: entity.Objective{Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease"},
+	}
+	snap.Frontier = []frontierRow{{
+		Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25,
+		Classification: experimentClassificationDead, HypothesisStatus: entity.StatusSupported,
+	}}
+
+	var buf bytes.Buffer
+	renderDashboard(&buf, snap, 120, "snapshot", nil)
+	out := buf.String()
+	if !strings.Contains(out, "[supported]") {
+		t.Fatalf("dashboard frontier missing supported marker:\n%s", out)
+	}
+	if strings.Contains(out, "[dead]") {
+		t.Fatalf("dashboard frontier should not show dead marker for supported hypotheses:\n%s", out)
+	}
+}
+
 // TestRenderDashboard_Colored exercises the color-on rendering path. We
 // bypass TTY detection by constructing an *ansi{enabled: true} directly, so
 // the test is deterministic regardless of the host environment, NO_COLOR, or

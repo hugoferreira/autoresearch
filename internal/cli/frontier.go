@@ -192,8 +192,8 @@ func renderFrontierSection(w *output.Writer, f goalFrontier, stallK int) {
 			if r.RescuedBy != "" {
 				w.Textf("  [rescued by %s]", r.RescuedBy)
 			}
-			if r.Classification == experimentClassificationDead {
-				w.Textf("  %s", experimentClassificationMarker(r.Classification))
+			if marker := frontierClassificationMarker(r.Classification, r.HypothesisStatus); marker != "" {
+				w.Textf("  %s", marker)
 			}
 			w.Textln("")
 		}

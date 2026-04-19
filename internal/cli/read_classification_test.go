@@ -89,4 +89,22 @@ func TestExperimentClassificationHelpers(t *testing.T) {
 	if got := experimentClassificationMarker(experimentClassificationLive); got != "" {
 		t.Fatalf("marker(live) = %q, want empty", got)
 	}
+	if got, want := frontierClassificationMarker(experimentClassificationDead, entity.StatusSupported), "[supported]"; got != want {
+		t.Fatalf("frontier marker(supported) = %q, want %q", got, want)
+	}
+	if got, want := frontierClassificationMarker(experimentClassificationDead, entity.StatusRefuted), "[refuted]"; got != want {
+		t.Fatalf("frontier marker(refuted) = %q, want %q", got, want)
+	}
+	if got, want := frontierClassificationMarker(experimentClassificationDead, entity.StatusKilled), "[killed]"; got != want {
+		t.Fatalf("frontier marker(killed) = %q, want %q", got, want)
+	}
+	if got, want := frontierClassificationMarker(experimentClassificationDead, entity.StatusUnreviewed), "[pending review]"; got != want {
+		t.Fatalf("frontier marker(unreviewed) = %q, want %q", got, want)
+	}
+	if got, want := frontierClassificationMarker(experimentClassificationDead, ""), "[dead]"; got != want {
+		t.Fatalf("frontier marker(fallback) = %q, want %q", got, want)
+	}
+	if got := frontierClassificationMarker(experimentClassificationLive, entity.StatusSupported); got != "" {
+		t.Fatalf("frontier marker(live) = %q, want empty", got)
+	}
 }
