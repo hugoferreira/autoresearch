@@ -1,14 +1,16 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
+	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -186,12 +188,27 @@ func lessonListCmd() *cobra.Command {
 		subject  string
 		tag      string
 		goalFlag string
+		fields   string
+		since    string
+		summary  bool
 	)
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List lessons (read by the generator before proposing)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
+			if summary && strings.TrimSpace(fields) != "" {
+				return errors.New("--summary and --fields cannot be combined")
+			}
+			var projectedFields []readmodel.LessonField
+			if strings.TrimSpace(fields) != "" {
+				var err error
+				projectedFields, err = readmodel.ParseLessonFields(fields)
+				if err != nil {
+					return err
+				}
+			}
+
 			s, err := openStore()
 			if err != nil {
 				return err
@@ -208,44 +225,58 @@ func lessonListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var filtered []*entity.Lesson
-			for _, l := range all {
-				view, err := annotateLessonForRead(s, l)
-				if err != nil {
-					return err
-				}
-				if scope != "" && view.Scope != scope {
-					continue
-				}
-				if status != "" && view.Status != status {
-					continue
-				}
-				if subject != "" && !slices.Contains(view.Subjects, subject) {
-					continue
-				}
-				if tag != "" && !slices.Contains(view.Tags, tag) {
-					continue
-				}
-				filtered = append(filtered, view)
+			filtered, err := readmodel.ListLessonsForRead(s, all, readmodel.LessonListOptions{
+				Scope:   scope,
+				Status:  status,
+				Subject: subject,
+				Tag:     tag,
+				SinceID: since,
+			})
+			if err != nil {
+				return err
 			}
 			if w.IsJSON() {
-				return w.JSON(filtered)
+				switch {
+				case summary:
+					return w.JSON(readmodel.BuildLessonSummaryViews(filtered))
+				case len(projectedFields) > 0:
+					return w.JSON(readmodel.ProjectLessonReadViews(filtered, projectedFields))
+				default:
+					return w.JSON(filtered)
+				}
 			}
 			if len(filtered) == 0 {
 				w.Textln("(no lessons)")
 				return nil
 			}
-			for _, l := range filtered {
-				subj := "-"
-				if len(l.Subjects) > 0 {
-					subj = strings.Join(l.Subjects, ",")
+			switch {
+			case summary:
+				for _, row := range readmodel.BuildLessonSummaryViews(filtered) {
+					w.Textf("  %-8s  %-11s  %-11s  %-24s  %s\n",
+						row.ID, row.Scope, row.Status, formatLessonProjectedValue(row.Tags), row.Claim)
 				}
-				source := "-"
-				if l.Provenance != nil && l.Provenance.SourceChain != "" {
-					source = l.Provenance.SourceChain
+			case len(projectedFields) > 0:
+				rows := readmodel.ProjectLessonReadViews(filtered, projectedFields)
+				for _, row := range rows {
+					parts := make([]string, 0, len(projectedFields))
+					for _, field := range projectedFields {
+						parts = append(parts, formatLessonProjectedValue(row[string(field)]))
+					}
+					w.Textln("  " + strings.Join(parts, "  "))
 				}
-				w.Textf("  %-8s  %-11s  %-11s  %-20s  from=%-20s  %s\n",
-					l.ID, l.Scope, l.Status, source, subj, truncate(l.Claim, 60))
+			default:
+				for _, l := range filtered {
+					subj := "-"
+					if len(l.Subjects) > 0 {
+						subj = strings.Join(l.Subjects, ",")
+					}
+					source := "-"
+					if l.Provenance != nil && l.Provenance.SourceChain != "" {
+						source = l.Provenance.SourceChain
+					}
+					w.Textf("  %-8s  %-11s  %-11s  %-20s  from=%-20s  %s\n",
+						l.ID, l.Scope, l.Status, source, subj, truncate(l.Claim, 60))
+				}
 			}
 			return nil
 		},
@@ -254,8 +285,39 @@ func lessonListCmd() *cobra.Command {
 	c.Flags().StringVar(&status, "status", "", "filter by status (active | provisional | invalidated | superseded)")
 	c.Flags().StringVar(&subject, "subject", "", "filter by subject id (returns lessons citing this id)")
 	c.Flags().StringVar(&tag, "tag", "", "filter by tag")
+	c.Flags().BoolVar(&summary, "summary", false, "project to id, scope, status, tags, and a truncated one-line claim")
+	c.Flags().StringVar(&fields, "fields", "", "comma-separated projection fields (id,claim,scope,subjects,tags,status,source_chain,predicted_effect,supersedes,superseded_by,author,created_at,body)")
+	c.Flags().StringVar(&since, "since", "", "only return lessons added after this lesson id (exclusive, e.g. L-0007)")
 	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope the list to (defaults to active goal; use 'all' for every goal)")
 	return c
+}
+
+func formatLessonProjectedValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "-"
+	case string:
+		if strings.TrimSpace(x) == "" {
+			return "-"
+		}
+		return x
+	case []string:
+		if len(x) == 0 {
+			return "[]"
+		}
+		return "[" + strings.Join(x, ",") + "]"
+	case time.Time:
+		if x.IsZero() {
+			return "-"
+		}
+		return x.Format(time.RFC3339)
+	default:
+		data, err := json.Marshal(x)
+		if err != nil {
+			return fmt.Sprintf("%v", x)
+		}
+		return string(data)
+	}
 }
 
 func lessonShowCmd() *cobra.Command {

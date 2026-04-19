@@ -74,7 +74,7 @@ func TestLessonListByScopeAndSubject(t *testing.T) {
 	}
 	sys := &entity.Lesson{
 		ID: "L-0002", Claim: "system lesson",
-		Scope: entity.LessonScopeSystem,
+		Scope:  entity.LessonScopeSystem,
 		Status: entity.LessonStatusActive, Author: "agent:critic", CreatedAt: now,
 	}
 	if err := s.WriteLesson(hyp); err != nil {
@@ -154,5 +154,36 @@ func TestListLessonsOnMissingDir(t *testing.T) {
 	back, err := s.ReadLesson("L-0001")
 	if err != nil || back.Claim != "x" {
 		t.Errorf("round-trip after lazy recreation failed: err=%v back=%+v", err, back)
+	}
+}
+
+func TestListLessonsOrdersByNumericIDAcrossFiveDigits(t *testing.T) {
+	s, _ := mustCreate(t)
+	now := time.Now().UTC()
+
+	for _, l := range []*entity.Lesson{
+		{ID: "L-10000", Claim: "ten thousand", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Author: "agent:analyst", CreatedAt: now},
+		{ID: "L-9998", Claim: "nine nine nine eight", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Author: "agent:analyst", CreatedAt: now},
+		{ID: "L-10001", Claim: "ten thousand one", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Author: "agent:analyst", CreatedAt: now},
+		{ID: "L-9999", Claim: "nine nine nine nine", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Author: "agent:analyst", CreatedAt: now},
+	} {
+		if err := s.WriteLesson(l); err != nil {
+			t.Fatalf("WriteLesson(%s): %v", l.ID, err)
+		}
+	}
+
+	got, err := s.ListLessons()
+	if err != nil {
+		t.Fatalf("ListLessons: %v", err)
+	}
+	if gotLen, want := len(got), 4; gotLen != want {
+		t.Fatalf("ListLessons len = %d, want %d", gotLen, want)
+	}
+
+	wantIDs := []string{"L-9998", "L-9999", "L-10000", "L-10001"}
+	for i, want := range wantIDs {
+		if got[i].ID != want {
+			t.Fatalf("ListLessons[%d].ID = %q, want %q (full=%v)", i, got[i].ID, want, []string{got[0].ID, got[1].ID, got[2].ID, got[3].ID})
+		}
 	}
 }
