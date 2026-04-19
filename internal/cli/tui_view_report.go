@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/store"
@@ -10,6 +11,69 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// entityIDPattern matches autoresearch entity IDs: G/H/E/O/C/L followed by a
+// dash and 4+ digits. Used to colorize references inside rendered markdown
+// bodies so readers can spot cross-entity links at a glance.
+var entityIDPattern = regexp.MustCompile(`[GHEOCL]-\d{4,}`)
+
+// ansiEscapePattern matches a single CSI escape sequence (glamour emits
+// these around every styled span). We treat the terminating "m" as a
+// boundary when deciding whether a preceding character blocks an entity-ID
+// match — \b can't, because "m" is a word character.
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*m$`)
+
+// highlightEntityIDs wraps every entity-ID occurrence in the given (possibly
+// ANSI-styled) string with a yellow foreground. It operates on the final
+// rendered output rather than the raw markdown source so glamour's styling
+// stays intact around each ID.
+//
+// A match is accepted only when the character immediately preceding it is
+// not an ASCII letter, digit, underscore, or dash — with one deliberate
+// exception: a terminating ANSI CSI (ending in "m") counts as "not a
+// word", so IDs that begin a glamour-styled paragraph still highlight.
+func highlightEntityIDs(s string) string {
+	locs := entityIDPattern.FindAllStringIndex(s, -1)
+	if len(locs) == 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 16*len(locs))
+	prev := 0
+	for _, loc := range locs {
+		start, end := loc[0], loc[1]
+		if !isEntityIDBoundary(s[:start]) {
+			continue
+		}
+		b.WriteString(s[prev:start])
+		b.WriteString(tuiYellow.Render(s[start:end]))
+		prev = end
+	}
+	b.WriteString(s[prev:])
+	return b.String()
+}
+
+// isEntityIDBoundary reports whether the character immediately ending the
+// given prefix is a valid left boundary for an entity-ID highlight. True
+// when the prefix is empty, ends in an ANSI CSI, or ends in a non-word
+// non-dash character.
+func isEntityIDBoundary(prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	if ansiEscapePattern.MatchString(prefix) {
+		return true
+	}
+	last := prefix[len(prefix)-1]
+	switch {
+	case last >= 'A' && last <= 'Z',
+		last >= 'a' && last <= 'z',
+		last >= '0' && last <= '9',
+		last == '_', last == '-':
+		return false
+	}
+	return true
+}
 
 // reportView renders the markdown report for a single hypothesis in a
 // scrollable viewport, styled with glamour so headings/bold/italic/code
@@ -103,6 +167,7 @@ func renderMarkdownRewrap(width int, md string) string {
 	if err != nil {
 		return md
 	}
+	out = highlightEntityIDs(out)
 	// Re-wrap each line with space-only breaking.
 	var rewrapped []string
 	for _, line := range strings.Split(out, "\n") {
