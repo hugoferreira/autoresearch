@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ClaudeSettingsRelPath is the Claude Code project settings file, relative to
@@ -25,16 +26,22 @@ const AutoresearchAllowEntry = "Bash(autoresearch:*)"
 // outside the project tree, typically under the user cache dir) don't
 // trigger permission prompts on every file or shell operation.
 //
+// Claude Code's Read/Edit/Write permission patterns treat a leading single
+// slash as project-relative, so `Read(/Users/...)` never matches a real
+// absolute path. Filesystem-absolute paths require a `//` prefix: we emit
+// `Read(//Users/...)` so the matcher walks from the filesystem root.
+//
 // Claude Code's Bash permission is command-prefix only — there's no way to
 // scope it to a directory. We use Read/Edit/Write path globs for file
 // operations and rely on the existing Bash(autoresearch:*) entry for CLI
 // calls. Shell commands in worktrees (make, gcc, git, etc.) will still
 // prompt unless the user adds broader Bash permissions themselves.
 func WorktreeAllowEntries(worktreesRoot string) []string {
+	abs := "//" + strings.TrimLeft(worktreesRoot, "/")
 	return []string{
-		"Read(" + worktreesRoot + "/**)",
-		"Edit(" + worktreesRoot + "/**)",
-		"Write(" + worktreesRoot + "/**)",
+		"Read(" + abs + "/**)",
+		"Edit(" + abs + "/**)",
+		"Write(" + abs + "/**)",
 	}
 }
 

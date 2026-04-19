@@ -166,6 +166,23 @@ func TestEnsureClaudeSettings_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestWorktreeAllowEntries_UsesDoubleSlashForAbsolute(t *testing.T) {
+	got := integration.WorktreeAllowEntries("/Users/bob/Library/Caches/autoresearch/proj-abc/worktrees")
+	want := []string{
+		"Read(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
+		"Edit(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
+		"Write(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len: got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestPreviewClaudeSettings(t *testing.T) {
 	dir := t.TempDir()
 	entries := []string{integration.AutoresearchAllowEntry}
