@@ -55,7 +55,7 @@ YAML authoring or file editing. When a human says:
 | "Ship that optimization" | ` + "`autoresearch hypothesis apply H-0001`" + ` (cherry-picks the winning experiment) |
 | "Where's the worktree for H-0003?" | ` + "`autoresearch hypothesis worktree H-0003`" + ` |
 | "What just happened?" | ` + "`autoresearch log --tail 30`" + ` |
-| "What have we learned so far?" | ` + "`autoresearch lesson list --status active`" + `, summarize |
+| "What have we learned so far?" | ` + "`autoresearch lesson list --status active --summary`" + `, summarize |
 
 **Never** ask the human to author YAML or edit files under ` + "`.research/`" + ` or
 ` + "`goal.md`" + ` directly. They can if they want to, but you should not require it.
@@ -462,7 +462,8 @@ Verbs:
 
     autoresearch lesson add --claim "..." --body "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
         [--predict-instrument X --predict-direction {increase|decrease} --predict-min-effect N [--predict-max-effect M]]
-    autoresearch lesson list [--goal G-NNNN|all] [--scope ...] [--status ...] [--subject ...] [--tag ...]
+    autoresearch lesson list [--goal G-NNNN|all] [--scope ...] [--status ...] [--subject ...] [--tag ...] [--since L-NNNN]
+                              [--summary | --fields id,scope,status,tags,...]
     autoresearch lesson show <L-id>
     autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
     autoresearch lesson accuracy   # compare predicted effects vs actual outcomes (read-only)
@@ -508,7 +509,7 @@ example.
 
 **3. The reading contract.** Lessons are load-bearing, not decorative:
 
-- The **orchestrator** MUST run ` + "`lesson list --status active --json`" + ` at
+- The **orchestrator** MUST run ` + "`lesson list --status active --summary --json`" + ` at
   the start of every cycle. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
   either cite a lesson ID or explicitly note "no relevant lesson". When
   citing lessons, pass their IDs via ` + "`--inspired-by L-XXXX,L-YYYY`" + ` to

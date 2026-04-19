@@ -36,7 +36,7 @@ load-bearing.
    Do not patch bootstrap/harness/instrument-definition files there
    mid-run; surface any setup drift as explicit maintenance instead.
 3. `autoresearch goal show` — the objective, constraints, steering.
-4. `autoresearch lesson list --status active --json` — the cumulative
+4. `autoresearch lesson list --status active --summary --json` — the cumulative
    notebook. If a lesson rules out a class of intervention, do not
    propose that class without new evidence. If a lesson recommends a
    direction, lean into it.

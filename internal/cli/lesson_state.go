@@ -6,6 +6,7 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 )
 
@@ -26,16 +27,7 @@ type lessonStateChange struct {
 }
 
 func lessonStatusForSourceChain(sourceChain string) (string, bool) {
-	switch sourceChain {
-	case entity.LessonSourceSystem, entity.LessonSourceReviewedDecisive:
-		return entity.LessonStatusActive, true
-	case entity.LessonSourceUnreviewedDecisive:
-		return entity.LessonStatusProvisional, true
-	case entity.LessonSourceInconclusive:
-		return entity.LessonStatusInvalidated, true
-	default:
-		return "", false
-	}
+	return readmodel.LessonStatusForSourceChain(sourceChain)
 }
 
 func initializeLessonState(s *store.Store, l *entity.Lesson) error {
@@ -59,36 +51,15 @@ func initializeLessonState(s *store.Store, l *entity.Lesson) error {
 }
 
 func annotateLessonForRead(s *store.Store, l *entity.Lesson) (*entity.Lesson, error) {
-	if l == nil {
-		return nil, nil
+	view, err := readmodel.AnnotateLessonForRead(s, l)
+	if err != nil || view == nil {
+		return nil, err
 	}
-	view := *l
-	sourceChain, err := firewall.AssessLessonSourceChain(s, l)
-	if err != nil {
-		// Legacy lessons may still be readable even if a referenced subject
-		// has gone missing. Preserve the stored metadata rather than failing
-		// the whole read surface.
-		sourceChain = l.EffectiveSourceChain()
-		if sourceChain == "" && l.Scope == entity.LessonScopeSystem {
-			sourceChain = entity.LessonSourceSystem
-		}
-	}
-	view.Provenance = &entity.LessonProvenance{SourceChain: sourceChain}
-	view.Status = lessonDisplayStatus(l, sourceChain)
-	return &view, nil
+	return view.Lesson, nil
 }
 
 func lessonDisplayStatus(l *entity.Lesson, sourceChain string) string {
-	if l != nil && l.EffectiveStatus() == entity.LessonStatusSuperseded {
-		return entity.LessonStatusSuperseded
-	}
-	if status, ok := lessonStatusForSourceChain(sourceChain); ok {
-		return status
-	}
-	if l == nil {
-		return entity.LessonStatusActive
-	}
-	return l.EffectiveStatus()
+	return readmodel.LessonDisplayStatus(l, sourceChain)
 }
 
 func lessonIsSteering(s *store.Store, l *entity.Lesson) bool {
