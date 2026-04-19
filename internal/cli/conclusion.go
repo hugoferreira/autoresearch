@@ -140,6 +140,9 @@ func conclusionShowCmd() *cobra.Command {
 				}
 			}
 			w.Textf("candidate:    %s  (n=%d)\n", c.CandidateExp, c.Effect.NCandidate)
+			if c.CandidateAttempt > 0 {
+				w.Textf("candidate_attempt: %d\n", c.CandidateAttempt)
+			}
 			if c.CandidateRef != "" {
 				w.Textf("candidate_ref: %s\n", c.CandidateRef)
 			}
@@ -148,6 +151,15 @@ func conclusionShowCmd() *cobra.Command {
 			}
 			if c.BaselineExp != "" {
 				w.Textf("baseline:     %s  (n=%d)\n", c.BaselineExp, c.Effect.NBaseline)
+				if c.BaselineAttempt > 0 {
+					w.Textf("baseline_attempt: %d\n", c.BaselineAttempt)
+				}
+				if c.BaselineRef != "" {
+					w.Textf("baseline_ref: %s\n", c.BaselineRef)
+				}
+				if c.BaselineSHA != "" {
+					w.Textf("baseline_sha: %s\n", c.BaselineSHA)
+				}
 			}
 			w.Textf("effect on %s:\n", c.Effect.Instrument)
 			w.Textf("  delta_frac: %+.4f  95%% CI [%+.4f, %+.4f]\n", c.Effect.DeltaFrac, c.Effect.CILowFrac, c.Effect.CIHighFrac)

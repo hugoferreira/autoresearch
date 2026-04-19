@@ -8,7 +8,6 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
 	"github.com/bytter/autoresearch/internal/stats"
-	"github.com/bytter/autoresearch/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -61,18 +60,14 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 			}
 			if !exp.IsBaseline {
 				if strings.TrimSpace(candidateRef) != "" {
-					ref, err := normalizeAnalyzeCandidateRef(exp, candidateRef)
-					if err != nil {
-						return err
-					}
-					candObs, err = filterAnalyzeObservationsByCandidateRef(candObs, ref)
+					candObs, err = filterAnalyzeObservationsByCandidateRef(candObs, strings.TrimSpace(candidateRef))
 					if err != nil {
 						return fmt.Errorf("experiment %s: %w", expID, err)
 					}
 				} else {
 					if provs := distinctObservationProvenances(candObs); len(provs) > 1 {
 						return fmt.Errorf(
-							"experiment %s has observations for multiple candidate refs/shas (%s); rerun analyze with --candidate-ref <ref>",
+							"experiment %s has observations for multiple candidate scopes (%s); rerun analyze with --candidate-ref <stored-ref>",
 							expID, formatObservationProvenances(provs),
 						)
 					}
@@ -175,30 +170,40 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 }
 
 type observationProvenance struct {
-	Ref string
-	SHA string
-}
-
-func normalizeAnalyzeCandidateRef(exp *entity.Experiment, candidateRef string) (string, error) {
-	ref := strings.TrimSpace(candidateRef)
-	if ref == "" {
-		return "", fmt.Errorf("--candidate-ref is required")
-	}
-	repoDir := exp.Worktree
-	if strings.TrimSpace(repoDir) == "" {
-		repoDir = globalProjectDir
-	}
-	sym, err := worktree.SymbolicFullName(repoDir, ref)
-	if err != nil {
-		return "", fmt.Errorf("resolve candidate ref %q for %s: %w", ref, exp.ID, err)
-	}
-	if !strings.HasPrefix(sym, "refs/") {
-		return "", fmt.Errorf("candidate ref %q is not a named git ref", ref)
-	}
-	return sym, nil
+	Attempt int
+	Ref     string
+	SHA     string
 }
 
 func filterAnalyzeObservationsByCandidateRef(obs []*entity.Observation, candidateRef string) ([]*entity.Observation, error) {
+	if candidateRef == "" {
+		return nil, fmt.Errorf("--candidate-ref is required")
+	}
+	filterRef := candidateRef
+	filtered := filterAnalyzeObservationsByStoredRef(obs, filterRef)
+	if len(filtered) == 0 {
+		resolvedRef, ok, err := resolveAnalyzeCandidateRefFromStoredObservations(obs, candidateRef)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			filterRef = resolvedRef
+			filtered = filterAnalyzeObservationsByStoredRef(obs, filterRef)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no observations recorded for candidate ref %s (candidate_ref matching is literal; use the stored full ref value)", candidateRef)
+	}
+	if provs := distinctObservationProvenances(filtered); len(provs) > 1 {
+		return nil, fmt.Errorf(
+			"candidate ref %s maps to multiple recorded candidate scopes (%s); use a unique candidate ref per measured candidate",
+			candidateRef, formatObservationProvenances(provs),
+		)
+	}
+	return filtered, nil
+}
+
+func filterAnalyzeObservationsByStoredRef(obs []*entity.Observation, candidateRef string) []*entity.Observation {
 	filtered := make([]*entity.Observation, 0, len(obs))
 	for _, o := range obs {
 		if o == nil {
@@ -208,16 +213,53 @@ func filterAnalyzeObservationsByCandidateRef(obs []*entity.Observation, candidat
 			filtered = append(filtered, o)
 		}
 	}
-	if len(filtered) == 0 {
-		return nil, fmt.Errorf("no observations recorded for candidate ref %s", candidateRef)
+	return filtered
+}
+
+func resolveAnalyzeCandidateRefFromStoredObservations(obs []*entity.Observation, candidateRef string) (string, bool, error) {
+	if strings.HasPrefix(candidateRef, "refs/") {
+		return "", false, nil
 	}
-	if provs := distinctObservationProvenances(filtered); len(provs) > 1 {
-		return nil, fmt.Errorf(
-			"candidate ref %s maps to multiple recorded SHAs (%s); use a unique candidate ref per measured candidate",
-			candidateRef, formatObservationProvenances(provs),
-		)
+	matches := map[string]struct{}{}
+	for _, o := range obs {
+		if o == nil {
+			continue
+		}
+		stored := strings.TrimSpace(o.CandidateRef)
+		if stored == "" || !storedAnalyzeCandidateRefMatches(stored, candidateRef) {
+			continue
+		}
+		matches[stored] = struct{}{}
 	}
-	return filtered, nil
+	switch len(matches) {
+	case 0:
+		return "", false, nil
+	case 1:
+		for stored := range matches {
+			return stored, true, nil
+		}
+	default:
+		var refs []string
+		for stored := range matches {
+			refs = append(refs, stored)
+		}
+		sort.Strings(refs)
+		return "", false, fmt.Errorf("candidate ref %s matches multiple stored refs (%s); use the stored full ref value", candidateRef, strings.Join(refs, ", "))
+	}
+	return "", false, nil
+}
+
+func storedAnalyzeCandidateRefMatches(stored, candidateRef string) bool {
+	if stored == candidateRef {
+		return true
+	}
+	if strings.TrimPrefix(stored, "refs/heads/") == candidateRef {
+		return true
+	}
+	if strings.TrimPrefix(stored, "refs/tags/") == candidateRef {
+		return true
+	}
+	return false
 }
 
 func distinctObservationProvenances(obs []*entity.Observation) []observationProvenance {
@@ -228,8 +270,9 @@ func distinctObservationProvenances(obs []*entity.Observation) []observationProv
 			continue
 		}
 		p := observationProvenance{
-			Ref: strings.TrimSpace(o.CandidateRef),
-			SHA: strings.TrimSpace(o.CandidateSHA),
+			Attempt: o.Attempt,
+			Ref:     strings.TrimSpace(o.CandidateRef),
+			SHA:     strings.TrimSpace(o.CandidateSHA),
 		}
 		if _, ok := seen[p]; ok {
 			continue
@@ -238,6 +281,9 @@ func distinctObservationProvenances(obs []*entity.Observation) []observationProv
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Attempt != out[j].Attempt {
+			return out[i].Attempt < out[j].Attempt
+		}
 		if out[i].Ref == out[j].Ref {
 			return out[i].SHA < out[j].SHA
 		}
@@ -249,13 +295,19 @@ func distinctObservationProvenances(obs []*entity.Observation) []observationProv
 func formatObservationProvenances(provs []observationProvenance) string {
 	parts := make([]string, 0, len(provs))
 	for _, p := range provs {
+		prefix := ""
+		if p.Attempt > 0 {
+			prefix = fmt.Sprintf("attempt=%d ", p.Attempt)
+		}
 		switch {
 		case p.Ref != "" && p.SHA != "":
-			parts = append(parts, fmt.Sprintf("%s@%s", p.Ref, shortSHA(p.SHA)))
+			parts = append(parts, fmt.Sprintf("%s%s@%s", prefix, p.Ref, shortSHA(p.SHA)))
 		case p.Ref != "":
-			parts = append(parts, p.Ref)
+			parts = append(parts, prefix+p.Ref)
 		case p.SHA != "":
-			parts = append(parts, shortSHA(p.SHA))
+			parts = append(parts, prefix+shortSHA(p.SHA))
+		case prefix != "":
+			parts = append(parts, strings.TrimSpace(prefix))
 		default:
 			parts = append(parts, "(legacy)")
 		}

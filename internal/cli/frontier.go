@@ -130,7 +130,7 @@ func collectFrontiers(s *store.Store, scope goalScope) ([]goalFrontier, error) {
 	if err != nil {
 		return nil, err
 	}
-	obsByExp := readmodel.LoadObservationsByExperiment(s)
+	obsByExp := readmodel.LoadObservationIndex(s)
 	expClassByID, err := readmodel.ClassifyAllExperimentsForRead(s)
 	if err != nil {
 		return nil, err

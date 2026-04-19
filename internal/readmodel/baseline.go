@@ -3,7 +3,6 @@ package readmodel
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -22,10 +21,25 @@ const (
 // inferred.
 type BaselineResolution struct {
 	ExperimentID       string `json:"experiment,omitempty"`
+	Attempt            int    `json:"attempt,omitempty"`
+	Ref                string `json:"ref,omitempty"`
+	SHA                string `json:"sha,omitempty"`
 	Source             string `json:"source,omitempty"`
 	AncestorHypothesis string `json:"ancestor_hypothesis,omitempty"`
 	AncestorConclusion string `json:"ancestor_conclusion,omitempty"`
 	Note               string `json:"note,omitempty"`
+}
+
+func (r *BaselineResolution) Scope() ObservationScope {
+	if r == nil {
+		return ObservationScope{}
+	}
+	return ObservationScope{
+		Experiment: strings.TrimSpace(r.ExperimentID),
+		Attempt:    r.Attempt,
+		Ref:        strings.TrimSpace(r.Ref),
+		SHA:        strings.TrimSpace(r.SHA),
+	}
 }
 
 // ResolveInferredBaseline resolves conclude's default absolute baseline order:
@@ -33,6 +47,14 @@ type BaselineResolution struct {
 // current goal's mapped baseline. It never applies the explicit
 // --baseline-experiment override; callers handle that strictly at the CLI.
 func ResolveInferredBaseline(s *store.Store, hyp *entity.Hypothesis, candidate *entity.Experiment, instrument string) (*BaselineResolution, error) {
+	obs, err := LoadObservationIndexStrict(s)
+	if err != nil {
+		return nil, err
+	}
+	return ResolveInferredBaselineWithIndex(s, obs, hyp, candidate, instrument)
+}
+
+func ResolveInferredBaselineWithIndex(s *store.Store, obs *ObservationIndex, hyp *entity.Hypothesis, candidate *entity.Experiment, instrument string) (*BaselineResolution, error) {
 	if s == nil || hyp == nil || candidate == nil {
 		return nil, nil
 	}
@@ -40,21 +62,19 @@ func ResolveInferredBaseline(s *store.Store, hyp *entity.Hypothesis, candidate *
 	if instrument == "" {
 		return nil, nil
 	}
-
-	obsByExp, err := loadObservationsByExperimentStrict(s)
-	if err != nil {
-		return nil, err
-	}
 	var notes []string
 
 	if expID := strings.TrimSpace(candidate.Baseline.Experiment); expID != "" {
-		ok, note, err := experimentHasInstrumentData(s, obsByExp, expID, instrument, "candidate recorded baseline")
+		scope, ok, note, err := ResolveExperimentInstrumentScope(s, obs, expID, instrument, "candidate recorded baseline")
 		if err != nil {
 			return nil, err
 		}
 		if ok {
 			return &BaselineResolution{
 				ExperimentID: expID,
+				Attempt:      scope.Attempt,
+				Ref:          scope.Ref,
+				SHA:          scope.SHA,
 				Source:       BaselineSourceCandidateRecorded,
 			}, nil
 		}
@@ -65,7 +85,7 @@ func ResolveInferredBaseline(s *store.Store, hyp *entity.Hypothesis, candidate *
 	if err != nil {
 		return nil, err
 	}
-	ancestor, note, err := resolveAncestorSupportedBaseline(s, hyp, instrument, concls, obsByExp)
+	ancestor, note, err := resolveAncestorSupportedBaseline(s, hyp, instrument, concls, obs)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +95,7 @@ func ResolveInferredBaseline(s *store.Store, hyp *entity.Hypothesis, candidate *
 		return ancestor, nil
 	}
 
-	goalBase, note, err := resolveGoalBaseline(s, hyp.GoalID, instrument, obsByExp)
+	goalBase, note, err := resolveGoalBaseline(s, hyp.GoalID, instrument, obs)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +111,7 @@ func ResolveInferredBaseline(s *store.Store, hyp *entity.Hypothesis, candidate *
 	return &BaselineResolution{Note: joinNotes(notes...)}, nil
 }
 
-func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, instrument string, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation) (*BaselineResolution, string, error) {
+func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, instrument string, concls []*entity.Conclusion, obs *ObservationIndex) (*BaselineResolution, string, error) {
 	if hyp == nil || strings.TrimSpace(hyp.Parent) == "" {
 		return nil, "", nil
 	}
@@ -118,37 +138,40 @@ func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, in
 		}
 
 		accepted := acceptedByHyp[parentID]
-		usableByExp := map[string]*entity.Conclusion{}
+		usableByScope := map[ObservationScope]*entity.Conclusion{}
 		for _, c := range accepted {
-			ok, _, err := experimentHasInstrumentData(s, obsByExp, c.CandidateExp, instrument, "accepted supported ancestor candidate")
-			if err != nil {
-				return nil, "", err
+			scope, ok := obs.ResolveConclusionCandidateScope(c)
+			if !ok {
+				continue
 			}
-			if ok {
-				usableByExp[c.CandidateExp] = preferAncestorConclusion(usableByExp[c.CandidateExp], c)
+			if !observationsContainInstrument(obs.ObservationsForScope(scope), instrument) {
+				continue
 			}
+			usableByScope[scope] = preferAncestorConclusion(usableByScope[scope], c)
 		}
 
-		switch len(usableByExp) {
+		switch len(usableByScope) {
 		case 0:
 			if len(accepted) > 0 {
 				notes = appendNote(notes, fmt.Sprintf("accepted supported ancestor %s has no candidate with observations on instrument %q", parentID, instrument))
 			}
 		case 1:
-			chosen := onlyAncestorConclusion(usableByExp)
+			scope, chosen := onlyAncestorScopeConclusion(usableByScope)
 			return &BaselineResolution{
 				ExperimentID:       chosen.CandidateExp,
+				Attempt:            scope.Attempt,
+				Ref:                scope.Ref,
+				SHA:                scope.SHA,
 				Source:             BaselineSourceAncestorSupported,
 				AncestorHypothesis: parentID,
 				AncestorConclusion: chosen.ID,
 			}, joinNotes(notes...), nil
 		default:
-			expIDs := make([]string, 0, len(usableByExp))
-			for expID := range usableByExp {
-				expIDs = append(expIDs, expID)
+			scopeLabels := make([]ObservationScope, 0, len(usableByScope))
+			for scope := range usableByScope {
+				scopeLabels = append(scopeLabels, scope)
 			}
-			sort.Strings(expIDs)
-			return nil, "", fmt.Errorf("ancestor %s has multiple accepted supported candidate experiments with observations on instrument %q: %s; pass --baseline-experiment explicitly", parentID, instrument, strings.Join(expIDs, ", "))
+			return nil, "", fmt.Errorf("ancestor %s has multiple accepted supported candidate scopes with observations on instrument %q: %s; pass --baseline-experiment explicitly", parentID, instrument, strings.Join(SortedObservationScopeLabels(scopeLabels), ", "))
 		}
 
 		parentID = strings.TrimSpace(parent.Parent)
@@ -157,7 +180,7 @@ func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, in
 	return nil, joinNotes(notes...), nil
 }
 
-func resolveGoalBaseline(s *store.Store, goalID, instrument string, obsByExp map[string][]*entity.Observation) (*BaselineResolution, string, error) {
+func resolveGoalBaseline(s *store.Store, goalID, instrument string, obs *ObservationIndex) (*BaselineResolution, string, error) {
 	goalID = strings.TrimSpace(goalID)
 	if goalID == "" {
 		return nil, "", nil
@@ -172,16 +195,16 @@ func resolveGoalBaseline(s *store.Store, goalID, instrument string, obsByExp map
 	}
 
 	var (
-		usable []string
+		usable []ObservationScope
 		notes  []string
 	)
 	for _, expID := range ids {
-		ok, note, err := experimentHasInstrumentData(s, obsByExp, expID, instrument, "goal baseline")
+		scope, ok, note, err := ResolveExperimentInstrumentScope(s, obs, expID, instrument, "goal baseline")
 		if err != nil {
 			return nil, "", err
 		}
 		if ok {
-			usable = append(usable, expID)
+			usable = append(usable, scope)
 			continue
 		}
 		notes = appendNote(notes, note)
@@ -192,12 +215,14 @@ func resolveGoalBaseline(s *store.Store, goalID, instrument string, obsByExp map
 		return nil, joinNotes(notes...), nil
 	case 1:
 		return &BaselineResolution{
-			ExperimentID: usable[0],
+			ExperimentID: usable[0].Experiment,
+			Attempt:      usable[0].Attempt,
+			Ref:          usable[0].Ref,
+			SHA:          usable[0].SHA,
 			Source:       BaselineSourceGoalBaseline,
 		}, joinNotes(notes...), nil
 	default:
-		sort.Strings(usable)
-		return nil, "", fmt.Errorf("goal %s has multiple baseline experiments with observations on instrument %q: %s; pass --baseline-experiment explicitly", goalID, instrument, strings.Join(usable, ", "))
+		return nil, "", fmt.Errorf("goal %s has multiple baseline scopes with observations on instrument %q: %s; pass --baseline-experiment explicitly", goalID, instrument, strings.Join(SortedObservationScopeLabels(usable), ", "))
 	}
 }
 
@@ -224,27 +249,25 @@ func goalBaselineExperimentIDs(s *store.Store, goalID string) ([]string, error) 
 	return ids, nil
 }
 
-func loadObservationsByExperimentStrict(s *store.Store) (map[string][]*entity.Observation, error) {
-	all, err := s.ListObservations()
-	if err != nil {
-		return nil, err
-	}
-	return GroupObservationsByExperiment(all), nil
-}
-
-func experimentHasInstrumentData(s *store.Store, obsByExp map[string][]*entity.Observation, expID, instrument, label string) (bool, string, error) {
+// ResolveExperimentInstrumentScope selects the single usable observation scope
+// for one experiment on one instrument. It distinguishes missing experiments,
+// missing instrument data, and ambiguous multi-scope measurements.
+func ResolveExperimentInstrumentScope(s *store.Store, obs *ObservationIndex, expID, instrument, label string) (ObservationScope, bool, string, error) {
 	if _, err := s.ReadExperiment(expID); err != nil {
 		if errors.Is(err, store.ErrExperimentNotFound) {
-			return false, fmt.Sprintf("%s %s does not exist", label, expID), nil
+			return ObservationScope{}, false, fmt.Sprintf("%s %s does not exist", label, expID), nil
 		}
-		return false, "", err
+		return ObservationScope{}, false, "", err
 	}
-	for _, o := range obsByExp[expID] {
-		if o != nil && o.Instrument == instrument {
-			return true, "", nil
-		}
+	scopes := obs.ScopesForExperimentInstrument(expID, instrument)
+	switch len(scopes) {
+	case 0:
+		return ObservationScope{}, false, fmt.Sprintf("%s %s has no observations on instrument %q", label, expID, instrument), nil
+	case 1:
+		return scopes[0], true, "", nil
+	default:
+		return ObservationScope{}, false, "", fmt.Errorf("%s %s has multiple observation scopes on instrument %q: %s", label, expID, instrument, strings.Join(SortedObservationScopeLabels(scopes), ", "))
 	}
-	return false, fmt.Sprintf("%s %s has no observations on instrument %q", label, expID, instrument), nil
 }
 
 func preferAncestorConclusion(cur, next *entity.Conclusion) *entity.Conclusion {
@@ -263,11 +286,11 @@ func preferAncestorConclusion(cur, next *entity.Conclusion) *entity.Conclusion {
 	return cur
 }
 
-func onlyAncestorConclusion(m map[string]*entity.Conclusion) *entity.Conclusion {
-	for _, c := range m {
-		return c
+func onlyAncestorScopeConclusion(m map[ObservationScope]*entity.Conclusion) (ObservationScope, *entity.Conclusion) {
+	for scope, c := range m {
+		return scope, c
 	}
-	return nil
+	return ObservationScope{}, nil
 }
 
 func appendNote(notes []string, note string) []string {

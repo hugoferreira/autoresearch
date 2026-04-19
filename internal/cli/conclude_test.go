@@ -20,10 +20,14 @@ type concludeResolutionJSON struct {
 		Reason string `json:"reason"`
 	} `json:"ignored_observations"`
 	CandidateExperiment string `json:"candidate_experiment"`
+	CandidateAttempt    int    `json:"candidate_attempt,omitempty"`
 	CandidateRef        string `json:"candidate_ref,omitempty"`
 	CandidateSHA        string `json:"candidate_sha,omitempty"`
 	CandidateSource     string `json:"candidate_source"`
 	BaselineExperiment  string `json:"baseline_experiment,omitempty"`
+	BaselineAttempt     int    `json:"baseline_attempt,omitempty"`
+	BaselineRef         string `json:"baseline_ref,omitempty"`
+	BaselineSHA         string `json:"baseline_sha,omitempty"`
 	BaselineSource      string `json:"baseline_source"`
 	BaselineNote        string `json:"baseline_note,omitempty"`
 	AncestorHypothesis  string `json:"ancestor_hypothesis,omitempty"`
@@ -175,6 +179,9 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 			CandidateSHA: candidateSHA,
 			Author:       "agent:observer",
 		}
+		if candidateRef != "" || candidateSHA != "" {
+			o.Attempt = 1
+		}
 		if instrument == "binary_size" {
 			o.Unit = "bytes"
 		}
@@ -192,14 +199,15 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 	writeObservation("O-0004", candidateExp.ID, "binary_size", 860, []float64{860, 860, 860, 860, 860}, candidateRef, candidateSHA)
 
 	ancestorConcl := &entity.Conclusion{
-		ID:           "C-0001",
-		Hypothesis:   ancestorHyp.ID,
-		Verdict:      entity.VerdictSupported,
-		Observations: []string{"O-0002"},
-		CandidateExp: ancestorExp.ID,
-		CandidateRef: ancestorRef,
-		CandidateSHA: ancestorSHA,
-		BaselineExp:  goalBaseline.ID,
+		ID:               "C-0001",
+		Hypothesis:       ancestorHyp.ID,
+		Verdict:          entity.VerdictSupported,
+		Observations:     []string{"O-0002"},
+		CandidateExp:     ancestorExp.ID,
+		CandidateAttempt: 1,
+		CandidateRef:     ancestorRef,
+		CandidateSHA:     ancestorSHA,
+		BaselineExp:      goalBaseline.ID,
 		Effect: entity.Effect{
 			Instrument: "timing",
 			DeltaFrac:  -0.15,
@@ -273,6 +281,9 @@ func TestConclude_JSONSurfacesResolutionAndEventAudit(t *testing.T) {
 	if resp.Conclusion.CandidateSHA != fx.candidateSHA {
 		t.Fatalf("candidate_sha = %q, want %q", resp.Conclusion.CandidateSHA, fx.candidateSHA)
 	}
+	if resp.Conclusion.CandidateAttempt != 1 {
+		t.Fatalf("candidate_attempt = %d, want 1", resp.Conclusion.CandidateAttempt)
+	}
 	if got, want := resp.Conclusion.Observations, []string{fx.timingObservation}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("stored observations = %v, want %v", got, want)
 	}
@@ -281,6 +292,9 @@ func TestConclude_JSONSurfacesResolutionAndEventAudit(t *testing.T) {
 	}
 	if resp.Resolution.CandidateSHA != fx.candidateSHA {
 		t.Fatalf("resolution candidate_sha = %q, want %q", resp.Resolution.CandidateSHA, fx.candidateSHA)
+	}
+	if resp.Resolution.CandidateAttempt != 1 {
+		t.Fatalf("resolution candidate_attempt = %d, want 1", resp.Resolution.CandidateAttempt)
 	}
 	if resp.Resolution.CandidateSource != concludeCandidateSourceObservations {
 		t.Fatalf("candidate_source = %q, want %q", resp.Resolution.CandidateSource, concludeCandidateSourceObservations)
@@ -299,6 +313,9 @@ func TestConclude_JSONSurfacesResolutionAndEventAudit(t *testing.T) {
 	}
 	if resp.Resolution.BaselineExperiment != fx.ancestorExperiment {
 		t.Fatalf("baseline_experiment = %q, want %q", resp.Resolution.BaselineExperiment, fx.ancestorExperiment)
+	}
+	if resp.Resolution.BaselineAttempt != 1 {
+		t.Fatalf("baseline_attempt = %d, want 1", resp.Resolution.BaselineAttempt)
 	}
 	if resp.Resolution.BaselineSource != readmodel.BaselineSourceAncestorSupported {
 		t.Fatalf("baseline_source = %q, want %q", resp.Resolution.BaselineSource, readmodel.BaselineSourceAncestorSupported)
@@ -339,8 +356,14 @@ func TestConclude_JSONSurfacesResolutionAndEventAudit(t *testing.T) {
 	if got := payload["candidate_sha"]; got != fx.candidateSHA {
 		t.Fatalf("payload candidate_sha = %v, want %q", got, fx.candidateSHA)
 	}
+	if got := payload["candidate_attempt"]; got != float64(1) {
+		t.Fatalf("payload candidate_attempt = %v, want 1", got)
+	}
 	if got := payload["baseline_source"]; got != readmodel.BaselineSourceAncestorSupported {
 		t.Fatalf("payload baseline_source = %v, want %q", got, readmodel.BaselineSourceAncestorSupported)
+	}
+	if got := payload["baseline_attempt"]; got != float64(1) {
+		t.Fatalf("payload baseline_attempt = %v, want 1", got)
 	}
 	if got := payload["ancestor_hypothesis"]; got != fx.ancestorHypothesis {
 		t.Fatalf("payload ancestor_hypothesis = %v, want %q", got, fx.ancestorHypothesis)
@@ -447,8 +470,244 @@ func TestConclude_RefusesMixedCandidateProvenance(t *testing.T) {
 	if err == nil {
 		t.Fatal("conclude unexpectedly succeeded with mixed candidate provenance")
 	}
-	if !strings.Contains(err.Error(), "mix candidate provenance") {
+	if !strings.Contains(err.Error(), "mix candidate scope") {
 		t.Fatalf("unexpected mixed provenance error: %v", err)
+	}
+}
+
+func TestConclude_RefusesMixedCandidateScopeAcrossAttempts(t *testing.T) {
+	saveGlobals(t)
+	fx := setupConcludeFallbackFixture(t)
+
+	s, err := store.Open(fx.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteObservation(&entity.Observation{
+		ID:           "O-0006",
+		Experiment:   fx.candidateExperiment,
+		Instrument:   "timing",
+		MeasuredAt:   time.Date(2026, 4, 19, 12, 2, 0, 0, time.UTC),
+		Value:        69.9,
+		Samples:      5,
+		PerSample:    []float64{70, 70, 69, 70, 70},
+		Unit:         "ns",
+		Attempt:      2,
+		CandidateRef: fx.candidateRef,
+		CandidateSHA: fx.candidateSHA,
+		Author:       "agent:observer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = runCLIResult(t, fx.dir,
+		"conclude", fx.currentHypothesis,
+		"--verdict", "supported",
+		"--observations", strings.Join([]string{fx.timingObservation, "O-0006"}, ","),
+	)
+	if err == nil {
+		t.Fatal("conclude unexpectedly succeeded with mixed candidate attempts")
+	}
+	if !strings.Contains(err.Error(), "mix candidate scope") {
+		t.Fatalf("unexpected mixed scope error: %v", err)
+	}
+}
+
+func TestConclude_UsesScopedRescuerComparison(t *testing.T) {
+	saveGlobals(t)
+
+	dir := t.TempDir()
+	s, err := store.Create(dir, store.Config{
+		Build: store.CommandSpec{Command: "true"},
+		Test:  store.CommandSpec{Command: "true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	goal := &entity.Goal{
+		ID:              "G-0001",
+		Status:          entity.GoalStatusActive,
+		CreatedAt:       &now,
+		Objective:       entity.Objective{Instrument: "timing", Direction: "decrease"},
+		NeutralBandFrac: 0.05,
+		Rescuers: []entity.Rescuer{
+			{Instrument: "binary_size", Direction: "decrease", MinEffect: 0.05},
+		},
+	}
+	parent := &entity.Hypothesis{
+		ID:        "H-0001",
+		GoalID:    goal.ID,
+		Claim:     "ancestor",
+		Status:    entity.StatusSupported,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+		Predicts: entity.Predicts{
+			Instrument: "timing",
+			Target:     "kernel",
+			Direction:  "decrease",
+			MinEffect:  0.05,
+		},
+	}
+	current := &entity.Hypothesis{
+		ID:        "H-0002",
+		GoalID:    goal.ID,
+		Parent:    parent.ID,
+		Claim:     "candidate",
+		Status:    entity.StatusOpen,
+		Author:    "agent:analyst",
+		CreatedAt: now,
+		Predicts: entity.Predicts{
+			Instrument: "timing",
+			Target:     "kernel",
+			Direction:  "decrease",
+			MinEffect:  0.05,
+		},
+	}
+	ancestorExp := &entity.Experiment{
+		ID:          "E-0001",
+		GoalID:      goal.ID,
+		Hypothesis:  parent.ID,
+		Status:      entity.ExpMeasured,
+		Attempt:     2,
+		Baseline:    entity.Baseline{Ref: "HEAD", SHA: "abc123"},
+		Instruments: []string{"timing", "binary_size"},
+		Author:      "agent:observer",
+		CreatedAt:   now,
+	}
+	candidateExp := &entity.Experiment{
+		ID:          "E-0002",
+		GoalID:      goal.ID,
+		Hypothesis:  current.ID,
+		Status:      entity.ExpMeasured,
+		Attempt:     2,
+		Baseline:    entity.Baseline{Ref: "HEAD", SHA: "abc123"},
+		Instruments: []string{"timing", "binary_size"},
+		Author:      "agent:observer",
+		CreatedAt:   now,
+	}
+	for _, g := range []*entity.Goal{goal} {
+		if err := s.WriteGoal(g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, h := range []*entity.Hypothesis{parent, current} {
+		if err := s.WriteHypothesis(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, e := range []*entity.Experiment{ancestorExp, candidateExp} {
+		if err := s.WriteExperiment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeObs := func(id, expID, instrument string, value float64, attempt int, ref, sha string) {
+		t.Helper()
+		perSample := []float64{value, value, value, value, value}
+		unit := "ns"
+		if instrument == "binary_size" {
+			unit = "bytes"
+		}
+		if err := s.WriteObservation(&entity.Observation{
+			ID:           id,
+			Experiment:   expID,
+			Instrument:   instrument,
+			MeasuredAt:   now,
+			Value:        value,
+			Samples:      len(perSample),
+			PerSample:    perSample,
+			Unit:         unit,
+			Attempt:      attempt,
+			CandidateRef: ref,
+			CandidateSHA: sha,
+			Author:       "agent:observer",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ancestorScopeA := readmodel.ObservationScope{
+		Experiment: ancestorExp.ID,
+		Attempt:    1,
+		Ref:        "refs/heads/candidate/E-0001-a1",
+		SHA:        "1111111111111111111111111111111111111111",
+	}
+	ancestorScopeB := readmodel.ObservationScope{
+		Experiment: ancestorExp.ID,
+		Attempt:    2,
+		Ref:        "refs/heads/candidate/E-0001-a2",
+		SHA:        "2222222222222222222222222222222222222222",
+	}
+	currentScopeA := readmodel.ObservationScope{
+		Experiment: candidateExp.ID,
+		Attempt:    1,
+		Ref:        "refs/heads/candidate/E-0002-a1",
+		SHA:        "3333333333333333333333333333333333333333",
+	}
+	currentScopeB := readmodel.ObservationScope{
+		Experiment: candidateExp.ID,
+		Attempt:    2,
+		Ref:        "refs/heads/candidate/E-0002-a2",
+		SHA:        "4444444444444444444444444444444444444444",
+	}
+
+	writeObs("O-0001", ancestorExp.ID, "timing", 100, ancestorScopeA.Attempt, ancestorScopeA.Ref, ancestorScopeA.SHA)
+	writeObs("O-0002", ancestorExp.ID, "binary_size", 1000, ancestorScopeA.Attempt, ancestorScopeA.Ref, ancestorScopeA.SHA)
+	writeObs("O-0003", ancestorExp.ID, "timing", 95, ancestorScopeB.Attempt, ancestorScopeB.Ref, ancestorScopeB.SHA)
+	writeObs("O-0004", ancestorExp.ID, "binary_size", 800, ancestorScopeB.Attempt, ancestorScopeB.Ref, ancestorScopeB.SHA)
+	writeObs("O-0005", candidateExp.ID, "timing", 100, currentScopeA.Attempt, currentScopeA.Ref, currentScopeA.SHA)
+	writeObs("O-0006", candidateExp.ID, "binary_size", 900, currentScopeA.Attempt, currentScopeA.Ref, currentScopeA.SHA)
+	writeObs("O-0007", candidateExp.ID, "timing", 70, currentScopeB.Attempt, currentScopeB.Ref, currentScopeB.SHA)
+	writeObs("O-0008", candidateExp.ID, "binary_size", 1200, currentScopeB.Attempt, currentScopeB.Ref, currentScopeB.SHA)
+
+	if err := s.WriteConclusion(&entity.Conclusion{
+		ID:               "C-0001",
+		Hypothesis:       parent.ID,
+		Verdict:          entity.VerdictSupported,
+		ReviewedBy:       "human:gate",
+		Observations:     []string{"O-0001"},
+		CandidateExp:     ancestorExp.ID,
+		CandidateAttempt: ancestorScopeA.Attempt,
+		CandidateRef:     ancestorScopeA.Ref,
+		CandidateSHA:     ancestorScopeA.SHA,
+		Effect: entity.Effect{
+			Instrument: "timing",
+			DeltaFrac:  -0.10,
+			NCandidate: 5,
+			NBaseline:  5,
+		},
+		StatTest:  "mann_whitney_u",
+		Strict:    entity.Strict{Passed: true},
+		Author:    "agent:analyst",
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := runCLIJSON[concludeJSONResponse](t, dir,
+		"conclude", current.ID,
+		"--verdict", "supported",
+		"--observations", "O-0005",
+	)
+	if got, want := resp.Conclusion.Verdict, entity.VerdictSupported; got != want {
+		t.Fatalf("verdict = %q, want %q", got, want)
+	}
+	if got, want := resp.Conclusion.Strict.RescuedBy, "binary_size"; got != want {
+		t.Fatalf("rescued_by = %q, want %q", got, want)
+	}
+	if got, want := resp.Resolution.BaselineExperiment, ancestorExp.ID; got != want {
+		t.Fatalf("baseline_experiment = %q, want %q", got, want)
+	}
+	if got, want := resp.Resolution.BaselineAttempt, ancestorScopeA.Attempt; got != want {
+		t.Fatalf("baseline_attempt = %d, want %d", got, want)
+	}
+	if got, want := resp.Resolution.BaselineRef, ancestorScopeA.Ref; got != want {
+		t.Fatalf("baseline_ref = %q, want %q", got, want)
+	}
+	if got, want := resp.Resolution.BaselineSHA, ancestorScopeA.SHA; got != want {
+		t.Fatalf("baseline_sha = %q, want %q", got, want)
 	}
 }
 
