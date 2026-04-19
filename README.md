@@ -105,7 +105,7 @@ The core nouns are:
 | **Experiment** | One concrete implementation attempt for a hypothesis, executed in its own git worktree. | Separates "what we changed" from "what we learned" and makes attempts reproducible. |
 | **Baseline** | A special experiment representing the reference code for a goal. | Gives every later comparison a stable "better than what?" anchor. |
 | **Observation** | The recorded result of running one instrument on one experiment: value, samples, CI, pass/fail, command, artifacts, and metadata. | This is the evidence layer. Conclusions may cite observations, not anecdotes. |
-| **Conclusion** | A verdict over a hypothesis, derived from observations and compared against the goal baseline. | Records whether the evidence actually supports, refutes, or fails to decide the claim. |
+| **Conclusion** | A verdict over a hypothesis, derived from observations and compared against the resolved absolute baseline. | Records whether the evidence actually supports, refutes, or fails to decide the claim. |
 | **Lesson** | A reusable takeaway extracted from prior work, either tied to a hypothesis chain or scoped to the system as a whole. | Prevents later cycles from rediscovering the same dead ends or overestimating future gains. |
 | **Frontier** | A derived view of the best supported conclusions for the current goal, annotated for current loop actionability. | Shows whether the search is still improving or has stalled without hiding historically important wins. |
 | **Instrument** | A command plus parser that turns program behavior into a number or pass/fail result. | Makes optimization targets measurable and repeatable. |

@@ -116,8 +116,11 @@ If the list is empty, create one:
 
     autoresearch experiment baseline --json
 
-The `conclude` command auto-derives the baseline — you do not need to
-pass `--baseline-experiment` manually.
+The `conclude` command auto-derives the baseline when you omit
+`--baseline-experiment`: candidate-recorded baseline if usable, else the
+nearest accepted supported ancestor, else the goal baseline. Its output
+spells out which source it used and any ignored off-instrument
+observations.
 
 ### Command spine
 
@@ -346,11 +349,15 @@ autoresearch conclude <hyp-id> \
     --author agent:orchestrator --json
 ```
 
-The CLI auto-derives two baselines: absolute (the goal's baseline
-experiment) and incremental (the current frontier best). The JSON
-response includes both `effect` (vs absolute) and `incremental_effect`
-(vs frontier best). The strict firewall always evaluates against the
-absolute baseline.
+The CLI auto-derives two baselines. Absolute resolution prefers the
+candidate's recorded baseline when it has matching instrument data, then
+the nearest accepted supported ancestor candidate, then the goal
+baseline. Incremental resolution uses the current frontier best within
+the same goal. JSON and text output report the chosen absolute-baseline
+source, any ignored off-instrument observations, and both `effect`
+(vs absolute) and `incremental_effect` (vs frontier best, when
+available). The strict firewall always evaluates against the absolute
+baseline.
 
 If the firewall downgrades your verdict, **the downgrade is
 authoritative**. Report it in the yield summary.

@@ -264,10 +264,12 @@ experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
         --observations O-XXXX,O-YYYY \
-        [--baseline-experiment E-XXXX] \   # override; auto-derived from goal baseline if omitted
+        [--baseline-experiment E-XXXX] \   # strict override; otherwise auto-derive baseline
         [--interpretation "..."]
-        # Dual baseline: auto-derives absolute (goal baseline) and incremental
-        # (frontier best). JSON output includes both effect and incremental_effect.
+        # Dual baseline: absolute prefers candidate-recorded baseline, then the
+        # nearest accepted supported ancestor, then the goal baseline; incremental
+        # uses the same goal's frontier best. Output reports the chosen source,
+        # ignored off-instrument observations, and both effect + incremental_effect.
 
 ### Conclusions (review and gate reviewer)
     autoresearch conclusion list       [--goal G-NNNN|all] [--hypothesis H-XXXX] [--verdict X]

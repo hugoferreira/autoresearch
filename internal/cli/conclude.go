@@ -15,6 +15,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	concludeCandidateSourceObservations = "observations"
+	concludeBaselineSourceNone          = "none"
+)
+
+type concludeIgnoredObservation struct {
+	ID         string `json:"id"`
+	Instrument string `json:"instrument,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+type concludeResolution struct {
+	RequestedObservations []string                     `json:"requested_observations"`
+	UsedObservations      []string                     `json:"used_observations"`
+	IgnoredObservations   []concludeIgnoredObservation `json:"ignored_observations,omitempty"`
+	CandidateExperiment   string                       `json:"candidate_experiment"`
+	CandidateSource       string                       `json:"candidate_source"`
+	BaselineExperiment    string                       `json:"baseline_experiment,omitempty"`
+	BaselineSource        string                       `json:"baseline_source"`
+	BaselineNote          string                       `json:"baseline_note,omitempty"`
+	AncestorHypothesis    string                       `json:"ancestor_hypothesis,omitempty"`
+	AncestorConclusion    string                       `json:"ancestor_conclusion,omitempty"`
+	IncrementalExperiment string                       `json:"incremental_experiment,omitempty"`
+}
+
 func concludeCommands() []*cobra.Command {
 	return []*cobra.Command{concludeCmd()}
 }
@@ -41,10 +66,18 @@ downgrade is recorded in the conclusion's strict_check block and in
 events.jsonl.
 
 Observations are concatenated by instrument. The candidate experiment is
-inferred from the observations; the baseline experiment is taken from
---baseline-experiment, or from the candidate's recorded baseline if set,
-or omitted entirely (in which case "supported" is automatically
-downgraded since there is no comparator).`,
+inferred from the observations. Requested observation ids on other
+instruments are ignored and reported in the CLI output; the remaining
+predicted-instrument observations must all belong to the same candidate
+experiment.
+
+The absolute baseline is resolved in this order: explicit
+--baseline-experiment (strict; no fallback), the candidate's recorded
+baseline if it has matching instrument data, the nearest accepted
+supported ancestor conclusion candidate, then the current goal's mapped
+baseline. If no usable comparator can be inferred, "supported" is
+automatically downgraded since there is no comparison. CLI and JSON
+output report which baseline source was used and any fallback note.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
@@ -67,79 +100,72 @@ downgraded since there is no comparator).`,
 				return fmt.Errorf("hypothesis %s is killed; reopen before concluding", hypID)
 			}
 
-			// Load observations, enforce they target the hypothesis's predicted instrument
-			// and all belong to the same candidate experiment.
-			var candObs []*entity.Observation
-			candExp := ""
-			for _, oid := range obsList {
-				o, err := s.ReadObservation(strings.TrimSpace(oid))
-				if err != nil {
-					return err
-				}
-				if o.Instrument != hyp.Predicts.Instrument {
-					return fmt.Errorf("observation %s uses instrument %q but hypothesis predicts on %q", o.ID, o.Instrument, hyp.Predicts.Instrument)
-				}
-				if candExp == "" {
-					candExp = o.Experiment
-				} else if candExp != o.Experiment {
-					return fmt.Errorf("observations belong to different experiments (%s and %s); pass only observations from a single candidate", candExp, o.Experiment)
-				}
-				candObs = append(candObs, o)
-			}
-
-			// Resolve absolute baseline: prefer --baseline-experiment flag,
-			// then the candidate's recorded baseline, then the goal's
-			// IsBaseline experiment.
-			if baselineExp == "" {
-				candExpRec, err := s.ReadExperiment(candExp)
-				if err != nil {
-					return err
-				}
-				if candExpRec.Baseline.Experiment != "" {
-					baselineExp = candExpRec.Baseline.Experiment
-				}
-			}
-			if baselineExp == "" {
-				// Fall back to goal's baseline experiment.
-				exps, err := s.ListExperiments()
-				if err != nil {
-					return err
-				}
-				for _, e := range exps {
-					if e.IsBaseline {
-						baselineExp = e.ID
-						break
-					}
-				}
-			}
-
-			var baseObs []*entity.Observation
-			if baselineExp != "" {
-				all, err := s.ListObservationsForExperiment(baselineExp)
-				if err != nil {
-					return err
-				}
-				for _, o := range all {
-					if o.Instrument == hyp.Predicts.Instrument {
-						baseObs = append(baseObs, o)
-					}
-				}
-				if len(baseObs) == 0 {
-					return fmt.Errorf("baseline experiment %s has no observations on instrument %q", baselineExp, hyp.Predicts.Instrument)
-				}
-			}
-
-			// Resolve incremental baseline: the frontier best experiment.
-			var incrementalExp string
-			var incrObs []*entity.Observation
-			cfg, err := s.Config()
+			goal, err := goalForHypothesis(s, hyp)
 			if err != nil {
 				return err
 			}
-			goal, goalErr := s.ActiveGoal()
-			if goalErr == nil {
-				concls, _ := s.ListConclusions()
-				frontierRows, _ := readmodel.ComputeFrontier(s, goal, concls)
+
+			requestedObsIDs, candObs, ignoredObs, candExp, err := resolveConcludeObservations(s, hyp, obsList)
+			if err != nil {
+				return err
+			}
+			candExpRec, err := s.ReadExperiment(candExp)
+			if err != nil {
+				return err
+			}
+
+			resolution := concludeResolution{
+				RequestedObservations: requestedObsIDs,
+				UsedObservations:      observationIDs(candObs),
+				IgnoredObservations:   ignoredObs,
+				CandidateExperiment:   candExp,
+				CandidateSource:       concludeCandidateSourceObservations,
+				BaselineSource:        concludeBaselineSourceNone,
+			}
+
+			var (
+				baseObs     []*entity.Observation
+				baselineRes *readmodel.BaselineResolution
+			)
+			if baselineExp = strings.TrimSpace(baselineExp); baselineExp != "" {
+				baseObs, err = baselineObservationsForExperiment(s, baselineExp, hyp.Predicts.Instrument)
+				if err != nil {
+					return err
+				}
+				baselineRes = &readmodel.BaselineResolution{
+					ExperimentID: baselineExp,
+					Source:       readmodel.BaselineSourceExplicit,
+				}
+			} else {
+				baselineRes, err = readmodel.ResolveInferredBaseline(s, hyp, candExpRec, hyp.Predicts.Instrument)
+				if err != nil {
+					return err
+				}
+				if baselineRes != nil {
+					baselineExp = baselineRes.ExperimentID
+				}
+				if baselineExp != "" {
+					baseObs, err = baselineObservationsForExperiment(s, baselineExp, hyp.Predicts.Instrument)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			applyBaselineResolution(&resolution, baselineRes, hyp.Predicts.Instrument)
+
+			// Resolve incremental baseline: the frontier best within the same goal.
+			var incrementalExp string
+			var incrObs []*entity.Observation
+			if goal != nil {
+				concls, err := s.ListConclusions()
+				if err != nil {
+					return err
+				}
+				scopedConcls, err := conclusionsForGoal(s, hyp.GoalID, concls)
+				if err != nil {
+					return err
+				}
+				frontierRows, _ := readmodel.ComputeFrontier(s, goal, scopedConcls)
 				if len(frontierRows) > 0 {
 					best := frontierRows[0].Candidate
 					// Only compute incremental if it differs from the absolute baseline.
@@ -156,7 +182,9 @@ downgraded since there is no comparator).`,
 					}
 				}
 			}
-			_ = cfg // used for future extensions
+			if incrementalExp != "" {
+				resolution.IncrementalExperiment = incrementalExp
+			}
 
 			// Compute comparison against absolute baseline.
 			cSamples := flattenSamples(candObs)
@@ -223,7 +251,7 @@ downgraded since there is no comparator).`,
 			concl := &entity.Conclusion{
 				Hypothesis:      hypID,
 				Verdict:         decision.FinalVerdict,
-				Observations:    obsList,
+				Observations:    resolution.UsedObservations,
 				CandidateExp:    candExp,
 				BaselineExp:     baselineExp,
 				Effect:          effect,
@@ -241,7 +269,10 @@ downgraded since there is no comparator).`,
 				concl.IncrementalEffect = &incrEffect
 			}
 
-			if err := dryRun(w, fmt.Sprintf("%sconclude %s with verdict=%s", downgradeLabel(decision), hypID, decision.FinalVerdict), map[string]any{"conclusion": concl}); err != nil {
+			if err := dryRun(w, fmt.Sprintf("%sconclude %s with verdict=%s", downgradeLabel(decision), hypID, decision.FinalVerdict), map[string]any{
+				"conclusion": concl,
+				"resolution": resolution,
+			}); err != nil {
 				return err
 			}
 
@@ -291,16 +322,33 @@ downgraded since there is no comparator).`,
 
 			// Event.
 			eventData := map[string]any{
-				"verdict":      decision.FinalVerdict,
-				"requested":    verdict,
-				"downgraded":   decision.Downgraded,
-				"reasons":      decision.Reasons,
-				"candidate":    candExp,
-				"baseline":     baselineExp,
-				"observations": obsList,
-				"delta_frac":   effect.DeltaFrac,
-				"ci_low_frac":  effect.CILowFrac,
-				"ci_high_frac": effect.CIHighFrac,
+				"verdict":          decision.FinalVerdict,
+				"requested":        verdict,
+				"downgraded":       decision.Downgraded,
+				"reasons":          decision.Reasons,
+				"candidate":        candExp,
+				"candidate_source": resolution.CandidateSource,
+				"baseline":         baselineExp,
+				"baseline_source":  resolution.BaselineSource,
+				"observations":     resolution.UsedObservations,
+				"delta_frac":       effect.DeltaFrac,
+				"ci_low_frac":      effect.CILowFrac,
+				"ci_high_frac":     effect.CIHighFrac,
+			}
+			if !slices.Equal(resolution.RequestedObservations, resolution.UsedObservations) {
+				eventData["requested_observations"] = resolution.RequestedObservations
+			}
+			if len(resolution.IgnoredObservations) > 0 {
+				eventData["ignored_observations"] = resolution.IgnoredObservations
+			}
+			if resolution.BaselineNote != "" {
+				eventData["baseline_note"] = resolution.BaselineNote
+			}
+			if resolution.AncestorHypothesis != "" {
+				eventData["ancestor_hypothesis"] = resolution.AncestorHypothesis
+			}
+			if resolution.AncestorConclusion != "" {
+				eventData["ancestor_conclusion"] = resolution.AncestorConclusion
 			}
 			if incrementalExp != "" {
 				eventData["incremental_experiment"] = incrementalExp
@@ -329,6 +377,7 @@ downgraded since there is no comparator).`,
 					"id":         id,
 					"conclusion": concl,
 					"decision":   decision,
+					"resolution": resolution,
 				})
 			}
 			if decision.Downgraded {
@@ -346,9 +395,25 @@ downgraded since there is no comparator).`,
 			}
 			w.Textf("wrote %s\n", id)
 			w.Textf("  hypothesis:  %s (now %s)\n", hypID, hyp.Status)
-			w.Textf("  candidate:   %s  (n=%d)\n", candExp, effect.NCandidate)
+			w.Textf("  candidate:   %s  (source=%s, n=%d)\n", candExp, resolution.CandidateSource, effect.NCandidate)
+			w.Textf("  observations: %s\n", strings.Join(resolution.UsedObservations, ", "))
+			if !slices.Equal(resolution.RequestedObservations, resolution.UsedObservations) {
+				w.Textf("  requested:   %s\n", strings.Join(resolution.RequestedObservations, ", "))
+			}
+			for i, ignored := range resolution.IgnoredObservations {
+				label := "  ignored:     "
+				if i > 0 {
+					label = "               "
+				}
+				w.Textf("%s%s (%s)\n", label, ignored.ID, ignored.Reason)
+			}
 			if baselineExp != "" {
-				w.Textf("  baseline:    %s  (n=%d)\n", baselineExp, effect.NBaseline)
+				w.Textf("  baseline:    %s  (n=%d, source=%s)\n", baselineExp, effect.NBaseline, formatBaselineSource(resolution))
+			} else {
+				w.Textf("  baseline:    none  (source=%s)\n", resolution.BaselineSource)
+			}
+			if resolution.BaselineNote != "" {
+				w.Textf("  baseline note: %s\n", resolution.BaselineNote)
 			}
 			if cmp != nil {
 				w.Textf("  delta_frac:  %+.4f  95%% CI [%+.4f, %+.4f]  (vs absolute baseline)\n", effect.DeltaFrac, effect.CILowFrac, effect.CIHighFrac)
@@ -370,7 +435,7 @@ downgraded since there is no comparator).`,
 	}
 	c.Flags().StringVar(&verdict, "verdict", "", "supported | refuted | inconclusive (required)")
 	c.Flags().StringSliceVar(&obsList, "observations", nil, "comma-separated observation ids (required)")
-	c.Flags().StringVar(&baselineExp, "baseline-experiment", "", "baseline experiment id (overrides candidate.baseline.experiment)")
+	c.Flags().StringVar(&baselineExp, "baseline-experiment", "", "baseline experiment id (strict override; no fallback if it lacks the predicted instrument)")
 	c.Flags().StringVar(&interpretation, "interpretation", "", "optional prose interpretation")
 	addAuthorFlag(c, &author, "")
 	c.Flags().StringVar(&reviewedBy, "reviewed-by", "", "critic or human who reviewed")
@@ -407,6 +472,160 @@ func downgradeLabel(d firewall.VerdictDecision) string {
 		return "(rescued) "
 	}
 	return ""
+}
+
+func goalForHypothesis(s *store.Store, hyp *entity.Hypothesis) (*entity.Goal, error) {
+	if s == nil || hyp == nil || strings.TrimSpace(hyp.GoalID) == "" {
+		return nil, nil
+	}
+	goal, err := s.ReadGoal(hyp.GoalID)
+	if errors.Is(err, store.ErrGoalNotFound) {
+		return nil, nil
+	}
+	return goal, err
+}
+
+func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs []string) ([]string, []*entity.Observation, []concludeIgnoredObservation, string, error) {
+	requested := normalizeObservationIDs(rawIDs)
+	if len(requested) == 0 {
+		return nil, nil, nil, "", errors.New("--observations is required (at least one observation id)")
+	}
+
+	var (
+		used    []*entity.Observation
+		ignored []concludeIgnoredObservation
+		candExp string
+	)
+	for _, oid := range requested {
+		o, err := s.ReadObservation(oid)
+		if err != nil {
+			return nil, nil, nil, "", err
+		}
+		if o.Instrument != hyp.Predicts.Instrument {
+			ignored = append(ignored, concludeIgnoredObservation{
+				ID:         o.ID,
+				Instrument: o.Instrument,
+				Reason:     fmt.Sprintf("instrument %q does not match predicted instrument %q", o.Instrument, hyp.Predicts.Instrument),
+			})
+			continue
+		}
+		if candExp == "" {
+			candExp = o.Experiment
+		} else if candExp != o.Experiment {
+			return nil, nil, nil, "", fmt.Errorf("observations belong to different experiments (%s and %s); pass only observations from a single candidate", candExp, o.Experiment)
+		}
+		used = append(used, o)
+	}
+	if len(used) == 0 {
+		var ignoredIDs []string
+		for _, ignoredObs := range ignored {
+			ignoredIDs = append(ignoredIDs, ignoredObs.ID)
+		}
+		if len(ignoredIDs) > 0 {
+			return nil, nil, nil, "", fmt.Errorf("none of the requested observations use predicted instrument %q; ignored: %s", hyp.Predicts.Instrument, strings.Join(ignoredIDs, ", "))
+		}
+		return nil, nil, nil, "", fmt.Errorf("none of the requested observations use predicted instrument %q", hyp.Predicts.Instrument)
+	}
+	return requested, used, ignored, candExp, nil
+}
+
+func normalizeObservationIDs(rawIDs []string) []string {
+	var ids []string
+	for _, raw := range rawIDs {
+		if id := strings.TrimSpace(raw); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func observationIDs(obs []*entity.Observation) []string {
+	ids := make([]string, 0, len(obs))
+	for _, o := range obs {
+		if o != nil {
+			ids = append(ids, o.ID)
+		}
+	}
+	return ids
+}
+
+func baselineObservationsForExperiment(s *store.Store, expID, instrument string) ([]*entity.Observation, error) {
+	if expID == "" {
+		return nil, nil
+	}
+	if _, err := s.ReadExperiment(expID); err != nil {
+		return nil, fmt.Errorf("baseline experiment %s: %w", expID, err)
+	}
+	all, err := s.ListObservationsForExperiment(expID)
+	if err != nil {
+		return nil, err
+	}
+	var filtered []*entity.Observation
+	for _, o := range all {
+		if o.Instrument == instrument {
+			filtered = append(filtered, o)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("baseline experiment %s has no observations on instrument %q", expID, instrument)
+	}
+	return filtered, nil
+}
+
+func applyBaselineResolution(res *concludeResolution, baseline *readmodel.BaselineResolution, instrument string) {
+	if res == nil {
+		return
+	}
+	res.BaselineSource = concludeBaselineSourceNone
+	if baseline == nil {
+		res.BaselineNote = fmt.Sprintf("no usable baseline could be inferred for instrument %q", instrument)
+		return
+	}
+	res.BaselineExperiment = baseline.ExperimentID
+	if baseline.Source != "" {
+		res.BaselineSource = baseline.Source
+	}
+	res.BaselineNote = baseline.Note
+	res.AncestorHypothesis = baseline.AncestorHypothesis
+	res.AncestorConclusion = baseline.AncestorConclusion
+	if res.BaselineExperiment == "" && res.BaselineNote == "" {
+		res.BaselineNote = fmt.Sprintf("no usable baseline could be inferred for instrument %q", instrument)
+	}
+}
+
+func formatBaselineSource(res concludeResolution) string {
+	if res.BaselineSource == readmodel.BaselineSourceAncestorSupported &&
+		res.AncestorHypothesis != "" &&
+		res.AncestorConclusion != "" {
+		return fmt.Sprintf("%s via %s/%s", res.BaselineSource, res.AncestorHypothesis, res.AncestorConclusion)
+	}
+	return res.BaselineSource
+}
+
+func conclusionsForGoal(s *store.Store, goalID string, concls []*entity.Conclusion) ([]*entity.Conclusion, error) {
+	if goalID == "" {
+		return nil, nil
+	}
+	goalByHypothesis := map[string]string{}
+	out := make([]*entity.Conclusion, 0, len(concls))
+	for _, c := range concls {
+		if c == nil || c.Hypothesis == "" {
+			continue
+		}
+		gid, ok := goalByHypothesis[c.Hypothesis]
+		if !ok {
+			h, err := s.ReadHypothesis(c.Hypothesis)
+			if err != nil {
+				return nil, err
+			}
+			gid = h.GoalID
+			goalByHypothesis[c.Hypothesis] = gid
+		}
+		if gid == goalID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 // samplesForInstrument flattens every per-sample slice across observations
