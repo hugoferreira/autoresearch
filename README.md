@@ -243,9 +243,10 @@ All commands accept `--json` (machine-readable output), `-C/--project-dir`
 is paused.
 
 `observe` is idempotent by default for the current implementation attempt and
-candidate commit: existing samples on that scope satisfy or top up the target
-rather than re-running blindly. Use `observe check` for the cheap probe, and
-`--append` when you intentionally want another fresh run.
+candidate snapshot: existing samples on that scope satisfy or top up the
+target rather than re-running blindly. Dirty worktrees disable reuse until the
+candidate is clean or committed again. Use `observe check` for the cheap
+probe, and `--append` when you intentionally want another fresh run.
 
 | Group | Verbs |
 | --- | --- |

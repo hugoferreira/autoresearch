@@ -340,6 +340,40 @@ func TestObserveCheckIgnoresObservationsAfterCandidateCommitChanges(t *testing.T
 	}
 }
 
+func TestObserveDirtyWorktreeDisablesReuse(t *testing.T) {
+	saveGlobals(t)
+	dir := setupObserveScenarioStore(t)
+	registerScenarioInstruments(t, dir)
+	scenario := setupObserveScenarioExperiment(t, dir, "timing", "--constraint-max", "binary_size=1000")
+	writeScenarioMetrics(t, scenario.Worktree, "90\n", "900\n")
+	gitCommitAll(t, scenario.Worktree, "candidate a")
+	first := runCLIJSON[observeRecordJSON](t, dir, "observe", scenario.ExpID, "--instrument", "timing")
+
+	writeScenarioMetrics(t, scenario.Worktree, "80\n", "900\n")
+
+	check := runCLIJSON[observeCheckJSON](t, dir,
+		"observe", "check", scenario.ExpID,
+		"--instrument", "timing",
+	)
+	if got, want := check.Check.CurrentSamples, 0; got != want {
+		t.Fatalf("current_samples after dirty edit = %d, want %d", got, want)
+	}
+	if check.Check.TargetSatisfied {
+		t.Fatal("target_satisfied = true after dirty edit, want false")
+	}
+
+	second := runCLIJSON[observeRecordJSON](t, dir, "observe", scenario.ExpID, "--instrument", "timing")
+	if second.ID == first.ID {
+		t.Fatalf("reused stale observation id %q after dirty edit", second.ID)
+	}
+	if got, want := second.Observation.Value, 80.0; got != want {
+		t.Fatalf("second observation value = %v, want %v", got, want)
+	}
+	if got, want := second.SamplesAdded, 3; got != want {
+		t.Fatalf("samples_added after dirty edit = %d, want %d", got, want)
+	}
+}
+
 func TestObserveAllJSONReturnsCurrentObservationSetOnIdempotentRerun(t *testing.T) {
 	saveGlobals(t)
 	dir := setupObserveScenarioStore(t)

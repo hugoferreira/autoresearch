@@ -45,6 +45,7 @@ type observeExecution struct {
 type observeScope struct {
 	Attempt      int
 	CandidateSHA string
+	DirtyPaths   []string
 }
 
 type observeAllExecution struct {
@@ -110,9 +111,14 @@ func resolveObserveScope(exp *entity.Experiment) (observeScope, error) {
 	if err != nil {
 		return observeScope{}, fmt.Errorf("resolve candidate HEAD for %s: %w", exp.ID, err)
 	}
+	dirtyPaths, err := observeScopeDirtyPaths(exp.Worktree)
+	if err != nil {
+		return observeScope{}, fmt.Errorf("inspect candidate dirtiness for %s: %w", exp.ID, err)
+	}
 	return observeScope{
 		Attempt:      exp.Attempt,
 		CandidateSHA: sha,
+		DirtyPaths:   dirtyPaths,
 	}, nil
 }
 
@@ -121,11 +127,37 @@ func loadCurrentObservations(s *store.Store, exp *entity.Experiment) (observeSco
 	if err != nil {
 		return observeScope{}, nil, err
 	}
+	if !scope.reuseEnabled() {
+		return scope, nil, nil
+	}
 	all, err := s.ListObservationsForExperiment(exp.ID)
 	if err != nil {
 		return observeScope{}, nil, err
 	}
 	return scope, filterObservationsByScope(all, scope), nil
+}
+
+func observeScopeDirtyPaths(worktreeDir string) ([]string, error) {
+	paths, err := worktree.DirtyPaths(worktreeDir)
+	if err != nil {
+		return nil, err
+	}
+	managed, err := autoresearchManagedCheckoutPaths()
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path == entity.BriefFileName || isAutoresearchManagedCheckoutPath(path, managed) {
+			continue
+		}
+		filtered = append(filtered, path)
+	}
+	return filtered, nil
+}
+
+func (s observeScope) reuseEnabled() bool {
+	return len(s.DirtyPaths) == 0
 }
 
 func filterObservationsByScope(observations []*entity.Observation, scope observeScope) []*entity.Observation {
@@ -140,6 +172,9 @@ func filterObservationsByScope(observations []*entity.Observation, scope observe
 
 func observationInScope(o *entity.Observation, scope observeScope) bool {
 	if o == nil {
+		return false
+	}
+	if !scope.reuseEnabled() {
 		return false
 	}
 	if o.Attempt != scope.Attempt {

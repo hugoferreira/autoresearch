@@ -36,10 +36,11 @@ the artifact is guaranteed to exist on disk. This is the speculation/
 observation firewall, made physical.
 
 By default, observe is idempotent for the current implementation attempt
-and candidate commit:
+and candidate snapshot:
 if enough samples already exist for the current implementation attempt and
-candidate commit, it no-ops; if some exist but not enough, it tops up to
-the requested total. Pass --append to force another run.`,
+candidate snapshot, it no-ops; if some exist but not enough, it tops up to
+the requested total. Dirty worktrees disable reuse until the candidate is
+clean or committed again. Pass --append to force another run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)

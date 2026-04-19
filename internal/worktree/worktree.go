@@ -113,7 +113,7 @@ func Merge(projectDir, branch string) (string, error) {
 	return run(projectDir, "merge", branch, "--no-edit")
 }
 
-// DirtyPaths returns relative paths in the main checkout that differ from
+// DirtyPaths returns relative paths in the given checkout that differ from
 // HEAD, including untracked files. The list is sorted and deduplicated. If the
 // directory is not a git repo, it returns an empty list.
 func DirtyPaths(projectDir string) ([]string, error) {

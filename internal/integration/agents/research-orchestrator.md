@@ -324,10 +324,11 @@ autoresearch observe check <exp-id> --instrument <name> --json
 ```
 
 `observe` is idempotent by default for the current implementation
-attempt and candidate commit: if enough samples already exist in that
+attempt and candidate snapshot: if enough samples already exist in that
 scope it no-ops, and if some exist but not enough it tops up to the
-target. Use `--append` only when you intentionally want another fresh
-run even though the target is already met.
+target. Dirty worktrees disable reuse until the candidate is clean or
+committed again. Use `--append` only when you intentionally want
+another fresh run even though the target is already met.
 
 To run a single instrument instead:
 
