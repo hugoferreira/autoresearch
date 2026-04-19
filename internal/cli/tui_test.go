@@ -624,7 +624,7 @@ func TestTUI_FrontierView(t *testing.T) {
 	}
 }
 
-func TestTUI_FrontierViewShowsDeadClassification(t *testing.T) {
+func TestTUI_FrontierViewShowsHypothesisStatusMarker(t *testing.T) {
 	v := newFrontierView(goalScope{GoalID: "G-0001"})
 	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
 	rows := []frontierRow{{
@@ -637,8 +637,28 @@ func TestTUI_FrontierViewShowsDeadClassification(t *testing.T) {
 		assessment: frontierGoalAssessment{Mode: "open_ended", RecommendedAction: "continue"},
 	}, nil)
 	out := stripANSI(nv.view(120, 20))
-	if !strings.Contains(out, "[dead]") {
-		t.Fatalf("frontier view missing dead marker:\n%s", out)
+	if !strings.Contains(out, "[supported]") {
+		t.Fatalf("frontier view missing supported marker:\n%s", out)
+	}
+	if strings.Contains(out, "[dead]") {
+		t.Fatalf("frontier view should not show dead marker for supported hypotheses:\n%s", out)
+	}
+}
+
+func TestTUI_DashboardFrontierShowsHypothesisStatusMarker(t *testing.T) {
+	v := newDashboardView(goalScope{All: true})
+	snap := tuiRichSnapshot()
+	snap.Frontier = []frontierRow{{
+		Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25,
+		Classification: experimentClassificationDead, HypothesisStatus: entity.StatusSupported,
+	}}
+	nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
+	out := stripANSI(nv.view(140, 40))
+	if !strings.Contains(out, "[supported]") {
+		t.Fatalf("dashboard frontier missing supported marker:\n%s", out)
+	}
+	if strings.Contains(out, "[dead]") {
+		t.Fatalf("dashboard frontier should not show dead marker for supported hypotheses:\n%s", out)
 	}
 }
 

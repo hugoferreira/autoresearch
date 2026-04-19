@@ -311,8 +311,8 @@ func (v *frontierView) view(width, height int) string {
 			v.goal.Objective.Instrument,
 			r.Value,
 			r.DeltaFrac)
-		if r.Classification == experimentClassificationDead {
-			rows[i] += "  " + tuiDim.Render(experimentClassificationMarker(r.Classification))
+		if marker := frontierClassificationMarker(r.Classification, r.HypothesisStatus); marker != "" {
+			rows[i] += "  " + tuiDim.Render(marker)
 		}
 	}
 	return renderFilteredListBody(header, rows, v.cursor, width, height)

@@ -535,8 +535,8 @@ func renderDashboardFrontier(w io.Writer, snap *dashboardSnapshot, a *ansi) {
 				marker = " " + a.boldYellow("*")
 			}
 			dead := ""
-			if r.Classification == experimentClassificationDead {
-				dead = "  " + a.dim(experimentClassificationMarker(r.Classification))
+			if marker := frontierClassificationMarker(r.Classification, r.HypothesisStatus); marker != "" {
+				dead = "  " + a.dim(marker)
 			}
 			fmt.Fprintf(w, " %s %s  %s  %s=%.6g%s\n",
 				marker, a.cyan(r.Conclusion), a.cyan(r.Hypothesis), snap.Goal.Objective.Instrument, r.Value, dead)

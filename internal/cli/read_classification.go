@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 )
@@ -62,4 +63,22 @@ func experimentClassificationMarker(classification string) string {
 		return "[dead]"
 	}
 	return ""
+}
+
+func frontierClassificationMarker(classification, hypothesisStatus string) string {
+	if classification != experimentClassificationDead {
+		return ""
+	}
+	switch hypothesisStatus {
+	case entity.StatusSupported:
+		return "[supported]"
+	case entity.StatusRefuted:
+		return "[refuted]"
+	case entity.StatusKilled:
+		return "[killed]"
+	case entity.StatusUnreviewed:
+		return "[pending review]"
+	default:
+		return experimentClassificationMarker(classification)
+	}
 }

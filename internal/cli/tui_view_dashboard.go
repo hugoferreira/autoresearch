@@ -503,8 +503,8 @@ func (v *dashboardView) renderFrontierPanel(width, height int) string {
 			tuiCyan.Render(r.Hypothesis),
 			snap.Goal.Objective.Instrument,
 			r.Value)
-		if r.Classification == experimentClassificationDead {
-			line += "  " + tuiDim.Render(experimentClassificationMarker(r.Classification))
+		if marker := frontierClassificationMarker(r.Classification, r.HypothesisStatus); marker != "" {
+			line += "  " + tuiDim.Render(marker)
 		}
 		lines = append(lines, line)
 	}
