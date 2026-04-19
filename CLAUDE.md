@@ -68,7 +68,8 @@ get a new file plus an entry in the `groups` slice in `Root()`.
 - **Read vs. write verbs.** Mutating verbs must check the pause flag via the
   store and return `ErrPaused` (exit 3) when paused. Read-only verbs
   (`status`, `log`, `tree`, `frontier`, `report`, `artifact <read>`,
-  `conclusion show`, `dashboard`, `*-list`, `*-show`) work even when paused.
+  `conclusion show`, `dashboard`, `observe check`, `*-list`, `*-show`) work
+  even when paused.
 - **Read models live in `internal/readmodel/`.** `experiment list/show`,
   `frontier`, `status`, `dashboard`, and the TUI consume shared read-side
   projections from there. Don't re-encode "live/dead", frontier, or

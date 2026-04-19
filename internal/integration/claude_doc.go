@@ -257,9 +257,16 @@ instruments have already been observed with a passing result on the same
 experiment. If a dependency is not satisfied, ` + "`observe`" + ` refuses. Use
 ` + "`observe --force`" + ` to bypass the dependency gate when you know what you're doing.
 
+` + "`observe`" + ` is idempotent by default on the (experiment, instrument) pair: if
+enough samples already exist it no-ops, and if some exist but not enough it
+tops up to the requested total. Use ` + "`observe check`" + ` as the cheap probe
+before rerunning an expensive measurement. Use ` + "`observe --append`" + ` only when
+you intentionally want another fresh run even though the target is already met.
+
 ### Observations and analysis
-    autoresearch observe  <exp-id> --instrument NAME [--samples N]   # single instrument
-    autoresearch observe  <exp-id> --all [--samples N]              # all instruments in dependency order
+    autoresearch observe  check <exp-id> --instrument NAME [--samples N]  # read-only sample probe
+    autoresearch observe  <exp-id> --instrument NAME [--samples N] [--append]
+    autoresearch observe  <exp-id> --all [--samples N] [--append]         # all instruments in dependency order
     autoresearch analyze  <exp-id> [--baseline <baseline-exp-id>] [--instrument NAME] [--iters N]
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \

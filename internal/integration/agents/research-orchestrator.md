@@ -315,7 +315,18 @@ This runs every instrument declared on the experiment, respecting
 `--requires` edges (e.g. compile before test before timing). Capture
 the `.observations` array from the response.
 
-To run a single instrument instead (e.g. for re-measurement):
+Before re-running an expensive single instrument, use the cheap probe:
+
+```sh
+autoresearch observe check <exp-id> --instrument <name> --json
+```
+
+`observe` is idempotent by default: if enough samples already exist it
+no-ops, and if some exist but not enough it tops up to the target. Use
+`--append` only when you intentionally want another fresh run even
+though the target is already met.
+
+To run a single instrument instead:
 
 ```sh
 autoresearch observe <exp-id> --instrument <name> --json

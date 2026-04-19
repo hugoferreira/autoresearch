@@ -242,6 +242,11 @@ All commands accept `--json` (machine-readable output), `-C/--project-dir`
 (target project), and `--dry-run`. Read-only verbs work even when the project
 is paused.
 
+`observe` is idempotent by default: existing samples on an
+`(experiment, instrument)` pair satisfy or top up the target rather than
+re-running blindly. Use `observe check` for the cheap probe, and `--append`
+when you intentionally want another fresh run.
+
 | Group | Verbs |
 | --- | --- |
 | **lifecycle** | `init`, `status`, `pause`, `resume` |
@@ -249,7 +254,7 @@ is paused.
 | **steering** | `steering show`, `steering append` |
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
 | **experiment** | `baseline`, `design`, `implement`, `reset`, `worktree`, `list`, `show` |
-| **observe** | `observe <exp> --instrument <name>`, `observe <exp> --all` |
+| **observe** | `observe check <exp> --instrument <name>`, `observe <exp> --instrument <name> [--append]`, `observe <exp> --all [--append]` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
 | **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |

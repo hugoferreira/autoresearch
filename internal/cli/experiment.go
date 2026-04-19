@@ -416,7 +416,7 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 			}
 
 			// --- Phase 3: Observe all instruments ---
-			results, err := observeAll(s, cfg, e, instruments, 0, or(author, "system"))
+			results, err := observeAll(s, cfg, e, instruments, 0, false, or(author, "system"))
 			if err != nil {
 				return err
 			}
