@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/readmodel"
@@ -527,6 +528,7 @@ type statusView struct {
 	scope goalScope
 	snap  *dashboardSnapshot
 	err   error
+	now   time.Time
 }
 
 func newStatusView(scope goalScope) *statusView { return &statusView{scope: scope} }
@@ -545,10 +547,23 @@ func (v *statusView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 	case dashLoadedMsg:
 		v.snap = msg.snap
 		v.err = msg.err
+		if msg.snap != nil {
+			v.now = msg.snap.CapturedAt
+		} else {
+			v.now = time.Time{}
+		}
 		return v, nil
 	case storeChangedMsg:
 		return v, v.init(s)
 	}
+	return v, nil
+}
+
+func (v *statusView) quietTick(at time.Time, _ *store.Store) (tuiView, tea.Cmd) {
+	if v.snap == nil {
+		return v, nil
+	}
+	v.now = dashboardRenderTime(v.snap, at.UTC())
 	return v, nil
 }
 
@@ -593,10 +608,11 @@ func (v *statusView) view(width, height int) string {
 		lines = append(lines, fmt.Sprintf("  %d experiments (no limit)", snap.Budgets.Usage.Experiments))
 	}
 	if snap.Budgets.Limits.MaxWallTimeH > 0 {
+		elapsedH := dashboardLiveElapsedHours(snap, v.now)
 		lines = append(lines, fmt.Sprintf("  %s", tuiMeterColor(
-			snap.Budgets.Usage.ElapsedH,
+			elapsedH,
 			float64(snap.Budgets.Limits.MaxWallTimeH),
-			fmt.Sprintf("%.1fh/%dh elapsed", snap.Budgets.Usage.ElapsedH, snap.Budgets.Limits.MaxWallTimeH),
+			fmt.Sprintf("%.1fh/%dh elapsed", elapsedH, snap.Budgets.Limits.MaxWallTimeH),
 		)))
 	}
 	if snap.Budgets.Limits.FrontierStallK > 0 && !snap.ScopeAll {

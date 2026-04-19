@@ -136,6 +136,40 @@ func TestTUI_DashboardNarrowFallback(t *testing.T) {
 	}
 }
 
+func TestTUI_DashboardQuietTickAdvancesElapsedFieldsWithoutResettingState(t *testing.T) {
+	v := newDashboardView(goalScope{All: true})
+	snap := tuiRichSnapshot()
+	nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
+	d := nv.(*dashboardView)
+	d.focus = dashFocusInFlight
+	d.cursors[dashFocusInFlight] = 0
+
+	plain := stripANSI(d.view(140, 40))
+	if !strings.Contains(plain, "1.2h/8h") {
+		t.Fatalf("initial dashboard budget missing captured elapsed time:\n%s", plain)
+	}
+	if !strings.Contains(plain, "02:00") {
+		t.Fatalf("initial dashboard in-flight elapsed missing captured time:\n%s", plain)
+	}
+
+	later := snap.CapturedAt.Add(65 * time.Second)
+	nv, _ = d.quietTick(later, nil)
+	d = nv.(*dashboardView)
+	plain = stripANSI(d.view(140, 40))
+	if !strings.Contains(plain, "1.2h/8h") {
+		t.Fatalf("dashboard budget should stay at one decimal hour over a 65s quiet tick:\n%s", plain)
+	}
+	if !strings.Contains(plain, "03:05") {
+		t.Fatalf("dashboard in-flight elapsed did not advance on quiet tick:\n%s", plain)
+	}
+	if got := d.cursors[dashFocusInFlight]; got != 0 {
+		t.Fatalf("quiet tick changed in-flight cursor: got %d want 0", got)
+	}
+	if d.focus != dashFocusInFlight {
+		t.Fatalf("quiet tick changed focus: got %v want %v", d.focus, dashFocusInFlight)
+	}
+}
+
 func TestTUI_DashboardLessonPanelUsesAccuracyArrows(t *testing.T) {
 	snap := tuiRichSnapshot()
 	snap.RecentLessons = []*entity.Lesson{
@@ -668,6 +702,26 @@ func TestTUI_StatusViewShowsStalledMeterForGoalScope(t *testing.T) {
 	out := stripANSI(nv.view(100, 30))
 	if !strings.Contains(out, "stalled 2/5") {
 		t.Fatalf("goal-scoped status view should show stalled meter:\n%s", out)
+	}
+}
+
+func TestTUI_StatusQuietTickAdvancesElapsedBudget(t *testing.T) {
+	snap := tuiRichSnapshot()
+	v := newStatusView(goalScope{All: true})
+	nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
+	status := nv.(*statusView)
+
+	plain := stripANSI(status.view(100, 30))
+	if !strings.Contains(plain, "1.2h/8h elapsed") {
+		t.Fatalf("initial status budget missing captured elapsed time:\n%s", plain)
+	}
+
+	later := snap.CapturedAt.Add(30 * time.Minute)
+	nv, _ = status.quietTick(later, nil)
+	status = nv.(*statusView)
+	plain = stripANSI(status.view(100, 30))
+	if !strings.Contains(plain, "1.7h/8h elapsed") {
+		t.Fatalf("status budget did not advance on quiet tick:\n%s", plain)
 	}
 }
 

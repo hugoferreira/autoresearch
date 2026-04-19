@@ -19,6 +19,7 @@ type dashboardView struct {
 	scope goalScope
 	snap  *dashboardSnapshot
 	err   error
+	now   time.Time
 
 	focus        dashFocus
 	cursors      [dashPanelCount]int
@@ -67,6 +68,49 @@ func newDashboardView(scope goalScope) *dashboardView {
 
 func (v *dashboardView) title() string { return "Dashboard" }
 
+func dashboardRenderTime(snap *dashboardSnapshot, at time.Time) time.Time {
+	if !at.IsZero() {
+		if snap != nil && !snap.CapturedAt.IsZero() && at.Before(snap.CapturedAt) {
+			return snap.CapturedAt
+		}
+		return at
+	}
+	if snap != nil {
+		return snap.CapturedAt
+	}
+	return time.Time{}
+}
+
+func dashboardLiveElapsedHours(snap *dashboardSnapshot, at time.Time) float64 {
+	if snap == nil {
+		return 0
+	}
+	elapsed := snap.Budgets.Usage.ElapsedH
+	renderAt := dashboardRenderTime(snap, at)
+	if renderAt.IsZero() || snap.CapturedAt.IsZero() {
+		return elapsed
+	}
+	if delta := renderAt.Sub(snap.CapturedAt); delta > 0 {
+		elapsed += delta.Hours()
+	}
+	return elapsed
+}
+
+func dashboardLiveInFlightElapsed(snap *dashboardSnapshot, row dashboardInFlight, at time.Time) time.Duration {
+	elapsed := time.Duration(row.ElapsedS) * time.Second
+	renderAt := dashboardRenderTime(snap, at)
+	if renderAt.IsZero() || snap == nil || snap.CapturedAt.IsZero() {
+		return elapsed
+	}
+	if delta := renderAt.Sub(snap.CapturedAt); delta > 0 {
+		elapsed += delta
+	}
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
+}
+
 func (v *dashboardView) init(s *store.Store) tea.Cmd {
 	v.eventsLoading = true
 	cmds := []tea.Cmd{
@@ -87,6 +131,11 @@ func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 	case dashLoadedMsg:
 		v.snap = msg.snap
 		v.err = msg.err
+		if msg.snap != nil {
+			v.now = msg.snap.CapturedAt
+		} else {
+			v.now = time.Time{}
+		}
 		return v, nil
 	case dashEventsLoadedMsg:
 		selected := v.selectedEventKey()
@@ -156,6 +205,14 @@ func (v *dashboardView) update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd) {
 		v.rightOverlay = nv
 		return v, cmd
 	}
+	return v, nil
+}
+
+func (v *dashboardView) quietTick(at time.Time, _ *store.Store) (tuiView, tea.Cmd) {
+	if v.snap == nil {
+		return v, nil
+	}
+	v.now = dashboardRenderTime(v.snap, at.UTC())
 	return v, nil
 }
 
@@ -328,9 +385,10 @@ func (v *dashboardView) renderTopStrip(width int) string {
 		parts = append(parts, fmt.Sprintf("%d exp", snap.Budgets.Usage.Experiments))
 	}
 	if snap.Budgets.Limits.MaxWallTimeH > 0 {
+		elapsedH := dashboardLiveElapsedHours(snap, v.now)
 		s := fmt.Sprintf("%.1fh/%dh",
-			snap.Budgets.Usage.ElapsedH, snap.Budgets.Limits.MaxWallTimeH)
-		parts = append(parts, tuiMeterColor(snap.Budgets.Usage.ElapsedH,
+			elapsedH, snap.Budgets.Limits.MaxWallTimeH)
+		parts = append(parts, tuiMeterColor(elapsedH,
 			float64(snap.Budgets.Limits.MaxWallTimeH), s))
 	}
 	if snap.Budgets.Limits.FrontierStallK > 0 {
@@ -471,7 +529,7 @@ func (v *dashboardView) renderInFlightPanel(width, height int) string {
 	for _, r := range v.snap.InFlight {
 		elapsed := "?"
 		if r.ImplementedAt != nil {
-			elapsed = formatElapsed(time.Duration(r.ElapsedS) * time.Second)
+			elapsed = formatElapsed(dashboardLiveInFlightElapsed(v.snap, r, v.now))
 		}
 		line := fmt.Sprintf("%-8s  %s  %s  inst=%s",
 			r.ID,

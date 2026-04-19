@@ -10,6 +10,32 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type staticTUIView struct{}
+
+func (v *staticTUIView) title() string                                       { return "static" }
+func (v *staticTUIView) kind() string                                        { return "test.static" }
+func (v *staticTUIView) init(_ *store.Store) tea.Cmd                         { return nil }
+func (v *staticTUIView) update(_ tea.Msg, _ *store.Store) (tuiView, tea.Cmd) { return v, nil }
+func (v *staticTUIView) view(_, _ int) string                                { return "" }
+func (v *staticTUIView) hints() []tuiHint                                    { return nil }
+
+type quietTickTestView struct {
+	ticks  int
+	lastAt time.Time
+}
+
+func (v *quietTickTestView) title() string                                       { return "tick" }
+func (v *quietTickTestView) kind() string                                        { return "test.tick" }
+func (v *quietTickTestView) init(_ *store.Store) tea.Cmd                         { return nil }
+func (v *quietTickTestView) update(_ tea.Msg, _ *store.Store) (tuiView, tea.Cmd) { return v, nil }
+func (v *quietTickTestView) view(_, _ int) string                                { return "" }
+func (v *quietTickTestView) hints() []tuiHint                                    { return nil }
+func (v *quietTickTestView) quietTick(at time.Time, _ *store.Store) (tuiView, tea.Cmd) {
+	v.ticks++
+	v.lastAt = at
+	return v, nil
+}
+
 // TestTUI_LessonDetail_PreservesScrollAcrossReloads is the regression anchor
 // for issue #25. Before the fix, every refresh tick re-issued a reload of
 // the current entity and the loadedMsg handler called pager.gotoTop(),
@@ -129,12 +155,12 @@ func TestTUI_Artifact_ScrollResetOnlyOnUserModeChange(t *testing.T) {
 	}
 }
 
-// TestTUI_StoreChangedMsg_EmptyBatchIsNoop verifies the app-level behavior
-// that a quiet poll (no new events) produces no view churn. This is the
-// load-bearing property that makes scroll preservation work: if there's
-// nothing new in events.jsonl, the top view is not asked to reload.
-func TestTUI_StoreChangedMsg_EmptyBatchIsNoop(t *testing.T) {
+// TestTUI_StoreChangedMsg_EmptyBatchIsNoopForNonTickViews verifies the
+// app-level behavior that a quiet poll (no new events) still produces no
+// reload path for views that have not opted into elapsed-time repaints.
+func TestTUI_StoreChangedMsg_EmptyBatchIsNoopForNonTickViews(t *testing.T) {
 	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
+	m.stack = []tuiView{&staticTUIView{}}
 	m.eventOffset = 42
 
 	updated, cmd := m.Update(storeChangedMsg{events: nil, newOff: 99})
@@ -147,6 +173,32 @@ func TestTUI_StoreChangedMsg_EmptyBatchIsNoop(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Errorf("empty batch should not emit commands; got %v", cmd)
+	}
+}
+
+func TestTUI_StoreChangedMsg_EmptyBatchDispatchesQuietTickToOptInView(t *testing.T) {
+	at := time.Date(2026, 4, 19, 12, 30, 0, 0, time.UTC)
+	m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
+	m.stack = []tuiView{&quietTickTestView{}}
+	m.eventOffset = 42
+
+	updated, cmd := m.Update(storeChangedMsg{events: nil, newOff: 99, polledAt: at})
+	nm := updated.(tuiModel)
+	if nm.eventOffset != 99 {
+		t.Fatalf("eventOffset = %d, want 99", nm.eventOffset)
+	}
+	if cmd != nil {
+		t.Fatalf("quiet tick repaint should not emit commands; got %v", cmd)
+	}
+	v, ok := nm.top().(*quietTickTestView)
+	if !ok {
+		t.Fatalf("top view = %T, want *quietTickTestView", nm.top())
+	}
+	if v.ticks != 1 {
+		t.Fatalf("quietTick count = %d, want 1", v.ticks)
+	}
+	if !v.lastAt.Equal(at) {
+		t.Fatalf("quietTick time = %s, want %s", v.lastAt, at)
 	}
 }
 
