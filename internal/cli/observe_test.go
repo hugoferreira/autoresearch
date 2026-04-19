@@ -24,8 +24,59 @@ type observeCheckJSON struct {
 	Check observeSampleCheck `json:"check"`
 }
 
+type observeScenarioExperiment struct {
+	ExpID    string
+	Worktree string
+}
+
 func timingSampleTotal(observations []*entity.Observation) int {
 	return samplesForObservedInstrument(store.Instrument{Parser: "builtin:scalar"}, observations, "timing")
+}
+
+func setupObserveScenarioStore(t *testing.T) string {
+	t.Helper()
+	dir := gitInitScenarioRepo(t)
+	if _, err := store.Create(dir, store.Config{
+		Build:     store.CommandSpec{Command: "true"},
+		Test:      store.CommandSpec{Command: "true"},
+		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
+	}); err != nil {
+		t.Fatalf("store.Create: %v", err)
+	}
+	return dir
+}
+
+func setupObserveScenarioExperiment(t *testing.T, dir, instruments string, goalArgs ...string) observeScenarioExperiment {
+	t.Helper()
+
+	args := []string{
+		"goal", "set",
+		"--objective-instrument", "timing",
+		"--objective-target", "kernel",
+		"--objective-direction", "decrease",
+	}
+	args = append(args, goalArgs...)
+	runCLIJSON[cliIDResponse](t, dir, args...)
+
+	hyp := runCLIJSON[cliIDResponse](t, dir,
+		"hypothesis", "add",
+		"--claim", "tighten the hot loop",
+		"--predicts-instrument", "timing",
+		"--predicts-target", "kernel",
+		"--predicts-direction", "decrease",
+		"--predicts-min-effect", "0.1",
+		"--kill-if", "tests fail",
+	)
+	exp := runCLIJSON[cliIDResponse](t, dir,
+		"experiment", "design", hyp.ID,
+		"--baseline", "HEAD",
+		"--instruments", instruments,
+	)
+	impl := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
+	return observeScenarioExperiment{
+		ExpID:    exp.ID,
+		Worktree: impl.Worktree,
+	}
 }
 
 func setupObserveFixture(t *testing.T) (string, *store.Store) {
@@ -219,52 +270,22 @@ func TestObserveCheckReportsCurrentAndNeededSamples(t *testing.T) {
 
 func TestObserveCheckIgnoresObservationsFromResetAttempts(t *testing.T) {
 	saveGlobals(t)
-	dir := gitInitScenarioRepo(t)
-	if _, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
-	}); err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
-
+	dir := setupObserveScenarioStore(t)
 	registerScenarioInstruments(t, dir)
-
-	runCLIJSON[cliIDResponse](t, dir,
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
-		"--constraint-max", "binary_size=1000",
-	)
-	hyp := runCLIJSON[cliIDResponse](t, dir,
-		"hypothesis", "add",
-		"--claim", "tighten the hot loop",
-		"--predicts-instrument", "timing",
-		"--predicts-target", "kernel",
-		"--predicts-direction", "decrease",
-		"--predicts-min-effect", "0.1",
-		"--kill-if", "tests fail",
-	)
-	exp := runCLIJSON[cliIDResponse](t, dir,
-		"experiment", "design", hyp.ID,
-		"--baseline", "HEAD",
-		"--instruments", "timing",
-	)
-	runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
+	scenario := setupObserveScenarioExperiment(t, dir, "timing", "--constraint-max", "binary_size=1000")
 	first := runCLIJSON[observeRecordJSON](t, dir,
-		"observe", exp.ID,
+		"observe", scenario.ExpID,
 		"--instrument", "timing",
 		"--allow-unchanged",
 	)
 	if first.ID == "" {
 		t.Fatal("first observation id missing")
 	}
-	runCLI(t, dir, "experiment", "reset", exp.ID, "--reason", "retry measurement")
-	runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
+	runCLI(t, dir, "experiment", "reset", scenario.ExpID, "--reason", "retry measurement")
+	runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", scenario.ExpID)
 
 	check := runCLIJSON[observeCheckJSON](t, dir,
-		"observe", "check", exp.ID,
+		"observe", "check", scenario.ExpID,
 		"--instrument", "timing",
 	)
 	if got, want := check.Check.CurrentSamples, 0; got != want {
@@ -275,7 +296,7 @@ func TestObserveCheckIgnoresObservationsFromResetAttempts(t *testing.T) {
 	}
 
 	second := runCLIJSON[observeRecordJSON](t, dir,
-		"observe", exp.ID,
+		"observe", scenario.ExpID,
 		"--instrument", "timing",
 		"--allow-unchanged",
 	)
@@ -287,7 +308,7 @@ func TestObserveCheckIgnoresObservationsFromResetAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	expEntity, err := s.ReadExperiment(exp.ID)
+	expEntity, err := s.ReadExperiment(scenario.ExpID)
 	if err != nil {
 		t.Fatalf("ReadExperiment: %v", err)
 	}
@@ -298,47 +319,17 @@ func TestObserveCheckIgnoresObservationsFromResetAttempts(t *testing.T) {
 
 func TestObserveCheckIgnoresObservationsAfterCandidateCommitChanges(t *testing.T) {
 	saveGlobals(t)
-	dir := gitInitScenarioRepo(t)
-	if _, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
-	}); err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
-
+	dir := setupObserveScenarioStore(t)
 	registerScenarioInstruments(t, dir)
-
-	runCLIJSON[cliIDResponse](t, dir,
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
-		"--constraint-max", "binary_size=1000",
-	)
-	hyp := runCLIJSON[cliIDResponse](t, dir,
-		"hypothesis", "add",
-		"--claim", "tighten the hot loop",
-		"--predicts-instrument", "timing",
-		"--predicts-target", "kernel",
-		"--predicts-direction", "decrease",
-		"--predicts-min-effect", "0.1",
-		"--kill-if", "tests fail",
-	)
-	exp := runCLIJSON[cliIDResponse](t, dir,
-		"experiment", "design", hyp.ID,
-		"--baseline", "HEAD",
-		"--instruments", "timing",
-	)
-	impl := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
-	writeScenarioMetrics(t, impl.Worktree, "90\n", "900\n")
-	gitCommitAll(t, impl.Worktree, "candidate a")
-	runCLIJSON[observeRecordJSON](t, dir, "observe", exp.ID, "--instrument", "timing")
-	writeScenarioMetrics(t, impl.Worktree, "85\n", "900\n")
-	gitCommitAll(t, impl.Worktree, "candidate b")
+	scenario := setupObserveScenarioExperiment(t, dir, "timing", "--constraint-max", "binary_size=1000")
+	writeScenarioMetrics(t, scenario.Worktree, "90\n", "900\n")
+	gitCommitAll(t, scenario.Worktree, "candidate a")
+	runCLIJSON[observeRecordJSON](t, dir, "observe", scenario.ExpID, "--instrument", "timing")
+	writeScenarioMetrics(t, scenario.Worktree, "85\n", "900\n")
+	gitCommitAll(t, scenario.Worktree, "candidate b")
 
 	check := runCLIJSON[observeCheckJSON](t, dir,
-		"observe", "check", exp.ID,
+		"observe", "check", scenario.ExpID,
 		"--instrument", "timing",
 	)
 	if got, want := check.Check.CurrentSamples, 0; got != want {
@@ -351,44 +342,16 @@ func TestObserveCheckIgnoresObservationsAfterCandidateCommitChanges(t *testing.T
 
 func TestObserveAllJSONReturnsCurrentObservationSetOnIdempotentRerun(t *testing.T) {
 	saveGlobals(t)
-	dir := gitInitScenarioRepo(t)
-	if _, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
-	}); err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
-
+	dir := setupObserveScenarioStore(t)
 	registerScenarioInstruments(t, dir)
-
-	runCLIJSON[cliIDResponse](t, dir,
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
+	scenario := setupObserveScenarioExperiment(t, dir, "timing,binary_size,host_test",
 		"--constraint-max", "binary_size=1000",
 		"--constraint-require", "host_test=pass",
 	)
-	hyp := runCLIJSON[cliIDResponse](t, dir,
-		"hypothesis", "add",
-		"--claim", "tighten the hot loop",
-		"--predicts-instrument", "timing",
-		"--predicts-target", "kernel",
-		"--predicts-direction", "decrease",
-		"--predicts-min-effect", "0.1",
-		"--kill-if", "tests fail",
-	)
-	exp := runCLIJSON[cliIDResponse](t, dir,
-		"experiment", "design", hyp.ID,
-		"--baseline", "HEAD",
-		"--instruments", "timing,binary_size,host_test",
-	)
-	impl := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
-	writeScenarioMetrics(t, impl.Worktree, "80\n", "900\n")
-	gitCommitAll(t, impl.Worktree, "candidate")
+	writeScenarioMetrics(t, scenario.Worktree, "80\n", "900\n")
+	gitCommitAll(t, scenario.Worktree, "candidate")
 
-	first := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp.ID, "--all")
+	first := runCLIJSON[cliObserveAllResponse](t, dir, "observe", scenario.ExpID, "--all")
 	if got, want := len(first.Observations), 3; got != want {
 		t.Fatalf("first observations len = %d, want %d", got, want)
 	}
@@ -399,7 +362,7 @@ func TestObserveAllJSONReturnsCurrentObservationSetOnIdempotentRerun(t *testing.
 		t.Fatalf("first reused_observations len = %d, want %d", got, want)
 	}
 
-	second := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp.ID, "--all")
+	second := runCLIJSON[cliObserveAllResponse](t, dir, "observe", scenario.ExpID, "--all")
 	if got, want := second.Action, observeActionSkipped; got != want {
 		t.Fatalf("second action = %q, want %q", got, want)
 	}
@@ -416,15 +379,7 @@ func TestObserveAllJSONReturnsCurrentObservationSetOnIdempotentRerun(t *testing.
 
 func TestObserveAllRerunsFailedPrerequisitesInsteadOfSkippingByCount(t *testing.T) {
 	saveGlobals(t)
-	dir := gitInitScenarioRepo(t)
-	if _, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(t.TempDir(), "worktrees")},
-	}); err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
-
+	dir := setupObserveScenarioStore(t)
 	runCLI(t, dir,
 		"instrument", "register", "timing",
 		"--cmd", "sh",
@@ -443,36 +398,14 @@ func TestObserveAllRerunsFailedPrerequisitesInsteadOfSkippingByCount(t *testing.
 		"--parser", "builtin:passfail",
 		"--unit", "bool",
 	)
-
-	runCLIJSON[cliIDResponse](t, dir,
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
-		"--constraint-require", "host_test=pass",
-	)
-	hyp := runCLIJSON[cliIDResponse](t, dir,
-		"hypothesis", "add",
-		"--claim", "tighten the hot loop",
-		"--predicts-instrument", "timing",
-		"--predicts-target", "kernel",
-		"--predicts-direction", "decrease",
-		"--predicts-min-effect", "0.1",
-		"--kill-if", "tests fail",
-	)
-	exp := runCLIJSON[cliIDResponse](t, dir,
-		"experiment", "design", hyp.ID,
-		"--baseline", "HEAD",
-		"--instruments", "timing,host_test",
-	)
-	impl := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
-	writeScenarioMetrics(t, impl.Worktree, "80\n", "900\n")
-	gitCommitAll(t, impl.Worktree, "candidate")
-	if err := os.Remove(filepath.Join(impl.Worktree, "PASS")); err != nil {
+	scenario := setupObserveScenarioExperiment(t, dir, "timing,host_test", "--constraint-require", "host_test=pass")
+	writeScenarioMetrics(t, scenario.Worktree, "80\n", "900\n")
+	gitCommitAll(t, scenario.Worktree, "candidate")
+	if err := os.Remove(filepath.Join(scenario.Worktree, "PASS")); err != nil {
 		t.Fatalf("remove PASS: %v", err)
 	}
 
-	_, _, err := runCLIResult(t, dir, "observe", exp.ID, "--all")
+	_, _, err := runCLIResult(t, dir, "observe", scenario.ExpID, "--all")
 	if err == nil {
 		t.Fatal("observe --all unexpectedly succeeded with failed prerequisite")
 	}
@@ -480,10 +413,10 @@ func TestObserveAllRerunsFailedPrerequisitesInsteadOfSkippingByCount(t *testing.
 		t.Fatalf("unexpected observe --all error: %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(impl.Worktree, "PASS"), []byte("ok\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenario.Worktree, "PASS"), []byte("ok\n"), 0o644); err != nil {
 		t.Fatalf("restore PASS: %v", err)
 	}
-	resp := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp.ID, "--all")
+	resp := runCLIJSON[cliObserveAllResponse](t, dir, "observe", scenario.ExpID, "--all")
 
 	hostTestRecorded := false
 	timingRecorded := false

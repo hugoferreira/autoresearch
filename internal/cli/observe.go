@@ -165,7 +165,7 @@ the requested total. Pass --append to force another run.`,
 			if err := dryRun(w, actionText, actionPayload); err != nil {
 				return err
 			}
-			exec, err := executeObservationRun(s, cfg, exp, scope, priorObs, check, appendMode, or(author, "agent:observer"))
+			exec, err := executeObservationRun(s, cfg, exp, scope, check, appendMode, or(author, "agent:observer"))
 			if err != nil {
 				return err
 			}

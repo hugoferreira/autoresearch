@@ -292,7 +292,6 @@ func executeObservationRun(
 	cfg *store.Config,
 	exp *entity.Experiment,
 	scope observeScope,
-	currentObservations []*entity.Observation,
 	check observeSampleCheck,
 	appendMode bool,
 	author string,
@@ -301,11 +300,7 @@ func executeObservationRun(
 	if err != nil {
 		return observeExecution{}, err
 	}
-	currentSamples := samplesForObservedInstrument(
-		cfg.Instruments[check.Instrument],
-		append(append([]*entity.Observation(nil), currentObservations...), observations...),
-		check.Instrument,
-	)
+	currentSamples := check.CurrentSamples + samplesForObservedInstrument(cfg.Instruments[check.Instrument], observations, check.Instrument)
 	return buildRecordedObservationResult(check, observations, currentSamples)
 }
 
@@ -328,10 +323,12 @@ func describeObserveAction(exp *entity.Experiment, check observeSampleCheck, app
 	}
 }
 
-func summarizeObserveResults(results []observationResult) observeResultSummary {
+func buildObserveResultSummary(results []observationResult, currentObservations, newObservations []*entity.Observation) observeResultSummary {
 	summary := observeResultSummary{
 		Action:      observeActionRecorded,
-		RecordedIDs: make([]string, 0, len(results)),
+		CurrentIDs:  observationIDs(currentObservations),
+		RecordedIDs: observationIDs(newObservations),
+		ReusedIDs:   currentObservationReuseIDs(currentObservations, newObservations),
 	}
 	for _, r := range results {
 		if r.skipped() {
@@ -339,7 +336,6 @@ func summarizeObserveResults(results []observationResult) observeResultSummary {
 			continue
 		}
 		summary.RecordedCount++
-		summary.RecordedIDs = append(summary.RecordedIDs, r.IDs...)
 	}
 	if summary.RecordedCount == 0 && summary.SkippedCount > 0 {
 		summary.Action = observeActionSkipped
@@ -347,17 +343,14 @@ func summarizeObserveResults(results []observationResult) observeResultSummary {
 	return summary
 }
 
-func buildObserveResultSummary(results []observationResult, currentObservations, newObservations []*entity.Observation) observeResultSummary {
-	summary := summarizeObserveResults(results)
-	summary.CurrentIDs = observationIDs(currentObservations)
-	summary.RecordedIDs = observationIDs(newObservations)
-	reused := make([]*entity.Observation, 0, len(currentObservations))
+func currentObservationReuseIDs(currentObservations, newObservations []*entity.Observation) []string {
 	recorded := make(map[string]struct{}, len(newObservations))
 	for _, o := range newObservations {
 		if o != nil {
 			recorded[o.ID] = struct{}{}
 		}
 	}
+	reused := make([]string, 0, len(currentObservations))
 	for _, o := range currentObservations {
 		if o == nil {
 			continue
@@ -365,10 +358,9 @@ func buildObserveResultSummary(results []observationResult, currentObservations,
 		if _, ok := recorded[o.ID]; ok {
 			continue
 		}
-		reused = append(reused, o)
+		reused = append(reused, o.ID)
 	}
-	summary.ReusedIDs = observationIDs(reused)
-	return summary
+	return reused
 }
 
 func recordedObservationPayload(exec observeExecution) map[string]any {
@@ -588,7 +580,7 @@ func observeAll(
 				continue
 			}
 
-			exec, err := executeObservationRun(s, cfg, exp, scope, priorObs, check, appendMode, author)
+			exec, err := executeObservationRun(s, cfg, exp, scope, check, appendMode, author)
 			if err != nil {
 				return observeAllExecution{}, err
 			}

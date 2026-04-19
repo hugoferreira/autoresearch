@@ -35,6 +35,31 @@ func experimentCommands() []*cobra.Command {
 	return []*cobra.Command{e}
 }
 
+func persistImplementedExperiment(s *store.Store, e *entity.Experiment, wtPath, branch, implNotes string, appendImplNotes bool) error {
+	e.Worktree = wtPath
+	e.Branch = branch
+	e.Attempt++
+	e.Status = entity.ExpImplemented
+	if appendImplNotes {
+		e.Body = entity.AppendMarkdownSection(e.Body, "Implementation notes", implNotes)
+	}
+	return s.WriteExperiment(e)
+}
+
+func emitExperimentImplementEvent(s *store.Store, id, wtPath, branch string, attempt int, implNotes string) error {
+	eventData := map[string]any{
+		"from":     entity.ExpDesigned,
+		"to":       entity.ExpImplemented,
+		"worktree": wtPath,
+		"branch":   branch,
+		"attempt":  attempt,
+	}
+	if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
+		eventData["impl_notes"] = snippet
+	}
+	return emitEvent(s, "experiment.implement", "system", id, eventData)
+}
+
 func experimentDesignCmd() *cobra.Command {
 	var (
 		baseline    string
@@ -178,12 +203,7 @@ func experimentImplementCmd() *cobra.Command {
 				return fmt.Errorf("create worktree: %w", err)
 			}
 
-			e.Worktree = wtPath
-			e.Branch = branch
-			e.Attempt++
-			e.Status = entity.ExpImplemented
-			e.Body = entity.AppendMarkdownSection(e.Body, "Implementation notes", implNotes)
-			if err := s.WriteExperiment(e); err != nil {
+			if err := persistImplementedExperiment(s, e, wtPath, branch, implNotes, true); err != nil {
 				return err
 			}
 
@@ -191,17 +211,7 @@ func experimentImplementCmd() *cobra.Command {
 				return fmt.Errorf("write worktree brief: %w", err)
 			}
 
-			eventData := map[string]any{
-				"from":     entity.ExpDesigned,
-				"to":       entity.ExpImplemented,
-				"worktree": wtPath,
-				"branch":   branch,
-				"attempt":  e.Attempt,
-			}
-			if snippet := truncate(strings.TrimSpace(implNotes), 200); snippet != "" {
-				eventData["impl_notes"] = snippet
-			}
-			if err := emitEvent(s, "experiment.implement", "system", id, eventData); err != nil {
+			if err := emitExperimentImplementEvent(s, id, wtPath, branch, e.Attempt, implNotes); err != nil {
 				return err
 			}
 			return w.Emit(
@@ -398,24 +408,14 @@ The returned experiment ID is used as --baseline-experiment in conclude.`,
 				return fmt.Errorf("create worktree: %w", err)
 			}
 
-			e.Worktree = wtPath
-			e.Branch = branch
-			e.Attempt++
-			e.Status = entity.ExpImplemented
-			if err := s.WriteExperiment(e); err != nil {
+			if err := persistImplementedExperiment(s, e, wtPath, branch, "", false); err != nil {
 				return err
 			}
 			if err := writeWorktreeBrief(s, e, wtPath, ""); err != nil {
 				// Non-fatal for baselines: no hypothesis to brief about.
 				_ = err
 			}
-			if err := emitEvent(s, "experiment.implement", "system", id, map[string]any{
-				"from":     entity.ExpDesigned,
-				"to":       entity.ExpImplemented,
-				"worktree": wtPath,
-				"branch":   branch,
-				"attempt":  e.Attempt,
-			}); err != nil {
+			if err := emitExperimentImplementEvent(s, id, wtPath, branch, e.Attempt, ""); err != nil {
 				return err
 			}
 
