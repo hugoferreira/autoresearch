@@ -1,7 +1,6 @@
 package readmodel
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -203,31 +202,24 @@ func resolveGoalBaseline(s *store.Store, goalID, instrument string, obsByExp map
 }
 
 func goalBaselineExperimentIDs(s *store.Store, goalID string) ([]string, error) {
-	events, err := s.Events(0)
+	exps, err := s.ListExperiments()
 	if err != nil {
 		return nil, err
 	}
-	type baselinePayload struct {
-		Goal string `json:"goal"`
-	}
 	var ids []string
 	seen := map[string]struct{}{}
-	for _, ev := range events {
-		if ev.Kind != "experiment.baseline" || strings.TrimSpace(ev.Subject) == "" {
+	for _, e := range exps {
+		if e == nil || !e.IsBaseline || strings.TrimSpace(e.GoalID) == "" {
 			continue
 		}
-		var payload baselinePayload
-		if err := json.Unmarshal(ev.Data, &payload); err != nil {
+		if e.GoalID != goalID {
 			continue
 		}
-		if payload.Goal != goalID {
+		if _, dup := seen[e.ID]; dup {
 			continue
 		}
-		if _, dup := seen[ev.Subject]; dup {
-			continue
-		}
-		seen[ev.Subject] = struct{}{}
-		ids = append(ids, ev.Subject)
+		seen[e.ID] = struct{}{}
+		ids = append(ids, e.ID)
 	}
 	return ids, nil
 }

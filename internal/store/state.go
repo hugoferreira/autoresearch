@@ -10,7 +10,10 @@ import (
 // StateSchemaVersion is the current state.json schema version.
 // v1: single-goal store (.research/goal.md).
 // v2: multi-goal store (.research/goals/G-NNNN.md) + current_goal_id pointer.
-const StateSchemaVersion = 2
+// v3: experiments persist durable goal_id provenance for read-side scoping
+//
+//	and baseline ownership (backfilled for older stores).
+const StateSchemaVersion = 3
 
 type State struct {
 	SchemaVersion     int            `json:"schema_version"`

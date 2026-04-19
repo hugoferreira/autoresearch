@@ -170,9 +170,9 @@ func writeEventLine(w io.Writer, e store.Event) {
 	)
 }
 
-// newFollowEventFilter recreates the scope resolver per streamed event so
-// baseline ownership picks up experiment.baseline events appended after
-// `log --follow` starts.
+// newFollowEventFilter recreates the scope resolver per streamed event so it
+// always scopes against the latest on-disk entity provenance for newly-added
+// experiments, observations, and conclusions.
 func newFollowEventFilter(s *store.Store, scope goalScope, keep func(store.Event) bool) func(store.Event) bool {
 	if scope.All {
 		return keep

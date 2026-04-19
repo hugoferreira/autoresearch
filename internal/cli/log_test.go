@@ -21,6 +21,7 @@ func TestNewFollowEventFilter_RefreshesBaselineGoalScope(t *testing.T) {
 	now := time.Now().UTC()
 	baseline := &entity.Experiment{
 		ID:          "E-0004",
+		GoalID:      "G-0001",
 		IsBaseline:  true,
 		Status:      entity.ExpMeasured,
 		Baseline:    entity.Baseline{Ref: "HEAD", SHA: "ghi789"},
@@ -37,7 +38,7 @@ func TestNewFollowEventFilter_RefreshesBaselineGoalScope(t *testing.T) {
 		Kind:    "experiment.baseline",
 		Actor:   "system",
 		Subject: baseline.ID,
-		Data:    jsonRaw(map[string]any{"goal": "G-0001"}),
+		Data:    jsonRaw(map[string]any{"note": "goal provenance now lives on the experiment entity"}),
 	}
 	if err := s.AppendEvent(baselineEvent); err != nil {
 		t.Fatal(err)

@@ -80,6 +80,7 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 
 	goalBaseline := &entity.Experiment{
 		ID:         "E-0001",
+		GoalID:     goal.ID,
 		IsBaseline: true,
 		Status:     entity.ExpMeasured,
 		Baseline:   entity.Baseline{Ref: "HEAD", SHA: "abc123"},
@@ -120,6 +121,7 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 	}
 	ancestorExp := &entity.Experiment{
 		ID:         "E-0002",
+		GoalID:     goal.ID,
 		Hypothesis: ancestorHyp.ID,
 		Status:     entity.ExpMeasured,
 		Baseline:   entity.Baseline{Ref: "HEAD", SHA: "abc123"},
@@ -131,6 +133,7 @@ func setupConcludeFallbackFixture(t *testing.T) concludeFixture {
 	}
 	candidateExp := &entity.Experiment{
 		ID:         "E-0003",
+		GoalID:     goal.ID,
 		Hypothesis: currentHyp.ID,
 		Status:     entity.ExpMeasured,
 		Baseline: entity.Baseline{

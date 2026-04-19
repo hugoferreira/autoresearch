@@ -135,6 +135,9 @@ func validateGoalRescuers(g *entity.Goal, cfg *store.Config) error {
 }
 
 func ValidateExperiment(e *entity.Experiment, cfg *store.Config) error {
+	if strings.TrimSpace(e.GoalID) == "" {
+		return errors.New("experiment must record goal_id provenance")
+	}
 	if !e.IsBaseline && strings.TrimSpace(e.Hypothesis) == "" {
 		return errors.New("experiment must reference a hypothesis")
 	}

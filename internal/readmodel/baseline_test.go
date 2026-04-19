@@ -69,10 +69,18 @@ func (f *baselineFixture) writeHypothesis(t *testing.T, id, goalID, parent strin
 	return h
 }
 
-func (f *baselineFixture) writeExperiment(t *testing.T, id, hypID, baselineExp string, isBaseline bool) *entity.Experiment {
+func (f *baselineFixture) writeExperiment(t *testing.T, id, hypID, goalID, baselineExp string, isBaseline bool) *entity.Experiment {
 	t.Helper()
+	if goalID == "" && hypID != "" {
+		h, err := f.s.ReadHypothesis(hypID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		goalID = h.GoalID
+	}
 	e := &entity.Experiment{
 		ID:         id,
+		GoalID:     goalID,
 		Hypothesis: hypID,
 		IsBaseline: isBaseline,
 		Status:     entity.ExpMeasured,
@@ -153,18 +161,17 @@ func TestResolveInferredBaseline_UsesCandidateRecordedWhenUsable(t *testing.T) {
 	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
 	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
 
-	goalBaseline := f.writeExperiment(t, "E-0001", "", "", true)
+	goalBaseline := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
 	f.writeObservation(t, "O-0001", goalBaseline.ID, "timing")
-	f.appendBaselineEvent(t, goalBaseline.ID, "G-0001")
 
-	ancestorExp := f.writeExperiment(t, "E-0002", parent.ID, "", false)
+	ancestorExp := f.writeExperiment(t, "E-0002", parent.ID, "", "", false)
 	f.writeObservation(t, "O-0002", ancestorExp.ID, "timing")
 	f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
 
-	recorded := f.writeExperiment(t, "E-0003", "", "", true)
+	recorded := f.writeExperiment(t, "E-0003", "", "G-0001", "", true)
 	f.writeObservation(t, "O-0003", recorded.ID, "timing")
 
-	candidate := f.writeExperiment(t, "E-0004", current.ID, recorded.ID, false)
+	candidate := f.writeExperiment(t, "E-0004", current.ID, "", recorded.ID, false)
 
 	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
 	if err != nil {
@@ -189,14 +196,14 @@ func TestResolveInferredBaseline_PrefersNearestAcceptedSupportedAncestor(t *test
 	mid := f.writeHypothesis(t, "H-0002", "G-0001", root.ID)
 	current := f.writeHypothesis(t, "H-0003", "G-0001", mid.ID)
 
-	rootExp := f.writeExperiment(t, "E-0001", root.ID, "", false)
-	midExp := f.writeExperiment(t, "E-0002", mid.ID, "", false)
+	rootExp := f.writeExperiment(t, "E-0001", root.ID, "", "", false)
+	midExp := f.writeExperiment(t, "E-0002", mid.ID, "", "", false)
 	f.writeObservation(t, "O-0001", rootExp.ID, "timing")
 	f.writeObservation(t, "O-0002", midExp.ID, "timing")
 	f.writeConclusion(t, "C-0001", root.ID, rootExp.ID, true)
 	f.writeConclusion(t, "C-0002", mid.ID, midExp.ID, true)
 
-	candidate := f.writeExperiment(t, "E-0003", current.ID, "", false)
+	candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
 
 	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
 	if err != nil {
@@ -226,13 +233,13 @@ func TestResolveInferredBaseline_DedupesSupportedConclusionsOnSameAncestorExperi
 	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
 	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
 
-	ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", false)
+	ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", "", false)
 	f.writeObservation(t, "O-0001", ancestorExp.ID, "timing")
 	f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
 	f.now = f.now.Add(time.Minute)
 	f.writeConclusion(t, "C-0002", parent.ID, ancestorExp.ID, true)
 
-	candidate := f.writeExperiment(t, "E-0002", current.ID, "", false)
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", "", false)
 
 	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
 	if err != nil {
@@ -257,15 +264,13 @@ func TestResolveInferredBaseline_UsesGoalScopedBaselineMapping(t *testing.T) {
 	f.writeGoal(t, "G-0001")
 	f.writeGoal(t, "G-0002")
 
-	otherBase := f.writeExperiment(t, "E-0001", "", "", true)
-	wantBase := f.writeExperiment(t, "E-0002", "", "", true)
+	otherBase := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	wantBase := f.writeExperiment(t, "E-0002", "", "G-0002", "", true)
 	f.writeObservation(t, "O-0001", otherBase.ID, "timing")
 	f.writeObservation(t, "O-0002", wantBase.ID, "timing")
-	f.appendBaselineEvent(t, otherBase.ID, "G-0001")
-	f.appendBaselineEvent(t, wantBase.ID, "G-0002")
 
 	current := f.writeHypothesis(t, "H-0001", "G-0002", "")
-	candidate := f.writeExperiment(t, "E-0003", current.ID, "", false)
+	candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
 
 	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
 	if err != nil {
@@ -286,15 +291,13 @@ func TestResolveInferredBaseline_ErrorsOnAmbiguousGoalBaseline(t *testing.T) {
 	f := newBaselineFixture(t)
 	f.writeGoal(t, "G-0001")
 
-	baseA := f.writeExperiment(t, "E-0001", "", "", true)
-	baseB := f.writeExperiment(t, "E-0002", "", "", true)
+	baseA := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	baseB := f.writeExperiment(t, "E-0002", "", "G-0001", "", true)
 	f.writeObservation(t, "O-0001", baseA.ID, "timing")
 	f.writeObservation(t, "O-0002", baseB.ID, "timing")
-	f.appendBaselineEvent(t, baseA.ID, "G-0001")
-	f.appendBaselineEvent(t, baseB.ID, "G-0001")
 
 	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
-	candidate := f.writeExperiment(t, "E-0003", current.ID, "", false)
+	candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
 
 	_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
 	if err == nil {
@@ -309,7 +312,7 @@ func TestResolveInferredBaseline_PropagatesObservationReadErrors(t *testing.T) {
 	f := newBaselineFixture(t)
 	f.writeGoal(t, "G-0001")
 	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
-	candidate := f.writeExperiment(t, "E-0001", current.ID, "", false)
+	candidate := f.writeExperiment(t, "E-0001", current.ID, "", "", false)
 
 	badPath := filepath.Join(f.s.ObservationsDir(), "O-9999.json")
 	if err := os.WriteFile(badPath, []byte("{not json"), 0o644); err != nil {

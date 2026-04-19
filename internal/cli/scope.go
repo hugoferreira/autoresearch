@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -84,12 +83,6 @@ type goalScopeResolver struct {
 	expGoals       map[string]string
 	conclusionMap  map[string]string
 	observationMap map[string]string
-
-	eventsLoaded bool
-	events       []store.Event
-
-	baselineLoaded bool
-	baselineGoals  map[string]string
 }
 
 func newGoalScopeResolver(s *store.Store, scope goalScope) *goalScopeResolver {
@@ -100,7 +93,6 @@ func newGoalScopeResolver(s *store.Store, scope goalScope) *goalScopeResolver {
 		expGoals:       map[string]string{},
 		conclusionMap:  map[string]string{},
 		observationMap: map[string]string{},
-		baselineGoals:  map[string]string{},
 	}
 }
 
@@ -130,45 +122,6 @@ func (r *goalScopeResolver) hypothesisGoal(id string) (string, error) {
 	return h.GoalID, nil
 }
 
-func (r *goalScopeResolver) ensureEvents() error {
-	if r.eventsLoaded {
-		return nil
-	}
-	all, err := r.store.Events(0)
-	if err != nil {
-		return err
-	}
-	r.events = all
-	r.eventsLoaded = true
-	return nil
-}
-
-func (r *goalScopeResolver) ensureBaselineGoals() error {
-	if r.baselineLoaded {
-		return nil
-	}
-	if err := r.ensureEvents(); err != nil {
-		return err
-	}
-	type baselinePayload struct {
-		Goal string `json:"goal"`
-	}
-	for _, ev := range r.events {
-		if ev.Kind != "experiment.baseline" || ev.Subject == "" {
-			continue
-		}
-		var payload baselinePayload
-		if err := json.Unmarshal(ev.Data, &payload); err != nil {
-			continue
-		}
-		if payload.Goal != "" {
-			r.baselineGoals[ev.Subject] = payload.Goal
-		}
-	}
-	r.baselineLoaded = true
-	return nil
-}
-
 func (r *goalScopeResolver) experimentGoal(id string) (string, error) {
 	if id == "" {
 		return "", nil
@@ -184,6 +137,10 @@ func (r *goalScopeResolver) experimentGoal(id string) (string, error) {
 		}
 		return "", err
 	}
+	if e.GoalID != "" {
+		r.expGoals[id] = e.GoalID
+		return e.GoalID, nil
+	}
 	if e.Hypothesis != "" {
 		gid, err := r.hypothesisGoal(e.Hypothesis)
 		if err != nil {
@@ -192,12 +149,8 @@ func (r *goalScopeResolver) experimentGoal(id string) (string, error) {
 		r.expGoals[id] = gid
 		return gid, nil
 	}
-	if err := r.ensureBaselineGoals(); err != nil {
-		return "", err
-	}
-	gid := r.baselineGoals[id]
-	r.expGoals[id] = gid
-	return gid, nil
+	r.expGoals[id] = ""
+	return "", nil
 }
 
 func (r *goalScopeResolver) conclusionGoal(id string) (string, error) {
