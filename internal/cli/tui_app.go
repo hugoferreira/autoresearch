@@ -16,9 +16,10 @@ import (
 // ---- messages ----
 
 // tuiTickMsg is internal to the root update loop: it schedules a poll of
-// the event log and reschedules itself. Views no longer observe ticks
+// the event log and reschedules itself. Views no longer observe raw ticks
 // directly — they react to storeChangedMsg when the poll surfaces new
-// events that actually changed something in .research/.
+// events, and time-sensitive views can opt into quiet-tick repaints via
+// tuiQuietTickView below.
 type tuiTickMsg time.Time
 type tuiErrMsg struct{ err error }
 
@@ -26,11 +27,13 @@ type tuiErrMsg struct{ err error }
 // sees new events in events.jsonl. Views decide whether to reload based
 // on what changed — most list and aggregate views just reload on any
 // change; detail views can narrow to events with a matching subject.
-// Quiet ticks produce no storeChangedMsg at all, so scroll and cursor
-// state are preserved whenever .research/ hasn't changed.
+// Quiet polls still emit storeChangedMsg with an empty events slice so the
+// root can advance the offset and offer an opt-in repaint hook for views
+// with elapsed/age fields. Non-opted-in views still see nothing.
 type storeChangedMsg struct {
-	events []store.Event
-	newOff int64
+	events   []store.Event
+	newOff   int64
+	polledAt time.Time
 }
 
 // eventOffsetPrimedMsg carries the initial byte offset into events.jsonl
@@ -81,6 +84,14 @@ type tuiView interface {
 	update(msg tea.Msg, s *store.Store) (tuiView, tea.Cmd)
 	view(width, height int) string
 	hints() []tuiHint
+}
+
+// tuiQuietTickView is an opt-in repaint hook for views whose output includes
+// time-derived values like elapsed or "in flight". Implementations must update
+// only render-time state; they must not reload store data or reset cursor /
+// pager state on quiet polls.
+type tuiQuietTickView interface {
+	quietTick(at time.Time, s *store.Store) (tuiView, tea.Cmd)
 }
 
 // ---- root model ----
@@ -151,19 +162,20 @@ func primeEventOffset(s *store.Store) tea.Cmd {
 // pollEvents reads any events appended to events.jsonl since offset and
 // returns them as a storeChangedMsg. Quiet polls (no new events) still
 // emit a storeChangedMsg with an empty slice so the root handler can
-// advance its offset, but the root filters empty batches out before
-// dispatching to the top view — so views that haven't hooked into the
-// refresh cycle see nothing, and their scroll/cursor state is preserved.
+// advance its offset. The root only forwards those quiet polls to
+// tuiQuietTickView implementations, so views without time-derived content
+// still avoid reload churn and preserve scroll/cursor state.
 func pollEvents(s *store.Store, offset int64) tea.Cmd {
 	if s == nil {
 		return nil
 	}
 	return func() tea.Msg {
+		polledAt := time.Now().UTC()
 		events, newOff, err := s.EventsSince(offset)
 		if err != nil {
-			return storeChangedMsg{newOff: offset}
+			return storeChangedMsg{newOff: offset, polledAt: polledAt}
 		}
-		return storeChangedMsg{events: events, newOff: newOff}
+		return storeChangedMsg{events: events, newOff: newOff, polledAt: polledAt}
 	}
 }
 
@@ -291,9 +303,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case storeChangedMsg:
 		m.eventOffset = msg.newOff
 		if len(msg.events) == 0 {
-			// Quiet poll — no changes to react to, no view churn, no
-			// chrome reload. Cursor and pager scroll stay where the
-			// user left them.
+			// Quiet poll — by default there's no reload and no chrome
+			// refresh. Views that render elapsed/age fields can opt into
+			// a repaint that preserves cursor and pager state.
+			if top, ok := m.top().(tuiQuietTickView); ok {
+				nv, cmd := top.quietTick(msg.polledAt, m.store)
+				m.setTop(nv)
+				return m, cmd
+			}
 			return m, nil
 		}
 		// Drop cache entries for any subjects these events mention, so
