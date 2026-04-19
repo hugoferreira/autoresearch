@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -82,7 +83,14 @@ func (s *Store) ListLessons() ([]*entity.Lesson, error) {
 		}
 		ids = append(ids, strings.TrimSuffix(name, ".md"))
 	}
-	sort.Strings(ids)
+	sort.Slice(ids, func(i, j int) bool {
+		left, leftOK := lessonIDOrdinal(ids[i])
+		right, rightOK := lessonIDOrdinal(ids[j])
+		if leftOK && rightOK && left != right {
+			return left < right
+		}
+		return ids[i] < ids[j]
+	})
 	out := make([]*entity.Lesson, 0, len(ids))
 	for _, id := range ids {
 		l, err := s.ReadLesson(id)
@@ -92,6 +100,17 @@ func (s *Store) ListLessons() ([]*entity.Lesson, error) {
 		out = append(out, l)
 	}
 	return out, nil
+}
+
+func lessonIDOrdinal(id string) (int, bool) {
+	if !strings.HasPrefix(id, "L-") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(id[2:])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // ListLessonsByScope returns lessons whose Scope matches. Empty scope returns

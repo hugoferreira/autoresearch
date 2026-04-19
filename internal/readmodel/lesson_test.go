@@ -59,7 +59,15 @@ func TestListLessonsForRead_FiltersAndSince(t *testing.T) {
 
 func TestListLessonsForRead_SinceUsesOrdinalNotLexicalOrder(t *testing.T) {
 	f := newBaselineFixture(t)
-	lessons := []*entity.Lesson{
+	for _, l := range []*entity.Lesson{
+		{
+			ID:        "L-10000",
+			Claim:     "newer",
+			Scope:     entity.LessonScopeSystem,
+			Status:    entity.LessonStatusActive,
+			Author:    "agent:analyst",
+			CreatedAt: f.now,
+		},
 		{
 			ID:        "L-9999",
 			Claim:     "older",
@@ -69,24 +77,36 @@ func TestListLessonsForRead_SinceUsesOrdinalNotLexicalOrder(t *testing.T) {
 			CreatedAt: f.now,
 		},
 		{
-			ID:        "L-10000",
-			Claim:     "newer",
+			ID:        "L-10001",
+			Claim:     "newest",
 			Scope:     entity.LessonScopeSystem,
 			Status:    entity.LessonStatusActive,
 			Author:    "agent:analyst",
 			CreatedAt: f.now,
 		},
+	} {
+		if err := f.s.WriteLesson(l); err != nil {
+			t.Fatalf("WriteLesson(%s): %v", l.ID, err)
+		}
 	}
 
-	got, err := ListLessonsForRead(f.s, lessons, LessonListOptions{SinceID: "L-9999"})
+	lessons, err := f.s.ListLessons()
+	if err != nil {
+		t.Fatalf("ListLessons: %v", err)
+	}
+
+	got, err := ListLessonsForRead(f.s, lessons, LessonListOptions{SinceID: "L-9998"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotLen, want := len(got), 1; gotLen != want {
+	if gotLen, want := len(got), 3; gotLen != want {
 		t.Fatalf("filtered len = %d, want %d", gotLen, want)
 	}
-	if gotID, want := got[0].ID, "L-10000"; gotID != want {
-		t.Fatalf("filtered[0].ID = %q, want %q", gotID, want)
+	wantIDs := []string{"L-9999", "L-10000", "L-10001"}
+	for i, want := range wantIDs {
+		if got[i].ID != want {
+			t.Fatalf("filtered[%d].ID = %q, want %q", i, got[i].ID, want)
+		}
 	}
 }
 
