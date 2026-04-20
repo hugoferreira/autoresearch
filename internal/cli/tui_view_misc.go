@@ -496,7 +496,7 @@ func renderGoalDetail(g *entity.Goal, scope goalScope, width, height int) string
 		lines = append(lines, tuiDim.Render("derived_from=")+g.DerivedFrom)
 	}
 	if g.Trigger != "" {
-		lines = append(lines, tuiDim.Render("trigger=")+g.Trigger)
+		lines = append(lines, tuiDim.Render("trigger=")+wrap(g.Trigger, max(width-len("trigger="), 1)))
 	}
 	lines = append(lines, "")
 	lines = append(lines, tuiBold.Render("Objective:"))
@@ -517,7 +517,7 @@ func renderGoalDetail(g *entity.Goal, scope goalScope, width, height int) string
 	if steering != "" {
 		lines = append(lines, "")
 		lines = append(lines, tuiBold.Render("Steering:"))
-		lines = append(lines, steering)
+		lines = append(lines, strings.TrimRight(renderMarkdown(width, steering), "\n"))
 	}
 	return clampLines(strings.Join(lines, "\n"), height, width)
 }
