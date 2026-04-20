@@ -80,3 +80,47 @@ func TestEmbeddedAgents_EvidenceArtifactContract(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedAgents_GateReviewerStatsAuthorityContract(t *testing.T) {
+	agents, err := integration.EmbeddedAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexAgents, err := integration.EmbeddedCodexAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checks := []struct {
+		label  string
+		agents []integration.AgentFile
+	}{
+		{label: "claude", agents: agents},
+		{label: "codex", agents: codexAgents},
+	}
+	for _, chk := range checks {
+		var content []byte
+		for _, a := range chk.agents {
+			if a.Name == "research-gate-reviewer" {
+				content = a.Content
+				break
+			}
+		}
+		if len(content) == 0 {
+			t.Fatalf("%s research-gate-reviewer agent missing", chk.label)
+		}
+		for _, needle := range []string{
+			"Treat `autoresearch analyze` as the authoritative stats source.",
+			"Do not spend tokens re-coding",
+			"bootstrap CI or Mann-Whitney U",
+			"Inspect the raw samples for sanity",
+		} {
+			if !bytes.Contains(content, []byte(needle)) {
+				t.Fatalf("%s research-gate-reviewer missing %q", chk.label, needle)
+			}
+		}
+		if bytes.Contains(content, []byte("Recompute the stats yourself:")) {
+			t.Fatalf("%s research-gate-reviewer still tells reviewers to recompute stats", chk.label)
+		}
+	}
+}
