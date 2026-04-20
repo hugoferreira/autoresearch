@@ -31,8 +31,14 @@ type concludeResolution struct {
 	UsedObservations      []string                     `json:"used_observations"`
 	IgnoredObservations   []concludeIgnoredObservation `json:"ignored_observations,omitempty"`
 	CandidateExperiment   string                       `json:"candidate_experiment"`
+	CandidateAttempt      int                          `json:"candidate_attempt,omitempty"`
+	CandidateRef          string                       `json:"candidate_ref,omitempty"`
+	CandidateSHA          string                       `json:"candidate_sha,omitempty"`
 	CandidateSource       string                       `json:"candidate_source"`
 	BaselineExperiment    string                       `json:"baseline_experiment,omitempty"`
+	BaselineAttempt       int                          `json:"baseline_attempt,omitempty"`
+	BaselineRef           string                       `json:"baseline_ref,omitempty"`
+	BaselineSHA           string                       `json:"baseline_sha,omitempty"`
 	BaselineSource        string                       `json:"baseline_source"`
 	BaselineNote          string                       `json:"baseline_note,omitempty"`
 	AncestorHypothesis    string                       `json:"ancestor_hypothesis,omitempty"`
@@ -105,11 +111,16 @@ output report which baseline source was used and any fallback note.`,
 				return err
 			}
 
-			requestedObsIDs, candObs, ignoredObs, candExp, err := resolveConcludeObservations(s, hyp, obsList)
+			requestedObsIDs, candObs, ignoredObs, candScope, err := resolveConcludeObservations(s, hyp, obsList)
 			if err != nil {
 				return err
 			}
+			candExp := candScope.Experiment
 			candExpRec, err := s.ReadExperiment(candExp)
+			if err != nil {
+				return err
+			}
+			obsIdx, err := readmodel.LoadObservationIndexStrict(s)
 			if err != nil {
 				return err
 			}
@@ -119,6 +130,9 @@ output report which baseline source was used and any fallback note.`,
 				UsedObservations:      observationIDs(candObs),
 				IgnoredObservations:   ignoredObs,
 				CandidateExperiment:   candExp,
+				CandidateAttempt:      candScope.Attempt,
+				CandidateRef:          candScope.Ref,
+				CandidateSHA:          candScope.SHA,
 				CandidateSource:       concludeCandidateSourceObservations,
 				BaselineSource:        concludeBaselineSourceNone,
 			}
@@ -128,16 +142,12 @@ output report which baseline source was used and any fallback note.`,
 				baselineRes *readmodel.BaselineResolution
 			)
 			if baselineExp = strings.TrimSpace(baselineExp); baselineExp != "" {
-				baseObs, err = baselineObservationsForExperiment(s, baselineExp, hyp.Predicts.Instrument)
+				baseObs, baselineRes, err = baselineObservationsForExperiment(s, obsIdx, baselineExp, hyp.Predicts.Instrument)
 				if err != nil {
 					return err
 				}
-				baselineRes = &readmodel.BaselineResolution{
-					ExperimentID: baselineExp,
-					Source:       readmodel.BaselineSourceExplicit,
-				}
 			} else {
-				baselineRes, err = readmodel.ResolveInferredBaseline(s, hyp, candExpRec, hyp.Predicts.Instrument)
+				baselineRes, err = readmodel.ResolveInferredBaselineWithIndex(s, obsIdx, hyp, candExpRec, hyp.Predicts.Instrument)
 				if err != nil {
 					return err
 				}
@@ -145,10 +155,7 @@ output report which baseline source was used and any fallback note.`,
 					baselineExp = baselineRes.ExperimentID
 				}
 				if baselineExp != "" {
-					baseObs, err = baselineObservationsForExperiment(s, baselineExp, hyp.Predicts.Instrument)
-					if err != nil {
-						return err
-					}
+					baseObs = filterObservationsByInstrument(obsIdx.ObservationsForScope(baselineRes.Scope()), hyp.Predicts.Instrument)
 				}
 			}
 			applyBaselineResolution(&resolution, baselineRes, hyp.Predicts.Instrument)
@@ -167,18 +174,12 @@ output report which baseline source was used and any fallback note.`,
 				}
 				frontierRows, _ := readmodel.ComputeFrontier(s, goal, scopedConcls)
 				if len(frontierRows) > 0 {
-					best := frontierRows[0].Candidate
-					// Only compute incremental if it differs from the absolute baseline.
-					if best != baselineExp && best != candExp {
-						incrementalExp = best
-						all, err := s.ListObservationsForExperiment(best)
-						if err == nil {
-							for _, o := range all {
-								if o.Instrument == hyp.Predicts.Instrument {
-									incrObs = append(incrObs, o)
-								}
-							}
-						}
+					bestConcl := conclusionByID(scopedConcls, frontierRows[0].Conclusion)
+					bestObs, bestScope, ok := obsIdx.ObservationsForConclusionCandidate(bestConcl)
+					baseScope := baselineRes.Scope()
+					if ok && bestScope != candScope && bestScope != baseScope {
+						incrementalExp = bestScope.Experiment
+						incrObs = filterObservationsByInstrument(bestObs, hyp.Predicts.Instrument)
 					}
 				}
 			}
@@ -212,10 +213,10 @@ output report which baseline source was used and any fallback note.`,
 			// primary can be rescued by a goal-level secondary.
 			strictCtx := firewall.StrictContext{}
 			if goal != nil && len(goal.Rescuers) > 0 && goal.NeutralBandFrac > 0 {
-				candAll, _ := s.ListObservationsForExperiment(candExp)
+				candAll := obsIdx.ObservationsForScope(candScope)
 				var baseAll []*entity.Observation
-				if baselineExp != "" {
-					baseAll, _ = s.ListObservationsForExperiment(baselineExp)
+				if baselineRes != nil {
+					baseAll = obsIdx.ObservationsForScope(baselineRes.Scope())
 				}
 				strictCtx = firewall.StrictContext{
 					Goal: goal,
@@ -249,20 +250,26 @@ output report which baseline source was used and any fallback note.`,
 			}
 
 			concl := &entity.Conclusion{
-				Hypothesis:      hypID,
-				Verdict:         decision.FinalVerdict,
-				Observations:    resolution.UsedObservations,
-				CandidateExp:    candExp,
-				BaselineExp:     baselineExp,
-				Effect:          effect,
-				IncrementalExp:  incrementalExp,
-				SecondaryChecks: decision.ClauseChecks,
-				StatTest:        "mann_whitney_u",
-				Strict:          strictRec,
-				Author:          or(author, "agent:analyst"),
-				ReviewedBy:      reviewedBy,
-				CreatedAt:       nowUTC(),
-				Body:            interpretationBody(interpretation, verdict, decision),
+				Hypothesis:       hypID,
+				Verdict:          decision.FinalVerdict,
+				Observations:     resolution.UsedObservations,
+				CandidateExp:     candExp,
+				CandidateAttempt: candScope.Attempt,
+				CandidateRef:     candScope.Ref,
+				CandidateSHA:     candScope.SHA,
+				BaselineExp:      baselineExp,
+				BaselineAttempt:  resolution.BaselineAttempt,
+				BaselineRef:      resolution.BaselineRef,
+				BaselineSHA:      resolution.BaselineSHA,
+				Effect:           effect,
+				IncrementalExp:   incrementalExp,
+				SecondaryChecks:  decision.ClauseChecks,
+				StatTest:         "mann_whitney_u",
+				Strict:           strictRec,
+				Author:           or(author, "agent:analyst"),
+				ReviewedBy:       reviewedBy,
+				CreatedAt:        nowUTC(),
+				Body:             interpretationBody(interpretation, verdict, decision),
 			}
 			if incrCmp != nil {
 				incrEffect := buildEffect(hyp.Predicts.Instrument, cSamples, flattenSamples(incrObs), incrCmp)
@@ -322,18 +329,21 @@ output report which baseline source was used and any fallback note.`,
 
 			// Event.
 			eventData := map[string]any{
-				"verdict":          decision.FinalVerdict,
-				"requested":        verdict,
-				"downgraded":       decision.Downgraded,
-				"reasons":          decision.Reasons,
-				"candidate":        candExp,
-				"candidate_source": resolution.CandidateSource,
-				"baseline":         baselineExp,
-				"baseline_source":  resolution.BaselineSource,
-				"observations":     resolution.UsedObservations,
-				"delta_frac":       effect.DeltaFrac,
-				"ci_low_frac":      effect.CILowFrac,
-				"ci_high_frac":     effect.CIHighFrac,
+				"verdict":           decision.FinalVerdict,
+				"requested":         verdict,
+				"downgraded":        decision.Downgraded,
+				"reasons":           decision.Reasons,
+				"candidate":         candExp,
+				"candidate_attempt": candScope.Attempt,
+				"candidate_ref":     candScope.Ref,
+				"candidate_sha":     candScope.SHA,
+				"candidate_source":  resolution.CandidateSource,
+				"baseline":          baselineExp,
+				"baseline_source":   resolution.BaselineSource,
+				"observations":      resolution.UsedObservations,
+				"delta_frac":        effect.DeltaFrac,
+				"ci_low_frac":       effect.CILowFrac,
+				"ci_high_frac":      effect.CIHighFrac,
 			}
 			if !slices.Equal(resolution.RequestedObservations, resolution.UsedObservations) {
 				eventData["requested_observations"] = resolution.RequestedObservations
@@ -343,6 +353,15 @@ output report which baseline source was used and any fallback note.`,
 			}
 			if resolution.BaselineNote != "" {
 				eventData["baseline_note"] = resolution.BaselineNote
+			}
+			if resolution.BaselineAttempt > 0 {
+				eventData["baseline_attempt"] = resolution.BaselineAttempt
+			}
+			if resolution.BaselineRef != "" {
+				eventData["baseline_ref"] = resolution.BaselineRef
+			}
+			if resolution.BaselineSHA != "" {
+				eventData["baseline_sha"] = resolution.BaselineSHA
 			}
 			if resolution.AncestorHypothesis != "" {
 				eventData["ancestor_hypothesis"] = resolution.AncestorHypothesis
@@ -396,6 +415,15 @@ output report which baseline source was used and any fallback note.`,
 			w.Textf("wrote %s\n", id)
 			w.Textf("  hypothesis:  %s (now %s)\n", hypID, hyp.Status)
 			w.Textf("  candidate:   %s  (source=%s, n=%d)\n", candExp, resolution.CandidateSource, effect.NCandidate)
+			if resolution.CandidateAttempt > 0 {
+				w.Textf("  candidate attempt: %d\n", resolution.CandidateAttempt)
+			}
+			if resolution.CandidateRef != "" {
+				w.Textf("  candidate ref: %s\n", resolution.CandidateRef)
+			}
+			if resolution.CandidateSHA != "" {
+				w.Textf("  candidate sha: %s\n", resolution.CandidateSHA)
+			}
 			w.Textf("  observations: %s\n", strings.Join(resolution.UsedObservations, ", "))
 			if !slices.Equal(resolution.RequestedObservations, resolution.UsedObservations) {
 				w.Textf("  requested:   %s\n", strings.Join(resolution.RequestedObservations, ", "))
@@ -409,6 +437,15 @@ output report which baseline source was used and any fallback note.`,
 			}
 			if baselineExp != "" {
 				w.Textf("  baseline:    %s  (n=%d, source=%s)\n", baselineExp, effect.NBaseline, formatBaselineSource(resolution))
+				if resolution.BaselineAttempt > 0 {
+					w.Textf("  baseline attempt: %d\n", resolution.BaselineAttempt)
+				}
+				if resolution.BaselineRef != "" {
+					w.Textf("  baseline ref: %s\n", resolution.BaselineRef)
+				}
+				if resolution.BaselineSHA != "" {
+					w.Textf("  baseline sha: %s\n", resolution.BaselineSHA)
+				}
 			} else {
 				w.Textf("  baseline:    none  (source=%s)\n", resolution.BaselineSource)
 			}
@@ -485,21 +522,21 @@ func goalForHypothesis(s *store.Store, hyp *entity.Hypothesis) (*entity.Goal, er
 	return goal, err
 }
 
-func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs []string) ([]string, []*entity.Observation, []concludeIgnoredObservation, string, error) {
+func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs []string) ([]string, []*entity.Observation, []concludeIgnoredObservation, readmodel.ObservationScope, error) {
 	requested := normalizeObservationIDs(rawIDs)
 	if len(requested) == 0 {
-		return nil, nil, nil, "", errors.New("--observations is required (at least one observation id)")
+		return nil, nil, nil, readmodel.ObservationScope{}, errors.New("--observations is required (at least one observation id)")
 	}
 
 	var (
-		used    []*entity.Observation
-		ignored []concludeIgnoredObservation
-		candExp string
+		used      []*entity.Observation
+		ignored   []concludeIgnoredObservation
+		candScope readmodel.ObservationScope
 	)
 	for _, oid := range requested {
 		o, err := s.ReadObservation(oid)
 		if err != nil {
-			return nil, nil, nil, "", err
+			return nil, nil, nil, readmodel.ObservationScope{}, err
 		}
 		if o.Instrument != hyp.Predicts.Instrument {
 			ignored = append(ignored, concludeIgnoredObservation{
@@ -509,10 +546,14 @@ func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs 
 			})
 			continue
 		}
-		if candExp == "" {
-			candExp = o.Experiment
-		} else if candExp != o.Experiment {
-			return nil, nil, nil, "", fmt.Errorf("observations belong to different experiments (%s and %s); pass only observations from a single candidate", candExp, o.Experiment)
+		scope := readmodel.ObservationScopeFromObservation(o)
+		if candScope.Experiment == "" {
+			candScope = scope
+		} else if candScope.Experiment != scope.Experiment {
+			return nil, nil, nil, readmodel.ObservationScope{}, fmt.Errorf("observations belong to different experiments (%s and %s); pass only observations from a single candidate", candScope.Experiment, scope.Experiment)
+		}
+		if err := validateObservationScope(candScope, o); err != nil {
+			return nil, nil, nil, readmodel.ObservationScope{}, err
 		}
 		used = append(used, o)
 	}
@@ -522,11 +563,24 @@ func resolveConcludeObservations(s *store.Store, hyp *entity.Hypothesis, rawIDs 
 			ignoredIDs = append(ignoredIDs, ignoredObs.ID)
 		}
 		if len(ignoredIDs) > 0 {
-			return nil, nil, nil, "", fmt.Errorf("none of the requested observations use predicted instrument %q; ignored: %s", hyp.Predicts.Instrument, strings.Join(ignoredIDs, ", "))
+			return nil, nil, nil, readmodel.ObservationScope{}, fmt.Errorf("none of the requested observations use predicted instrument %q; ignored: %s", hyp.Predicts.Instrument, strings.Join(ignoredIDs, ", "))
 		}
-		return nil, nil, nil, "", fmt.Errorf("none of the requested observations use predicted instrument %q", hyp.Predicts.Instrument)
+		return nil, nil, nil, readmodel.ObservationScope{}, fmt.Errorf("none of the requested observations use predicted instrument %q", hyp.Predicts.Instrument)
 	}
-	return requested, used, ignored, candExp, nil
+	return requested, used, ignored, candScope, nil
+}
+
+func validateObservationScope(expected readmodel.ObservationScope, o *entity.Observation) error {
+	actual := readmodel.ObservationScopeFromObservation(o)
+	if actual == expected {
+		return nil
+	}
+	return fmt.Errorf(
+		"observations mix candidate scope: expected %s, got %s on %s",
+		readmodel.FormatObservationScope(expected),
+		readmodel.FormatObservationScope(actual),
+		o.ID,
+	)
 }
 
 func normalizeObservationIDs(rawIDs []string) []string {
@@ -549,27 +603,25 @@ func observationIDs(obs []*entity.Observation) []string {
 	return ids
 }
 
-func baselineObservationsForExperiment(s *store.Store, expID, instrument string) ([]*entity.Observation, error) {
+func baselineObservationsForExperiment(s *store.Store, obs *readmodel.ObservationIndex, expID, instrument string) ([]*entity.Observation, *readmodel.BaselineResolution, error) {
 	if expID == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
-	if _, err := s.ReadExperiment(expID); err != nil {
-		return nil, fmt.Errorf("baseline experiment %s: %w", expID, err)
-	}
-	all, err := s.ListObservationsForExperiment(expID)
+	scope, ok, note, err := readmodel.ResolveExperimentInstrumentScope(s, obs, expID, instrument, "baseline experiment")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var filtered []*entity.Observation
-	for _, o := range all {
-		if o.Instrument == instrument {
-			filtered = append(filtered, o)
-		}
+	if !ok {
+		return nil, nil, fmt.Errorf("%s", note)
 	}
-	if len(filtered) == 0 {
-		return nil, fmt.Errorf("baseline experiment %s has no observations on instrument %q", expID, instrument)
-	}
-	return filtered, nil
+	filtered := filterObservationsByInstrument(obs.ObservationsForScope(scope), instrument)
+	return filtered, &readmodel.BaselineResolution{
+		ExperimentID: expID,
+		Attempt:      scope.Attempt,
+		Ref:          scope.Ref,
+		SHA:          scope.SHA,
+		Source:       readmodel.BaselineSourceExplicit,
+	}, nil
 }
 
 func applyBaselineResolution(res *concludeResolution, baseline *readmodel.BaselineResolution, instrument string) {
@@ -582,6 +634,9 @@ func applyBaselineResolution(res *concludeResolution, baseline *readmodel.Baseli
 		return
 	}
 	res.BaselineExperiment = baseline.ExperimentID
+	res.BaselineAttempt = baseline.Attempt
+	res.BaselineRef = baseline.Ref
+	res.BaselineSHA = baseline.SHA
 	if baseline.Source != "" {
 		res.BaselineSource = baseline.Source
 	}
@@ -600,6 +655,25 @@ func formatBaselineSource(res concludeResolution) string {
 		return fmt.Sprintf("%s via %s/%s", res.BaselineSource, res.AncestorHypothesis, res.AncestorConclusion)
 	}
 	return res.BaselineSource
+}
+
+func conclusionByID(concls []*entity.Conclusion, id string) *entity.Conclusion {
+	for _, c := range concls {
+		if c != nil && c.ID == id {
+			return c
+		}
+	}
+	return nil
+}
+
+func filterObservationsByInstrument(obs []*entity.Observation, instrument string) []*entity.Observation {
+	var filtered []*entity.Observation
+	for _, o := range obs {
+		if o != nil && o.Instrument == instrument {
+			filtered = append(filtered, o)
+		}
+	}
+	return filtered
 }
 
 func conclusionsForGoal(s *store.Store, goalID string, concls []*entity.Conclusion) ([]*entity.Conclusion, error) {

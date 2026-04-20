@@ -8,6 +8,25 @@ import (
 	"github.com/bytter/autoresearch/internal/readmodel"
 )
 
+func observationIndexForFrontierTest(m map[string][]*entity.Observation) *readmodel.ObservationIndex {
+	var all []*entity.Observation
+	for expID, obs := range m {
+		for _, o := range obs {
+			if o == nil {
+				continue
+			}
+			if o.Experiment == expID {
+				all = append(all, o)
+				continue
+			}
+			copyObs := *o
+			copyObs.Experiment = expID
+			all = append(all, &copyObs)
+		}
+	}
+	return readmodel.NewObservationIndex(all)
+}
+
 func TestBuildGoalFromFlags_DefaultsThresholdPolicy(t *testing.T) {
 	g, err := buildGoalFromFlags(
 		"host_timing",
@@ -176,7 +195,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 		obsByExp := map[string][]*entity.Observation{
 			"E-0001": {{Instrument: "host_timing", Value: 0.75}},
 		}
-		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, observationIndexForFrontierTest(obsByExp), nil)
 		if !got.Met || got.MetByConclusion != "C-0001" || got.RecommendedAction != "ask_human" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -212,7 +231,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 			"E-0001": {{Instrument: "host_timing", Value: 0.70}},
 			"E-0002": {{Instrument: "host_timing", Value: 0.82}},
 		}
-		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, observationIndexForFrontierTest(obsByExp), nil)
 		if !got.Met || got.MetByConclusion != "C-0002" || got.RecommendedAction != "stop" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -280,7 +299,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 				{Instrument: "host_test", Pass: &pass},
 			},
 		}
-		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, observationIndexForFrontierTest(obsByExp), nil)
 		if !got.Met || got.MetByConclusion != "C-0102" || got.RecommendedAction != "ask_human" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -307,7 +326,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 		obsByExp := map[string][]*entity.Observation{
 			"E-1000": {{Instrument: "throughput", Value: 112}},
 		}
-		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, observationIndexForFrontierTest(obsByExp), nil)
 		if !got.Met || got.RecommendedAction != "continue" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -343,7 +362,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 			"E-2000": {{Instrument: "host_timing", Value: 0.70}},
 			"E-2001": {{Instrument: "host_timing", Value: 0.70}},
 		}
-		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, nil)
+		got := readmodel.AssessGoalCompletion(goal, concls, observationIndexForFrontierTest(obsByExp), nil)
 		if got.Met || got.RecommendedAction != "continue" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -376,7 +395,7 @@ func TestAssessGoalCompletion(t *testing.T) {
 				HypothesisStatus: entity.StatusSupported,
 			},
 		}
-		got := readmodel.AssessGoalCompletion(goal, concls, obsByExp, expClassByID)
+		got := readmodel.AssessGoalCompletion(goal, concls, observationIndexForFrontierTest(obsByExp), expClassByID)
 		if !got.Met || got.MetByConclusion != "C-3000" || got.RecommendedAction != "stop" {
 			t.Fatalf("unexpected assessment: %+v", got)
 		}
@@ -399,7 +418,7 @@ func TestComputeFrontierFromObservations_CarriesExperimentClassification(t *test
 	obsByExp := map[string][]*entity.Observation{
 		"E-0001": {{Instrument: "host_timing", Value: 0.75}},
 	}
-	rows, _ := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
+	rows, _ := readmodel.ComputeFrontierFromObservations(goal, concls, observationIndexForFrontierTest(obsByExp), map[string]experimentReadClass{
 		"E-0001": {
 			Classification:   experimentClassificationDead,
 			HypothesisStatus: entity.StatusSupported,
@@ -452,7 +471,7 @@ func TestComputeFrontierFromObservations_StalledForCountsLaterConclusionsAfterAc
 		"E-0002": {{Instrument: "host_timing", Value: 101}},
 		"E-0003": {{Instrument: "host_timing", Value: 90}},
 	}
-	rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, obsByExp, map[string]experimentReadClass{
+	rows, stalled := readmodel.ComputeFrontierFromObservations(goal, concls, observationIndexForFrontierTest(obsByExp), map[string]experimentReadClass{
 		"E-0001": {
 			Classification:   experimentClassificationDead,
 			HypothesisStatus: entity.StatusSupported,

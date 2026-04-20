@@ -79,12 +79,18 @@ func TestConclusionShowJSON_JoinsObservationArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.WriteConclusion(&entity.Conclusion{
-		ID:           "C-0001",
-		Hypothesis:   "H-0001",
-		Verdict:      entity.VerdictSupported,
-		Observations: []string{"O-0001", "O-0002", "O-0003", "O-9999"},
-		CandidateExp: "E-0001",
-		BaselineExp:  "E-0000",
+		ID:               "C-0001",
+		Hypothesis:       "H-0001",
+		Verdict:          entity.VerdictSupported,
+		Observations:     []string{"O-0001", "O-0002", "O-0003", "O-9999"},
+		CandidateExp:     "E-0001",
+		CandidateAttempt: 2,
+		CandidateRef:     "refs/heads/candidate/E-0001-a1",
+		CandidateSHA:     "0123456789abcdef0123456789abcdef01234567",
+		BaselineExp:      "E-0000",
+		BaselineAttempt:  1,
+		BaselineRef:      "refs/heads/baseline/E-0000-a1",
+		BaselineSHA:      "89abcdef0123456789abcdef0123456789abcdef",
 		Effect: entity.Effect{
 			Instrument: "timing",
 			DeltaAbs:   -20,
@@ -112,6 +118,24 @@ func TestConclusionShowJSON_JoinsObservationArtifacts(t *testing.T) {
 	}
 	if got.ID != "C-0001" {
 		t.Fatalf("id = %q, want C-0001", got.ID)
+	}
+	if got.CandidateRef != "refs/heads/candidate/E-0001-a1" {
+		t.Fatalf("candidate_ref = %q", got.CandidateRef)
+	}
+	if got.CandidateSHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("candidate_sha = %q", got.CandidateSHA)
+	}
+	if got.CandidateAttempt != 2 {
+		t.Fatalf("candidate_attempt = %d", got.CandidateAttempt)
+	}
+	if got.BaselineAttempt != 1 {
+		t.Fatalf("baseline_attempt = %d", got.BaselineAttempt)
+	}
+	if got.BaselineRef != "refs/heads/baseline/E-0000-a1" {
+		t.Fatalf("baseline_ref = %q", got.BaselineRef)
+	}
+	if got.BaselineSHA != "89abcdef0123456789abcdef0123456789abcdef" {
+		t.Fatalf("baseline_sha = %q", got.BaselineSHA)
 	}
 	if len(got.Observations) != 4 {
 		t.Fatalf("observations len = %d, want 4", len(got.Observations))

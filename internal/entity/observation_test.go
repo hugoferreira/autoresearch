@@ -27,9 +27,12 @@ func TestObservationRoundTrip(t *testing.T) {
 		Artifacts: []entity.Artifact{
 			{Name: "timing", SHA: "abcd1234", Path: "artifacts/ab/cd/timing.json", Bytes: 480},
 		},
-		Command:  "./a.out",
-		ExitCode: 0,
-		Author:   "agent:observer",
+		Command:      "./a.out",
+		ExitCode:     0,
+		Attempt:      2,
+		CandidateRef: "refs/heads/candidate/E-0001-a2",
+		CandidateSHA: "0123456789abcdef0123456789abcdef01234567",
+		Author:       "agent:observer",
 	}
 	data, err := o.Marshal()
 	if err != nil {
@@ -44,6 +47,15 @@ func TestObservationRoundTrip(t *testing.T) {
 	}
 	if back.CILow == nil || *back.CILow != 0.0045 {
 		t.Errorf("ci_low round trip: %v", back.CILow)
+	}
+	if back.Attempt != 2 {
+		t.Errorf("attempt round trip: got %d, want 2", back.Attempt)
+	}
+	if back.CandidateRef != "refs/heads/candidate/E-0001-a2" {
+		t.Errorf("candidate_ref round trip: %q", back.CandidateRef)
+	}
+	if back.CandidateSHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Errorf("candidate_sha round trip: %q", back.CandidateSHA)
 	}
 	if len(back.Artifacts) != 1 || back.Artifacts[0].Name != "timing" {
 		t.Errorf("artifacts round trip: %+v", back.Artifacts)

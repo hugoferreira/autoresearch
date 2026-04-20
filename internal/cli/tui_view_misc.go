@@ -226,7 +226,7 @@ func (v *frontierView) init(s *store.Store) tea.Cmd {
 		if err != nil {
 			return frontierLoadedMsg{err: err}
 		}
-		obsByExp := readmodel.LoadObservationsByExperiment(s)
+		obsByExp := readmodel.LoadObservationIndex(s)
 		expClassByID := readmodel.LoadExperimentReadClasses(s)
 		frontier := readmodel.BuildFrontierSnapshot(goal, concls, obsByExp, expClassByID)
 		return frontierLoadedMsg{

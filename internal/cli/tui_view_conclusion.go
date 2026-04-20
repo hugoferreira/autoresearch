@@ -190,6 +190,12 @@ func (v *conclusionDetailView) view(width, height int) string {
 	if c.CandidateExp != "" {
 		lines = append(lines, tuiDim.Render("candidate=")+c.CandidateExp+"  "+tuiDim.Render("baseline=")+emptyDash(c.BaselineExp))
 	}
+	if c.CandidateRef != "" {
+		lines = append(lines, tuiDim.Render("candidate_ref=")+c.CandidateRef)
+	}
+	if c.CandidateSHA != "" {
+		lines = append(lines, tuiDim.Render("candidate_sha=")+c.CandidateSHA)
+	}
 	if c.Strict.RequestedFrom != "" {
 		lines = append(lines, "")
 		lines = append(lines, tuiBoldYellow.Render("⚠ downgraded from "+c.Strict.RequestedFrom))

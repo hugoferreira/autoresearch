@@ -7,6 +7,25 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 )
 
+func observationIndexForTest(m map[string][]*entity.Observation) *ObservationIndex {
+	var all []*entity.Observation
+	for expID, obs := range m {
+		for _, o := range obs {
+			if o == nil {
+				continue
+			}
+			if o.Experiment == expID {
+				all = append(all, o)
+				continue
+			}
+			copyObs := *o
+			copyObs.Experiment = expID
+			all = append(all, &copyObs)
+		}
+	}
+	return NewObservationIndex(all)
+}
+
 func TestAssessGoalCompletion_CountsReviewedSupportedCandidatesAfterAcceptance(t *testing.T) {
 	goal := &entity.Goal{
 		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
@@ -35,7 +54,7 @@ func TestAssessGoalCompletion_CountsReviewedSupportedCandidatesAfterAcceptance(t
 		},
 	}
 
-	got := AssessGoalCompletion(goal, concls, obsByExp, expClassByID)
+	got := AssessGoalCompletion(goal, concls, observationIndexForTest(obsByExp), expClassByID)
 	if !got.Met || got.MetByConclusion != "C-3000" || got.RecommendedAction != "stop" {
 		t.Fatalf("unexpected assessment: %+v", got)
 	}
@@ -78,7 +97,7 @@ func TestComputeFrontierFromObservations_StalledForCountsLaterConclusionsAfterAc
 		"E-0003": {{Instrument: "host_timing", Value: 90}},
 	}
 
-	rows, stalled := ComputeFrontierFromObservations(goal, concls, obsByExp, map[string]ExperimentReadClass{
+	rows, stalled := ComputeFrontierFromObservations(goal, concls, observationIndexForTest(obsByExp), map[string]ExperimentReadClass{
 		"E-0001": {
 			Classification:   ExperimentClassificationDead,
 			HypothesisStatus: entity.StatusSupported,
@@ -126,7 +145,7 @@ func TestBuildFrontierSnapshot_ComposesRowsAssessmentAndStall(t *testing.T) {
 		},
 	}
 
-	got := BuildFrontierSnapshot(goal, concls, GroupObservationsByExperiment(obs), expClassByID)
+	got := BuildFrontierSnapshot(goal, concls, NewObservationIndex(obs), expClassByID)
 	if got.StalledFor != 0 {
 		t.Fatalf("stalled_for = %d, want 0", got.StalledFor)
 	}
@@ -141,5 +160,128 @@ func TestBuildFrontierSnapshot_ComposesRowsAssessmentAndStall(t *testing.T) {
 	}
 	if got.Rows[0].Classification != ExperimentClassificationDead {
 		t.Fatalf("row classification = %q, want %q", got.Rows[0].Classification, ExperimentClassificationDead)
+	}
+}
+
+func TestComputeFrontierFromObservations_UsesConclusionCandidateScope(t *testing.T) {
+	goal := &entity.Goal{
+		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
+	}
+	concls := []*entity.Conclusion{
+		{
+			ID:               "C-0001",
+			Hypothesis:       "H-0001",
+			Verdict:          entity.VerdictSupported,
+			Observations:     []string{"O-a1"},
+			CandidateExp:     "E-0001",
+			CandidateAttempt: 1,
+			CandidateRef:     "refs/heads/candidate/E-0001-a1",
+			CandidateSHA:     "1111111111111111111111111111111111111111",
+			Effect:           entity.Effect{Instrument: "host_timing", DeltaFrac: -0.10},
+		},
+		{
+			ID:               "C-0002",
+			Hypothesis:       "H-0002",
+			Verdict:          entity.VerdictSupported,
+			Observations:     []string{"O-a2"},
+			CandidateExp:     "E-0001",
+			CandidateAttempt: 2,
+			CandidateRef:     "refs/heads/candidate/E-0001-a2",
+			CandidateSHA:     "2222222222222222222222222222222222222222",
+			Effect:           entity.Effect{Instrument: "host_timing", DeltaFrac: -0.20},
+		},
+	}
+	obs := NewObservationIndex([]*entity.Observation{
+		{
+			ID:           "O-a2",
+			Experiment:   "E-0001",
+			Instrument:   "host_timing",
+			Value:        80,
+			Attempt:      2,
+			CandidateRef: "refs/heads/candidate/E-0001-a2",
+			CandidateSHA: "2222222222222222222222222222222222222222",
+		},
+		{
+			ID:           "O-a1",
+			Experiment:   "E-0001",
+			Instrument:   "host_timing",
+			Value:        100,
+			Attempt:      1,
+			CandidateRef: "refs/heads/candidate/E-0001-a1",
+			CandidateSHA: "1111111111111111111111111111111111111111",
+		},
+	})
+	rows, _ := ComputeFrontierFromObservations(goal, concls, obs, nil)
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("rows len = %d, want %d", got, want)
+	}
+	if got, want := rows[0].Conclusion, "C-0002"; got != want {
+		t.Fatalf("best row conclusion = %q, want %q", got, want)
+	}
+	if got, want := rows[0].Value, 80.0; got != want {
+		t.Fatalf("best row value = %v, want %v", got, want)
+	}
+	if got, want := rows[1].Value, 100.0; got != want {
+		t.Fatalf("second row value = %v, want %v", got, want)
+	}
+}
+
+func TestAssessGoalCompletion_UsesReviewedConclusionScope(t *testing.T) {
+	goal := &entity.Goal{
+		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
+		Completion: &entity.Completion{
+			Threshold:   0.15,
+			OnThreshold: entity.GoalOnThresholdStop,
+		},
+	}
+	concls := []*entity.Conclusion{
+		{
+			ID:               "C-0001",
+			Hypothesis:       "H-0001",
+			Verdict:          entity.VerdictSupported,
+			ReviewedBy:       "agent:gate",
+			Observations:     []string{"O-a1"},
+			CandidateExp:     "E-0001",
+			CandidateAttempt: 1,
+			CandidateRef:     "refs/heads/candidate/E-0001-a1",
+			CandidateSHA:     "1111111111111111111111111111111111111111",
+			Effect:           entity.Effect{Instrument: "host_timing", DeltaFrac: -0.10},
+		},
+		{
+			ID:               "C-0002",
+			Hypothesis:       "H-0002",
+			Verdict:          entity.VerdictSupported,
+			ReviewedBy:       "agent:gate",
+			Observations:     []string{"O-a2"},
+			CandidateExp:     "E-0001",
+			CandidateAttempt: 2,
+			CandidateRef:     "refs/heads/candidate/E-0001-a2",
+			CandidateSHA:     "2222222222222222222222222222222222222222",
+			Effect:           entity.Effect{Instrument: "host_timing", DeltaFrac: -0.20},
+		},
+	}
+	obs := NewObservationIndex([]*entity.Observation{
+		{
+			ID:           "O-a1",
+			Experiment:   "E-0001",
+			Instrument:   "host_timing",
+			Value:        100,
+			Attempt:      1,
+			CandidateRef: "refs/heads/candidate/E-0001-a1",
+			CandidateSHA: "1111111111111111111111111111111111111111",
+		},
+		{
+			ID:           "O-a2",
+			Experiment:   "E-0001",
+			Instrument:   "host_timing",
+			Value:        80,
+			Attempt:      2,
+			CandidateRef: "refs/heads/candidate/E-0001-a2",
+			CandidateSHA: "2222222222222222222222222222222222222222",
+		},
+	})
+	got := AssessGoalCompletion(goal, concls, obs, nil)
+	if !got.Met || got.MetByConclusion != "C-0002" || got.RecommendedAction != "stop" {
+		t.Fatalf("unexpected assessment: %+v", got)
 	}
 }

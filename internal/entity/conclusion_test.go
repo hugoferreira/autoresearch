@@ -9,12 +9,18 @@ import (
 
 func TestConclusionRoundTrip(t *testing.T) {
 	c := &entity.Conclusion{
-		ID:           "C-0001",
-		Hypothesis:   "H-0001",
-		Verdict:      entity.VerdictSupported,
-		Observations: []string{"O-0001", "O-0002"},
-		CandidateExp: "E-0002",
-		BaselineExp:  "E-0001",
+		ID:               "C-0001",
+		Hypothesis:       "H-0001",
+		Verdict:          entity.VerdictSupported,
+		Observations:     []string{"O-0001", "O-0002"},
+		CandidateExp:     "E-0002",
+		CandidateAttempt: 2,
+		CandidateRef:     "refs/heads/candidate/E-0002-a1",
+		CandidateSHA:     "0123456789abcdef0123456789abcdef01234567",
+		BaselineExp:      "E-0001",
+		BaselineAttempt:  1,
+		BaselineRef:      "refs/heads/baseline/E-0001-a1",
+		BaselineSHA:      "89abcdef0123456789abcdef0123456789abcdef",
 		Effect: entity.Effect{
 			Instrument: "host_timing",
 			DeltaAbs:   -0.0005,
@@ -50,6 +56,24 @@ func TestConclusionRoundTrip(t *testing.T) {
 	}
 	if len(back.Observations) != 2 {
 		t.Errorf("observations: %+v", back.Observations)
+	}
+	if back.CandidateRef != c.CandidateRef {
+		t.Errorf("candidate_ref: %q", back.CandidateRef)
+	}
+	if back.CandidateSHA != c.CandidateSHA {
+		t.Errorf("candidate_sha: %q", back.CandidateSHA)
+	}
+	if back.CandidateAttempt != c.CandidateAttempt {
+		t.Errorf("candidate_attempt: %d", back.CandidateAttempt)
+	}
+	if back.BaselineAttempt != c.BaselineAttempt {
+		t.Errorf("baseline_attempt: %d", back.BaselineAttempt)
+	}
+	if back.BaselineRef != c.BaselineRef {
+		t.Errorf("baseline_ref: %q", back.BaselineRef)
+	}
+	if back.BaselineSHA != c.BaselineSHA {
+		t.Errorf("baseline_sha: %q", back.BaselineSHA)
 	}
 	if back.Body != c.Body {
 		t.Errorf("body round-trip:\n want: %q\n  got: %q", c.Body, back.Body)

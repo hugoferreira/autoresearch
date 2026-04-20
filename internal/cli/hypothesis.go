@@ -463,6 +463,21 @@ func abs(f float64) float64 {
 	return f
 }
 
+func conclusionMeasuredCandidateRef(concl *entity.Conclusion, exp *entity.Experiment) string {
+	if concl != nil {
+		if strings.TrimSpace(concl.CandidateSHA) != "" {
+			return concl.CandidateSHA
+		}
+		if strings.TrimSpace(concl.CandidateRef) != "" {
+			return concl.CandidateRef
+		}
+	}
+	if exp == nil {
+		return ""
+	}
+	return exp.Branch
+}
+
 func hypothesisWorktreeCmd() *cobra.Command {
 	var conclusionID string
 	c := &cobra.Command{
@@ -514,18 +529,19 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if err != nil {
 				return err
 			}
-			_, exp, err := resolveWinningExperiment(s, args[0], conclusionID)
+			concl, exp, err := resolveWinningExperiment(s, args[0], conclusionID)
 			if err != nil {
 				return err
 			}
-			if exp.Branch == "" {
+			source := conclusionMeasuredCandidateRef(concl, exp)
+			if source == "" {
 				return fmt.Errorf("%s has no branch (status=%s)", exp.ID, exp.Status)
 			}
 			base := exp.Baseline.SHA
 			if base == "" {
 				base = exp.Baseline.Ref
 			}
-			diff, err := worktree.Diff(globalProjectDir, base, exp.Branch)
+			diff, err := worktree.Diff(globalProjectDir, base, source)
 			if err != nil {
 				return err
 			}
@@ -536,6 +552,19 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 					"experiment": exp.ID,
 					"baseline":   base,
 					"branch":     exp.Branch,
+					"candidate_ref": func() string {
+						if concl == nil {
+							return ""
+						}
+						return concl.CandidateRef
+					}(),
+					"candidate_sha": func() string {
+						if concl == nil {
+							return ""
+						}
+						return concl.CandidateSHA
+					}(),
+					"source_ref": source,
 					"diff":       diff,
 				})
 			}
@@ -586,40 +615,47 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 			if hyp.Status == entity.StatusUnreviewed {
 				return fmt.Errorf("hypothesis %s is unreviewed — dispatch the gate reviewer to review %s first (or self-review with `conclusion accept %s --reviewed-by ...`)", args[0], concl.ID, concl.ID)
 			}
-			if exp.Branch == "" {
+			source := conclusionMeasuredCandidateRef(concl, exp)
+			if source == "" {
 				return fmt.Errorf("%s has no branch (status=%s)", exp.ID, exp.Status)
 			}
 			verb := "cherry-pick"
 			if merge {
 				verb = "merge"
 			}
-			if err := dryRun(w, fmt.Sprintf("%s branch %s (experiment %s, conclusion %s)", verb, exp.Branch, exp.ID, concl.ID), map[string]any{
-				"action":     verb,
-				"hypothesis": args[0],
-				"conclusion": concl.ID,
-				"experiment": exp.ID,
-				"branch":     exp.Branch,
+			if err := dryRun(w, fmt.Sprintf("%s ref %s (experiment %s, conclusion %s)", verb, source, exp.ID, concl.ID), map[string]any{
+				"action":        verb,
+				"hypothesis":    args[0],
+				"conclusion":    concl.ID,
+				"experiment":    exp.ID,
+				"branch":        exp.Branch,
+				"candidate_ref": concl.CandidateRef,
+				"candidate_sha": concl.CandidateSHA,
+				"source_ref":    source,
 			}); err != nil {
 				return err
 			}
 			var out string
 			if merge {
-				out, err = worktree.Merge(globalProjectDir, exp.Branch)
+				out, err = worktree.Merge(globalProjectDir, source)
 			} else {
-				out, err = worktree.CherryPick(globalProjectDir, exp.Baseline.SHA, exp.Branch)
+				out, err = worktree.CherryPick(globalProjectDir, exp.Baseline.SHA, source)
 			}
 			if err != nil {
 				return err
 			}
 			return w.Emit(
-				fmt.Sprintf("applied %s → %s\n%s", concl.ID, exp.Branch, out),
+				fmt.Sprintf("applied %s → %s\n%s", concl.ID, source, out),
 				map[string]any{
-					"status":     "ok",
-					"hypothesis": args[0],
-					"conclusion": concl.ID,
-					"experiment": exp.ID,
-					"branch":     exp.Branch,
-					"output":     out,
+					"status":        "ok",
+					"hypothesis":    args[0],
+					"conclusion":    concl.ID,
+					"experiment":    exp.ID,
+					"branch":        exp.Branch,
+					"candidate_ref": concl.CandidateRef,
+					"candidate_sha": concl.CandidateSHA,
+					"source_ref":    source,
+					"output":        out,
 				},
 			)
 		},

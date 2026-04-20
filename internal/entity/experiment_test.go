@@ -18,6 +18,7 @@ func TestExperimentRoundTrip(t *testing.T) {
 			SHA: "abcdef1234567890",
 		},
 		Instruments: []string{"host_compile", "host_test", "host_timing"},
+		Attempt:     2,
 		Budget: entity.Budget{
 			WallTimeS:  600,
 			MaxSamples: 30,
@@ -49,6 +50,9 @@ func TestExperimentRoundTrip(t *testing.T) {
 	}
 	if back.Budget.MaxSamples != 30 {
 		t.Errorf("budget max_samples: %d", back.Budget.MaxSamples)
+	}
+	if back.Attempt != 2 {
+		t.Errorf("attempt round-trip: got %d, want 2", back.Attempt)
 	}
 	if back.Body != e.Body {
 		t.Errorf("body round-trip:\n want: %q\n  got: %q", e.Body, back.Body)

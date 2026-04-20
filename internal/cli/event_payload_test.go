@@ -304,7 +304,8 @@ func TestEventPayload_ObservationRecordIncludesEvidenceFailures(t *testing.T) {
 	impl := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp.ID)
 	writeScenarioMetrics(t, impl.Worktree, "80\n", "900\n")
 	gitCommitAll(t, impl.Worktree, "improve timing")
-	runCLI(t, dir, "observe", exp.ID, "--instrument", "timing")
+	candidateRef := gitCreateCandidateRef(t, impl.Worktree, "candidate/event-timing")
+	runCLI(t, dir, "observe", exp.ID, "--instrument", "timing", "--candidate-ref", candidateRef)
 
 	s, err := store.Open(dir)
 	if err != nil {
@@ -331,5 +332,14 @@ func TestEventPayload_ObservationRecordIncludesEvidenceFailures(t *testing.T) {
 	}
 	if failure["exit_code"] != float64(7) {
 		t.Fatalf("failure exit_code = %v, want 7", failure["exit_code"])
+	}
+	if got := payload["attempt"]; got != float64(1) {
+		t.Fatalf("data.attempt = %v, want 1", got)
+	}
+	if got, ok := payload["candidate_ref"].(string); !ok || got == "" {
+		t.Fatalf("data.candidate_ref = %#v, want non-empty string", payload["candidate_ref"])
+	}
+	if got, ok := payload["candidate_sha"].(string); !ok || got == "" {
+		t.Fatalf("data.candidate_sha = %#v, want non-empty string", payload["candidate_sha"])
 	}
 }

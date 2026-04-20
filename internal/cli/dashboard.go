@@ -257,7 +257,7 @@ func captureDashboardScoped(s *store.Store, scope goalScope) (*dashboardSnapshot
 	}
 
 	if snap.Goal != nil {
-		frontier := readmodel.BuildFrontierSnapshot(snap.Goal, concls, readmodel.GroupObservationsByExperiment(allObs), expClassByID)
+		frontier := readmodel.BuildFrontierSnapshot(snap.Goal, concls, readmodel.NewObservationIndex(allObs), expClassByID)
 		snap.Frontier = frontier.Rows
 		snap.StalledFor = frontier.StalledFor
 	}

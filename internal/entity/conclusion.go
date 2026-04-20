@@ -14,13 +14,19 @@ const (
 )
 
 type Conclusion struct {
-	ID           string    `yaml:"id"                            json:"id"`
-	Hypothesis   string    `yaml:"hypothesis"                    json:"hypothesis"`
-	Verdict      string    `yaml:"verdict"                       json:"verdict"`
-	Observations []string  `yaml:"observations"                  json:"observations"`
-	CandidateExp string    `yaml:"candidate_experiment,omitempty" json:"candidate_experiment,omitempty"`
-	BaselineExp  string    `yaml:"baseline_experiment,omitempty"  json:"baseline_experiment,omitempty"`
-	Effect       Effect    `yaml:"effect"                        json:"effect"`
+	ID               string   `yaml:"id"                              json:"id"`
+	Hypothesis       string   `yaml:"hypothesis"                      json:"hypothesis"`
+	Verdict          string   `yaml:"verdict"                         json:"verdict"`
+	Observations     []string `yaml:"observations"                    json:"observations"`
+	CandidateExp     string   `yaml:"candidate_experiment,omitempty"  json:"candidate_experiment,omitempty"`
+	CandidateAttempt int      `yaml:"candidate_attempt,omitempty"     json:"candidate_attempt,omitempty"`
+	CandidateRef     string   `yaml:"candidate_ref,omitempty"         json:"candidate_ref,omitempty"`
+	CandidateSHA     string   `yaml:"candidate_sha,omitempty"         json:"candidate_sha,omitempty"`
+	BaselineExp      string   `yaml:"baseline_experiment,omitempty"   json:"baseline_experiment,omitempty"`
+	BaselineAttempt  int      `yaml:"baseline_attempt,omitempty"      json:"baseline_attempt,omitempty"`
+	BaselineRef      string   `yaml:"baseline_ref,omitempty"          json:"baseline_ref,omitempty"`
+	BaselineSHA      string   `yaml:"baseline_sha,omitempty"          json:"baseline_sha,omitempty"`
+	Effect           Effect   `yaml:"effect"                          json:"effect"`
 	// IncrementalExp is the frontier-best experiment at the time this
 	// conclusion was written. Together with IncrementalEffect it answers
 	// "how much did this improve over the current best?" as opposed to
@@ -68,9 +74,9 @@ type Effect struct {
 }
 
 type Strict struct {
-	Passed        bool     `yaml:"passed"                    json:"passed"`
-	RequestedFrom string   `yaml:"downgraded_from,omitempty" json:"downgraded_from,omitempty"`
-	RescuedBy     string   `yaml:"rescued_by,omitempty"      json:"rescued_by,omitempty"`
+	Passed        bool   `yaml:"passed"                    json:"passed"`
+	RequestedFrom string `yaml:"downgraded_from,omitempty" json:"downgraded_from,omitempty"`
+	RescuedBy     string `yaml:"rescued_by,omitempty"      json:"rescued_by,omitempty"`
 	// Directional is true when the hypothesis predicted a direction
 	// with MinEffect == 0 (no magnitude commitment). A directional
 	// "supported" verdict must be rendered distinctly so readers don't

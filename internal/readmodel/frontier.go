@@ -66,26 +66,30 @@ func ComputeFrontier(s *store.Store, goal *entity.Goal, concls []*entity.Conclus
 // ComputeFrontierSnapshot loads the read-side context needed to build a full
 // frontier projection from store-backed entities.
 func ComputeFrontierSnapshot(s *store.Store, goal *entity.Goal, concls []*entity.Conclusion) FrontierSnapshot {
-	return BuildFrontierSnapshot(goal, concls, LoadObservationsByExperiment(s), LoadExperimentReadClasses(s))
+	return BuildFrontierSnapshot(goal, concls, LoadObservationIndex(s), LoadExperimentReadClasses(s))
 }
 
 // BuildFrontierSnapshot composes the frontier rows, goal assessment, and
 // stalled-for counter from already-loaded read-side inputs.
-func BuildFrontierSnapshot(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) FrontierSnapshot {
-	rows, stalled := ComputeFrontierFromObservations(goal, concls, obsByExp, expClassByID)
+func BuildFrontierSnapshot(goal *entity.Goal, concls []*entity.Conclusion, obs *ObservationIndex, expClassByID map[string]ExperimentReadClass) FrontierSnapshot {
+	rows, stalled := ComputeFrontierFromObservations(goal, concls, obs, expClassByID)
 	return FrontierSnapshot{
 		Rows:       rows,
-		Assessment: AssessGoalCompletion(goal, concls, obsByExp, expClassByID),
+		Assessment: AssessGoalCompletion(goal, concls, obs, expClassByID),
 		StalledFor: stalled,
 	}
 }
 
-func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) (rows []FrontierRow, stalledFor int) {
+func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclusion, obs *ObservationIndex, expClassByID map[string]ExperimentReadClass) (rows []FrontierRow, stalledFor int) {
 	rows = []FrontierRow{} // always non-nil so --json emits [] not null
 	requireByInst := frontierRequireConstraints(goal)
 
 	for _, c := range concls {
-		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		scopeObs, _, ok := obs.ObservationsForConclusionCandidate(c)
+		if !ok {
+			continue
+		}
+		val, ok := frontierCandidateValue(goal, c, scopeObs, requireByInst)
 		if !ok {
 			continue
 		}
@@ -99,7 +103,7 @@ func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 			Classification:   class.Classification,
 			HypothesisStatus: class.HypothesisStatus,
 			RescuedBy:        c.Strict.RescuedBy,
-			TiebreakValues:   rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
+			TiebreakValues:   rescuerTiebreakValues(goal, scopeObs),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -113,11 +117,12 @@ func ComputeFrontierFromObservations(goal *entity.Goal, concls []*entity.Conclus
 	hasBest := false
 	var bestRow FrontierRow
 	for _, c := range sortedByTime {
-		val, ok := frontierCandidateValue(goal, c, obsByExp, requireByInst)
+		scopeObs, _, _ := obs.ObservationsForConclusionCandidate(c)
+		val, ok := frontierCandidateValue(goal, c, scopeObs, requireByInst)
 		if ok {
 			cur := FrontierRow{
 				Value:          val,
-				TiebreakValues: rescuerTiebreakValues(goal, obsByExp[c.CandidateExp]),
+				TiebreakValues: rescuerTiebreakValues(goal, scopeObs),
 			}
 			if !hasBest {
 				hasBest = true
@@ -169,7 +174,7 @@ func FrontierRowBetter(goal *entity.Goal, a, b FrontierRow) bool {
 	return false
 }
 
-func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByExp map[string][]*entity.Observation, expClassByID map[string]ExperimentReadClass) FrontierGoalAssessment {
+func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obs *ObservationIndex, expClassByID map[string]ExperimentReadClass) FrontierGoalAssessment {
 	_ = expClassByID
 	if goal == nil || goal.IsOpenEnded() {
 		return FrontierGoalAssessment{
@@ -200,11 +205,14 @@ func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 		if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
 			continue
 		}
-		obs := obsByExp[c.CandidateExp]
-		if !goalConstraintsSatisfied(obs, goal.Constraints) {
+		scopeObs, _, ok := obs.ObservationsForConclusionCandidate(c)
+		if !ok {
 			continue
 		}
-		val, ok := candidateObjectiveValue(obs, goal.Objective.Instrument)
+		if !goalConstraintsSatisfied(scopeObs, goal.Constraints) {
+			continue
+		}
+		val, ok := candidateObjectiveValue(scopeObs, goal.Objective.Instrument)
 		if !ok {
 			continue
 		}
@@ -229,30 +237,6 @@ func AssessGoalCompletion(goal *entity.Goal, concls []*entity.Conclusion, obsByE
 		}
 	}
 	return assessment
-}
-
-// LoadObservationsByExperiment reads all observations once and returns them
-// indexed by experiment ID. A nil map (on read error) is safe — callers get
-// empty slices from the nil map.
-func LoadObservationsByExperiment(s *store.Store) map[string][]*entity.Observation {
-	all, err := s.ListObservations()
-	if err != nil {
-		return nil
-	}
-	return GroupObservationsByExperiment(all)
-}
-
-// GroupObservationsByExperiment buckets already-loaded observations by their
-// experiment ID for frontier and status projections.
-func GroupObservationsByExperiment(all []*entity.Observation) map[string][]*entity.Observation {
-	m := make(map[string][]*entity.Observation, len(all))
-	for _, o := range all {
-		if o == nil {
-			continue
-		}
-		m[o.Experiment] = append(m[o.Experiment], o)
-	}
-	return m
 }
 
 // rescuerTiebreakValues extracts one candidate value per goal rescuer, in
@@ -300,17 +284,17 @@ func frontierRequireConstraints(goal *entity.Goal) map[string]string {
 	return requireByInst
 }
 
-func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obsByExp map[string][]*entity.Observation, requireByInst map[string]string) (float64, bool) {
+func frontierCandidateValue(goal *entity.Goal, c *entity.Conclusion, obs []*entity.Observation, requireByInst map[string]string) (float64, bool) {
 	if goal == nil || c == nil {
 		return 0, false
 	}
 	if c.Verdict != entity.VerdictSupported || c.Effect.Instrument != goal.Objective.Instrument {
 		return 0, false
 	}
-	if !requireSatisfied(obsByExp[c.CandidateExp], requireByInst) {
+	if !requireSatisfied(obs, requireByInst) {
 		return 0, false
 	}
-	return candidateObjectiveValue(obsByExp[c.CandidateExp], goal.Objective.Instrument)
+	return candidateObjectiveValue(obs, goal.Objective.Instrument)
 }
 
 func betterFrontierValue(direction string, candidate, incumbent float64) bool {

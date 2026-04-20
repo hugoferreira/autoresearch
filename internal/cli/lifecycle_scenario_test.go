@@ -23,9 +23,15 @@ type cliImplementResponse struct {
 }
 
 type cliObserveAllResponse struct {
-	Results []struct {
-		ID   string `json:"id"`
-		Inst string `json:"instrument"`
+	Action             string   `json:"action"`
+	Observations       []string `json:"observations"`
+	NewObservations    []string `json:"new_observations"`
+	ReusedObservations []string `json:"reused_observations"`
+	Results            []struct {
+		ID     string   `json:"id"`
+		IDs    []string `json:"ids"`
+		Inst   string   `json:"instrument"`
+		Action string   `json:"action"`
 	} `json:"results"`
 }
 
@@ -120,9 +126,10 @@ func TestLifecycleScenario_ReadSurfacesStayConsistentAfterAcceptedWinAndLaterSta
 	impl1 := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp1.ID)
 	writeScenarioMetrics(t, impl1.Worktree, "80\n", "900\n")
 	gitCommitAll(t, impl1.Worktree, "improve timing")
+	candidateRef1 := gitCreateCandidateRef(t, impl1.Worktree, "candidate/lifecycle-e1")
 
-	obs1 := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp1.ID, "--all")
-	analyze1 := runCLIJSON[cliAnalyzeResponse](t, dir, "analyze", exp1.ID, "--baseline", baseline.ID)
+	obs1 := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp1.ID, "--all", "--candidate-ref", candidateRef1)
+	analyze1 := runCLIJSON[cliAnalyzeResponse](t, dir, "analyze", exp1.ID, "--candidate-ref", candidateRef1, "--baseline", baseline.ID)
 	if got, want := len(analyze1.Rows), 3; got != want {
 		t.Fatalf("analyze rows len = %d, want %d", got, want)
 	}
@@ -158,8 +165,9 @@ func TestLifecycleScenario_ReadSurfacesStayConsistentAfterAcceptedWinAndLaterSta
 	impl2 := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp2.ID)
 	writeScenarioMetrics(t, impl2.Worktree, "95\n", "900\n")
 	gitCommitAll(t, impl2.Worktree, "small tweak")
+	candidateRef2 := gitCreateCandidateRef(t, impl2.Worktree, "candidate/lifecycle-e2")
 
-	obs2 := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp2.ID, "--all")
+	obs2 := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp2.ID, "--all", "--candidate-ref", candidateRef2)
 	runCLIJSON[cliIDResponse](t, dir,
 		"conclude", hyp2.ID,
 		"--verdict", "inconclusive",
@@ -292,8 +300,9 @@ func TestLifecycleScenario_EvidenceArtifactsCloseAuditChain(t *testing.T) {
 	writeScenarioMechanism(t, impl.Worktree, "candidate trace\n")
 	gitRun(t, impl.Worktree, "add", "timing.txt", "size.txt", "mechanism.txt")
 	gitRun(t, impl.Worktree, "commit", "-m", "improve timing")
+	candidateRef := gitCreateCandidateRef(t, impl.Worktree, "candidate/evidence-e1")
 
-	obs := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp.ID, "--all")
+	obs := runCLIJSON[cliObserveAllResponse](t, dir, "observe", exp.ID, "--all", "--candidate-ref", candidateRef)
 	timingObsID := observeResultID(t, obs, "timing")
 	concl := runCLIJSON[cliIDResponse](t, dir,
 		"conclude", hyp.ID,
@@ -353,7 +362,8 @@ func TestLifecycleScenario_EvidenceArtifactsCloseAuditChain(t *testing.T) {
 	impl2 := runCLIJSON[cliImplementResponse](t, dir, "experiment", "implement", exp2.ID)
 	writeScenarioMetrics(t, impl2.Worktree, "95\n", "900\n")
 	gitCommitAll(t, impl2.Worktree, "small tweak")
-	obs2 := runCLIJSON[cliIDResponse](t, dir, "observe", exp2.ID, "--instrument", "timing")
+	candidateRef2 := gitCreateCandidateRef(t, impl2.Worktree, "candidate/evidence-e2")
+	obs2 := runCLIJSON[cliIDResponse](t, dir, "observe", exp2.ID, "--instrument", "timing", "--candidate-ref", candidateRef2)
 	concl2 := runCLIJSON[cliIDResponse](t, dir,
 		"conclude", hyp2.ID,
 		"--verdict", "inconclusive",
@@ -498,6 +508,12 @@ func gitCommitAll(t *testing.T, dir, msg string) {
 	t.Helper()
 	gitRun(t, dir, "add", "timing.txt", "size.txt")
 	gitRun(t, dir, "commit", "-m", msg)
+}
+
+func gitCreateCandidateRef(t *testing.T, dir, ref string) string {
+	t.Helper()
+	gitRun(t, dir, "branch", ref, "HEAD")
+	return ref
 }
 
 func gitRun(t *testing.T, dir string, args ...string) {

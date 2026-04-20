@@ -208,13 +208,7 @@ func runPassFail(ctx context.Context, cfg Config) (*Result, error) {
 }
 
 func runTiming(ctx context.Context, cfg Config) (*Result, error) {
-	samples := cfg.Samples
-	if samples <= 0 {
-		samples = cfg.Instrument.MinSamples
-	}
-	if samples <= 0 {
-		samples = 5
-	}
+	samples := PlanSamples(cfg.Instrument, cfg.Samples).Target
 
 	type sampleRec struct {
 		Run      int     `json:"run"`
@@ -313,13 +307,7 @@ func runScalar(ctx context.Context, cfg Config) (*Result, error) {
 		return nil, fmt.Errorf("pattern %q must have exactly one capture group, got %d", cfg.Instrument.Pattern, re.NumSubexp())
 	}
 
-	samples := cfg.Samples
-	if samples <= 0 {
-		samples = cfg.Instrument.MinSamples
-	}
-	if samples <= 0 {
-		samples = 3
-	}
+	samples := PlanSamples(cfg.Instrument, cfg.Samples).Target
 
 	type sampleRec struct {
 		Run      int    `json:"run"`

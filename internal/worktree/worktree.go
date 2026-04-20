@@ -34,6 +34,13 @@ func ResolveRef(dir, ref string) (string, error) {
 	return run(dir, "rev-parse", ref)
 }
 
+// SymbolicFullName resolves a rev-like input to its full symbolic ref name
+// (for example "main" -> "refs/heads/main"). Non-symbolic inputs such as raw
+// SHAs resolve to the empty string.
+func SymbolicFullName(dir, ref string) (string, error) {
+	return run(dir, "rev-parse", "--symbolic-full-name", ref)
+}
+
 // Add creates a new git worktree at path, checking out a new branch off baseline.
 func Add(projectDir, path, branch, baseline string) error {
 	_, err := run(projectDir, "worktree", "add", "-b", branch, path, baseline)
@@ -113,7 +120,7 @@ func Merge(projectDir, branch string) (string, error) {
 	return run(projectDir, "merge", branch, "--no-edit")
 }
 
-// DirtyPaths returns relative paths in the main checkout that differ from
+// DirtyPaths returns relative paths in the given checkout that differ from
 // HEAD, including untracked files. The list is sorted and deduplicated. If the
 // directory is not a git repo, it returns an empty list.
 func DirtyPaths(projectDir string) ([]string, error) {

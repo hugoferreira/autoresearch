@@ -278,6 +278,12 @@ func renderReportMarkdown(r *reportData) string {
 				sb.WriteString("> **Directional** — the hypothesis predicted direction only (`min_effect: 0`); any clean-CI effect in the predicted direction counts as supported. Follow-up hypotheses should refine this into a quantitative claim once the magnitude is known.\n\n")
 			}
 			fmt.Fprintf(&sb, "- **Candidate experiment**: %s\n", c.CandidateExp)
+			if c.CandidateRef != "" {
+				fmt.Fprintf(&sb, "- **Measured candidate ref**: %s\n", c.CandidateRef)
+			}
+			if c.CandidateSHA != "" {
+				fmt.Fprintf(&sb, "- **Measured candidate SHA**: %s\n", c.CandidateSHA)
+			}
 			if c.BaselineExp != "" {
 				fmt.Fprintf(&sb, "- **Baseline experiment**: %s\n", c.BaselineExp)
 			}

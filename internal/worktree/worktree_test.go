@@ -79,6 +79,26 @@ func TestAddAndRemove(t *testing.T) {
 	}
 }
 
+func TestSymbolicFullName(t *testing.T) {
+	dir := gitInit(t)
+
+	got, err := worktree.SymbolicFullName(dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "refs/heads/main" {
+		t.Fatalf("SymbolicFullName(main) = %q, want %q", got, "refs/heads/main")
+	}
+
+	got, err = worktree.SymbolicFullName(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "refs/heads/main" {
+		t.Fatalf("SymbolicFullName(HEAD) = %q, want %q", got, "refs/heads/main")
+	}
+}
+
 func gitCommit(t *testing.T, dir, file, body, msg string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o644); err != nil {

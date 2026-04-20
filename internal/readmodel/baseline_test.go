@@ -117,6 +117,27 @@ func (f *baselineFixture) writeObservation(t *testing.T, id, expID, instrument s
 	}
 }
 
+func (f *baselineFixture) writeScopedObservation(t *testing.T, id, expID, instrument string, attempt int, ref, sha string) {
+	t.Helper()
+	o := &entity.Observation{
+		ID:           id,
+		Experiment:   expID,
+		Instrument:   instrument,
+		MeasuredAt:   f.now,
+		Value:        100,
+		Samples:      3,
+		PerSample:    []float64{100, 101, 99},
+		Unit:         "ns",
+		Attempt:      attempt,
+		CandidateRef: ref,
+		CandidateSHA: sha,
+		Author:       "agent:observer",
+	}
+	if err := f.s.WriteObservation(o); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *baselineFixture) writeConclusion(t *testing.T, id, hypID, candidateExp string, reviewed bool) {
 	t.Helper()
 	c := &entity.Conclusion{
@@ -129,6 +150,30 @@ func (f *baselineFixture) writeConclusion(t *testing.T, id, hypID, candidateExp 
 		StatTest:     "mann_whitney_u",
 		Author:       "agent:analyst",
 		CreatedAt:    f.now,
+	}
+	if reviewed {
+		c.ReviewedBy = "human:gate"
+	}
+	if err := f.s.WriteConclusion(c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *baselineFixture) writeScopedConclusion(t *testing.T, id, hypID, obsID string, scope ObservationScope, reviewed bool) {
+	t.Helper()
+	c := &entity.Conclusion{
+		ID:               id,
+		Hypothesis:       hypID,
+		Verdict:          entity.VerdictSupported,
+		Observations:     []string{obsID},
+		CandidateExp:     scope.Experiment,
+		CandidateAttempt: scope.Attempt,
+		CandidateRef:     scope.Ref,
+		CandidateSHA:     scope.SHA,
+		Effect:           entity.Effect{Instrument: "timing", DeltaFrac: -0.1},
+		StatTest:         "mann_whitney_u",
+		Author:           "agent:analyst",
+		CreatedAt:        f.now,
 	}
 	if reviewed {
 		c.ReviewedBy = "human:gate"
@@ -259,6 +304,47 @@ func TestResolveInferredBaseline_DedupesSupportedConclusionsOnSameAncestorExperi
 	}
 }
 
+func TestResolveInferredBaseline_UsesAcceptedAncestorScope(t *testing.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+
+	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
+
+	ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", "", false)
+	scopeA := ObservationScope{
+		Experiment: ancestorExp.ID,
+		Attempt:    1,
+		Ref:        "refs/heads/candidate/E-0001-a1",
+		SHA:        "1111111111111111111111111111111111111111",
+	}
+	scopeB := ObservationScope{
+		Experiment: ancestorExp.ID,
+		Attempt:    2,
+		Ref:        "refs/heads/candidate/E-0001-a2",
+		SHA:        "2222222222222222222222222222222222222222",
+	}
+	f.writeScopedObservation(t, "O-0001", ancestorExp.ID, "timing", scopeA.Attempt, scopeA.Ref, scopeA.SHA)
+	f.writeScopedObservation(t, "O-0002", ancestorExp.ID, "timing", scopeB.Attempt, scopeB.Ref, scopeB.SHA)
+	f.writeScopedConclusion(t, "C-0001", parent.ID, "O-0001", scopeA, true)
+
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", "", false)
+
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != ancestorExp.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, ancestorExp.ID)
+	}
+	if got.Attempt != scopeA.Attempt || got.Ref != scopeA.Ref || got.SHA != scopeA.SHA {
+		t.Fatalf("ancestor scope = %+v, want %+v", got.Scope(), scopeA)
+	}
+}
+
 func TestResolveInferredBaseline_UsesGoalScopedBaselineMapping(t *testing.T) {
 	f := newBaselineFixture(t)
 	f.writeGoal(t, "G-0001")
@@ -303,8 +389,28 @@ func TestResolveInferredBaseline_ErrorsOnAmbiguousGoalBaseline(t *testing.T) {
 	if err == nil {
 		t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
 	}
-	if !strings.Contains(err.Error(), "multiple baseline experiments") {
-		t.Fatalf("error = %q, want multiple baseline experiments", err)
+	if !strings.Contains(err.Error(), "multiple baseline scopes") {
+		t.Fatalf("error = %q, want multiple baseline scopes", err)
+	}
+}
+
+func TestResolveInferredBaseline_ErrorsOnAmbiguousCandidateRecordedScope(t *testing.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
+
+	recorded := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	f.writeScopedObservation(t, "O-0001", recorded.ID, "timing", 1, "refs/heads/baseline/E-0001-a1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	f.writeScopedObservation(t, "O-0002", recorded.ID, "timing", 2, "refs/heads/baseline/E-0001-a2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", recorded.ID, false)
+
+	_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err == nil {
+		t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "multiple observation scopes") {
+		t.Fatalf("error = %q, want multiple observation scopes", err)
 	}
 }
 
