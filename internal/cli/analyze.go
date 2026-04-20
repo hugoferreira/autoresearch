@@ -41,6 +41,7 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
 			expID := args[0]
+			candidateRef = strings.TrimSpace(candidateRef)
 
 			s, err := openStore()
 			if err != nil {
@@ -58,19 +59,23 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 			if len(candObs) == 0 {
 				return fmt.Errorf("experiment %s has no observations", expID)
 			}
-			if !exp.IsBaseline {
-				if strings.TrimSpace(candidateRef) != "" {
-					candObs, err = filterAnalyzeObservationsByCandidateRef(candObs, strings.TrimSpace(candidateRef))
-					if err != nil {
-						return fmt.Errorf("experiment %s: %w", expID, err)
-					}
-				} else {
-					if provs := distinctObservationProvenances(candObs); len(provs) > 1 {
-						return fmt.Errorf(
-							"experiment %s has observations for multiple candidate scopes (%s); rerun analyze with --candidate-ref <stored-ref>",
-							expID, formatObservationProvenances(provs),
-						)
-					}
+			if candidateRef != "" {
+				if exp.IsBaseline {
+					return fmt.Errorf("--candidate-ref is only valid for non-baseline experiments")
+				}
+				candObs, err = filterAnalyzeObservationsByCandidateRef(candObs, candidateRef)
+				if err != nil {
+					return fmt.Errorf("experiment %s: %w", expID, err)
+				}
+			} else {
+				scopeLabel := "recorded scopes"
+				hint := "analyze requires a single recorded scope"
+				if !exp.IsBaseline {
+					scopeLabel = "candidate scopes"
+					hint = "rerun analyze with --candidate-ref <stored-ref>"
+				}
+				if err := ensureAnalyzeObservationsSingleScope("experiment", expID, scopeLabel, candObs, hint); err != nil {
+					return err
 				}
 			}
 
@@ -83,6 +88,15 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 				}
 				if len(baseObs) == 0 {
 					return fmt.Errorf("baseline experiment %s has no observations", baselineExp)
+				}
+				if err := ensureAnalyzeObservationsSingleScope(
+					"baseline experiment",
+					baselineExp,
+					"recorded scopes",
+					baseObs,
+					"analyze requires a baseline experiment with a single recorded scope",
+				); err != nil {
+					return err
 				}
 			}
 
@@ -167,6 +181,16 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 	c.Flags().IntVar(&iters, "iters", 0, "bootstrap iterations (0 uses default 2000)")
 	c.Flags().StringVar(&candidateRef, "candidate-ref", "", "for non-baseline experiments, restrict analysis to observations recorded on this candidate ref")
 	return c
+}
+
+func ensureAnalyzeObservationsSingleScope(subject, expID, scopeLabel string, obs []*entity.Observation, hint string) error {
+	if provs := distinctObservationProvenances(obs); len(provs) > 1 {
+		return fmt.Errorf(
+			"%s %s has observations for multiple %s (%s); %s",
+			subject, expID, scopeLabel, formatObservationProvenances(provs), hint,
+		)
+	}
+	return nil
 }
 
 type observationProvenance struct {
