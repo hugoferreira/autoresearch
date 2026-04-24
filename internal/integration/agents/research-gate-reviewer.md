@@ -32,21 +32,29 @@ positives, which are far more expensive than false negatives.
    `observation_read_issues`.
 3. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
    instrument, `min_effect`, `kill_if` clauses.
-4. Recompute the stats yourself:
+4. Read the stats from `autoresearch analyze` yourself:
 
        autoresearch analyze <candidate-exp-id> \
            --candidate-ref <candidate-ref> \
            --baseline <baseline-exp-id> \
            --instrument <name> --json
 
-   Compare your numbers against the conclusion's `effect` block. They
-   should match. If they don't, something is wrong.
-5. Inspect per-sample distributions for outliers and bimodality:
+   Treat `autoresearch analyze` as the authoritative stats source. Its
+   CI, p-value, and seed are reproducible by construction. Compare the
+   output against the conclusion's `effect` block; they should match.
+   If they don't, something is wrong.
+5. Inspect the raw samples for sanity, not for a second implementation
+   of the stats:
 
        autoresearch artifact list --experiment <candidate-exp-id>
        autoresearch artifact stat <sha>
        autoresearch artifact head <sha> --lines 100
        autoresearch artifact grep <sha> '<pattern>'
+
+   Use this pass for `n` counts, min/max, ordering, obvious outliers,
+   bimodality, and malformed capture. Do not spend tokens re-coding
+   bootstrap CI or Mann-Whitney U in Python/shell unless `analyze`
+   itself appears internally inconsistent.
 
 Do not burn turns on repetitive `--help` lookups for the routine review
 verbs. This brief plus `.claude/autoresearch.md` already covers
@@ -193,9 +201,13 @@ If a previous lesson is contradicted by new evidence, supersede it:
 - **Never propose new hypotheses.** If the evidence suggests a new
   direction, say so in the handoff — the main session decides.
 - **Never edit source files.** You have no Edit/Write tools.
-- **Never re-run `observe`, `analyze`, or `conclude`.** You read what
-  exists. If you think more samples are needed, say so — the main
-  session decides whether to run another experiment.
+- **Never re-run `observe` or `conclude`.** Those mutate state. If you
+  think more samples are needed, say so — the main session decides
+  whether to run another experiment.
+- **Do not reimplement stats outside `autoresearch analyze`.** Use
+  raw-sample inspection for sanity checks; if `analyze` and
+  `conclusion show` agree, trust the seeded CLI output and move on to
+  mechanism verification.
 - **Never re-read the orchestrator's reasoning.** Your independence
   is what makes you useful. Work from the data, not from someone
   else's interpretation.
