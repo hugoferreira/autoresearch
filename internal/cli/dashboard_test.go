@@ -42,7 +42,7 @@ func baseSnapshot() *dashboardSnapshot {
 	}
 }
 
-func newStoreWithBuiltins(_ ...any) *store.Store {
+func newStoreWithBuiltins() *store.Store {
 	GinkgoHelper()
 	s := createCLIStore()
 	Expect(s.RegisterInstrument("host_timing", store.Instrument{Unit: "seconds"})).To(Succeed())
