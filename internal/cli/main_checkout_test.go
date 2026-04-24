@@ -5,13 +5,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"testing"
 
 	"github.com/bytter/autoresearch/internal/integration"
 	"github.com/bytter/autoresearch/internal/store"
+	"github.com/bytter/autoresearch/internal/testkit"
+	"github.com/onsi/ginkgo/v2"
 )
 
-func initGitRepo(t *testing.T) string {
+func initGitRepo(t testkit.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, args := range [][]string{
@@ -40,7 +41,7 @@ func initGitRepo(t *testing.T) string {
 	return dir
 }
 
-func writeFile(t *testing.T, root, rel, body string) {
+func writeFile(t testkit.T, root, rel, body string) {
 	t.Helper()
 	abs := filepath.Join(root, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
@@ -51,70 +52,78 @@ func writeFile(t *testing.T, root, rel, body string) {
 	}
 }
 
-func TestCaptureMainCheckoutState_FiltersOnlyFullyManagedPaths(t *testing.T) {
-	dir := initGitRepo(t)
+var _ = ginkgo.Describe("TestCaptureMainCheckoutState_FiltersOnlyFullyManagedPaths", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-	for _, rel := range []string{
-		integration.ClaudeDocRelPath,
-		integration.CodexDocRelPath,
-		".claude/agents/research-orchestrator.md",
-		".claude/agents/research-gate-reviewer.md",
-		".codex/agents/research-orchestrator.toml",
-		".codex/agents/research-gate-reviewer.toml",
-		".research/state.json",
-	} {
-		writeFile(t, dir, rel, "managed\n")
-	}
+		dir := initGitRepo(t)
 
-	for path, body := range map[string]string{
-		"AGENTS.md":             "team notes\n",
-		".gitignore":            ".cache/\n",
-		".claude/settings.json": "{\n  \"permissions\": {}\n}\n",
-		"bootstrap.sh":          "#!/bin/sh\n",
-	} {
-		writeFile(t, dir, path, body)
-	}
+		for _, rel := range []string{
+			integration.ClaudeDocRelPath,
+			integration.CodexDocRelPath,
+			".claude/agents/research-orchestrator.md",
+			".claude/agents/research-gate-reviewer.md",
+			".codex/agents/research-orchestrator.toml",
+			".codex/agents/research-gate-reviewer.toml",
+			".research/state.json",
+		} {
+			writeFile(t, dir, rel, "managed\n")
+		}
 
-	got, err := captureMainCheckoutState(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+		for path, body := range map[string]string{
+			"AGENTS.md":             "team notes\n",
+			".gitignore":            ".cache/\n",
+			".claude/settings.json": "{\n  \"permissions\": {}\n}\n",
+			"bootstrap.sh":          "#!/bin/sh\n",
+		} {
+			writeFile(t, dir, path, body)
+		}
 
-	if !got.Dirty {
-		t.Fatal("expected main checkout to be dirty")
-	}
-	want := []string{
-		".claude/settings.json",
-		".gitignore",
-		"AGENTS.md",
-		"bootstrap.sh",
-	}
-	if !reflect.DeepEqual(got.Paths, want) {
-		t.Fatalf("paths = %v, want %v", got.Paths, want)
-	}
-}
+		got, err := captureMainCheckoutState(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-func TestCaptureDashboard_RecordsMainCheckoutWarning(t *testing.T) {
-	dir := initGitRepo(t)
-	s, err := store.Create(dir, store.Config{
-		Build: store.CommandSpec{Command: "true"},
-		Test:  store.CommandSpec{Command: "true"},
+		if !got.Dirty {
+			t.Fatal("expected main checkout to be dirty")
+		}
+		want := []string{
+			".claude/settings.json",
+			".gitignore",
+			"AGENTS.md",
+			"bootstrap.sh",
+		}
+		if !reflect.DeepEqual(got.Paths, want) {
+			t.Fatalf("paths = %v, want %v", got.Paths, want)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+})
 
-	writeFile(t, dir, "bootstrap.sh", "#!/bin/sh\n")
+var _ = ginkgo.Describe("TestCaptureDashboard_RecordsMainCheckoutWarning", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-	snap, err := captureDashboard(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !snap.MainCheckoutDirty {
-		t.Fatal("expected dashboard snapshot to flag dirty main checkout")
-	}
-	want := []string{"bootstrap.sh"}
-	if !reflect.DeepEqual(snap.MainCheckoutDirtyPaths, want) {
-		t.Fatalf("paths = %v, want %v", snap.MainCheckoutDirtyPaths, want)
-	}
-}
+		dir := initGitRepo(t)
+		s, err := store.Create(dir, store.Config{
+			Build: store.CommandSpec{Command: "true"},
+			Test:  store.CommandSpec{Command: "true"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		writeFile(t, dir, "bootstrap.sh", "#!/bin/sh\n")
+
+		snap, err := captureDashboard(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !snap.MainCheckoutDirty {
+			t.Fatal("expected dashboard snapshot to flag dirty main checkout")
+		}
+		want := []string{"bootstrap.sh"}
+		if !reflect.DeepEqual(snap.MainCheckoutDirtyPaths, want) {
+			t.Fatalf("paths = %v, want %v", snap.MainCheckoutDirtyPaths, want)
+		}
+	})
+})

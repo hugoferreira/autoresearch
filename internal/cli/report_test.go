@@ -2,10 +2,11 @@ package cli
 
 import (
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/testkit"
+	"github.com/onsi/ginkgo/v2"
 )
 
 func testReportWithObservationEvidenceFailures(failures ...entity.EvidenceFailure) *reportData {
@@ -46,41 +47,49 @@ func testReportWithObservationEvidenceFailures(failures ...entity.EvidenceFailur
 	}
 }
 
-func TestRenderReportMarkdown_ShowsObservationEvidenceFailures(t *testing.T) {
-	report := testReportWithObservationEvidenceFailures(entity.EvidenceFailure{
-		Name:     testEvidenceName,
-		ExitCode: 7,
-		Error:    "trace collection failed",
-	})
+var _ = ginkgo.Describe("TestRenderReportMarkdown_ShowsObservationEvidenceFailures", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-	out := renderReportMarkdown(report)
-	for _, want := range []string{
-		"## Experiments",
-		"O-0001 `timing` = 80 ns",
-		"Evidence failures:",
-		testEvidenceName + " (exit 7): trace collection failed",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("report missing %q:\n%s", want, out)
+		report := testReportWithObservationEvidenceFailures(entity.EvidenceFailure{
+			Name:     testEvidenceName,
+			ExitCode: 7,
+			Error:    "trace collection failed",
+		})
+
+		out := renderReportMarkdown(report)
+		for _, want := range []string{
+			"## Experiments",
+			"O-0001 `timing` = 80 ns",
+			"Evidence failures:",
+			testEvidenceName + " (exit 7): trace collection failed",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("report missing %q:\n%s", want, out)
+			}
 		}
-	}
-}
-
-func TestRenderReportMarkdown_ShowsObservationEvidenceSpawnFailure(t *testing.T) {
-	report := testReportWithObservationEvidenceFailures(entity.EvidenceFailure{
-		Name:  testEvidenceName,
-		Error: testEvidenceSpawnTraceErr,
 	})
+})
 
-	out := renderReportMarkdown(report)
-	for _, want := range []string{
-		"## Experiments",
-		"O-0001 `timing` = 80 ns",
-		"Evidence failures:",
-		testEvidenceName + ": " + testEvidenceSpawnTraceErr,
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("report missing %q:\n%s", want, out)
+var _ = ginkgo.Describe("TestRenderReportMarkdown_ShowsObservationEvidenceSpawnFailure", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
+
+		report := testReportWithObservationEvidenceFailures(entity.EvidenceFailure{
+			Name:  testEvidenceName,
+			Error: testEvidenceSpawnTraceErr,
+		})
+
+		out := renderReportMarkdown(report)
+		for _, want := range []string{
+			"## Experiments",
+			"O-0001 `timing` = 80 ns",
+			"Evidence failures:",
+			testEvidenceName + ": " + testEvidenceSpawnTraceErr,
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("report missing %q:\n%s", want, out)
+			}
 		}
-	}
-}
+	})
+})

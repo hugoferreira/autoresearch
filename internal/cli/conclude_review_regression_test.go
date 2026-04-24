@@ -2,14 +2,15 @@ package cli
 
 import (
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
+	"github.com/bytter/autoresearch/internal/testkit"
+	"github.com/onsi/ginkgo/v2"
 )
 
-func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
+func setupConcludeReviewedRegressionStore(t testkit.T) (string, string) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -125,30 +126,34 @@ func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
 	return dir, candObs.ID
 }
 
-func TestConcludeReviewedByPromotesHypothesisConsistently(t *testing.T) {
-	saveGlobals(t)
-	dir, obsID := setupConcludeReviewedRegressionStore(t)
+var _ = ginkgo.Describe("TestConcludeReviewedByPromotesHypothesisConsistently", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-	resp := runCLIJSON[concludeJSONResponse](t, dir,
-		"conclude", "H-0001",
-		"--verdict", "supported",
-		"--baseline-experiment", "E-0001",
-		"--observations", obsID,
-		"--reviewed-by", "human:gate",
-	)
-	if resp.Conclusion.ReviewedBy != "human:gate" {
-		t.Fatalf("conclusion reviewed_by = %q, want human:gate", resp.Conclusion.ReviewedBy)
-	}
+		saveGlobals(t)
+		dir, obsID := setupConcludeReviewedRegressionStore(t)
 
-	s, err := store.Open(dir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	hyp, err := s.ReadHypothesis("H-0001")
-	if err != nil {
-		t.Fatalf("ReadHypothesis: %v", err)
-	}
-	if got, want := hyp.Status, entity.StatusSupported; got != want {
-		t.Fatalf("hypothesis status after reviewed conclusion = %q, want %q", got, want)
-	}
-}
+		resp := runCLIJSON[concludeJSONResponse](t, dir,
+			"conclude", "H-0001",
+			"--verdict", "supported",
+			"--baseline-experiment", "E-0001",
+			"--observations", obsID,
+			"--reviewed-by", "human:gate",
+		)
+		if resp.Conclusion.ReviewedBy != "human:gate" {
+			t.Fatalf("conclusion reviewed_by = %q, want human:gate", resp.Conclusion.ReviewedBy)
+		}
+
+		s, err := store.Open(dir)
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		hyp, err := s.ReadHypothesis("H-0001")
+		if err != nil {
+			t.Fatalf("ReadHypothesis: %v", err)
+		}
+		if got, want := hyp.Status, entity.StatusSupported; got != want {
+			t.Fatalf("hypothesis status after reviewed conclusion = %q, want %q", got, want)
+		}
+	})
+})
