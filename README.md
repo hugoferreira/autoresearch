@@ -146,6 +146,12 @@ make test         # go vet + go test ./...
 
 Requires Go 1.26+.
 
+The test suite is written as Ginkgo v2 specs but still runs through normal Go
+tooling. New tests should register specs with `testkit.Spec("Name", func(t
+testkit.T) { ... })` and keep one `RunSpecs` suite bootstrap per package.
+Use `testkit.T` for shared helpers; benchmarks may continue to use
+`testing.B`.
+
 ## Quickstart
 
 Human setup is a short, one-time CLI step. After that, the main Claude Code

@@ -12,7 +12,7 @@
 #                    local CLI testing without clobbering the installed
 #                    binary.
 #
-#   make test      — go vet + go test across the whole tree.
+#   make test      — go vet + go test across the Ginkgo-backed test suite.
 #
 #   make tidy      — go mod tidy.
 #
