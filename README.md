@@ -147,10 +147,11 @@ make test         # go vet + go test ./...
 Requires Go 1.26+.
 
 The test suite is written as Ginkgo v2 specs but still runs through normal Go
-tooling. New tests should register specs with `testkit.Spec("Name", func(t
-testkit.T) { ... })` and keep one `RunSpecs` suite bootstrap per package.
-Use `testkit.T` for shared helpers; benchmarks may continue to use
-`testing.B`.
+tooling. New tests should use direct `Describe` / `Context` / `It` /
+`DescribeTable` blocks with Gomega assertions and keep one `RunSpecs` suite
+bootstrap per package. Shared test helpers should be Ginkgo-native
+(`GinkgoHelper`, `GinkgoT`, and `DeferCleanup`); benchmarks may continue to
+use `testing.B`.
 
 ## Quickstart
 
