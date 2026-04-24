@@ -664,6 +664,13 @@ func observeAll(
 	var newObs []*entity.Observation
 	recordedAny := false
 
+	strict := cfg.Mode == "" || cfg.Mode == "strict"
+	for _, instName := range instruments {
+		if err := firewall.CheckObservationRequest(instName, samples, exp, cfg, strict); err != nil {
+			return observeAllExecution{}, err
+		}
+	}
+
 	remaining := make([]string, len(instruments))
 	copy(remaining, instruments)
 

@@ -456,6 +456,50 @@ func resolveWinningExperiment(s *store.Store, hypID, conclusionID string) (*enti
 	return concl, exp, nil
 }
 
+// resolveReviewedWinningExperiment is the apply-specific resolver. Shipping
+// requires a reviewed supported conclusion; read-only helpers may still use
+// resolveWinningExperiment to inspect unreviewed work.
+func resolveReviewedWinningExperiment(s *store.Store, hypID, conclusionID string) (*entity.Conclusion, *entity.Experiment, error) {
+	var concl *entity.Conclusion
+	if conclusionID != "" {
+		c, err := s.ReadConclusion(conclusionID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if c.Hypothesis != hypID {
+			return nil, nil, fmt.Errorf("conclusion %s belongs to %s, not %s", conclusionID, c.Hypothesis, hypID)
+		}
+		if c.Verdict != entity.VerdictSupported {
+			return nil, nil, fmt.Errorf("conclusion %s verdict is %q, not %q — nothing to apply", c.ID, c.Verdict, entity.VerdictSupported)
+		}
+		if strings.TrimSpace(c.ReviewedBy) == "" {
+			return nil, nil, fmt.Errorf("conclusion %s is unreviewed — dispatch the gate reviewer first (or self-review with `conclusion accept %s --reviewed-by ...`)", c.ID, c.ID)
+		}
+		concl = c
+	} else {
+		all, err := s.ListConclusionsForHypothesis(hypID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, c := range all {
+			if c.Verdict != entity.VerdictSupported || strings.TrimSpace(c.ReviewedBy) == "" {
+				continue
+			}
+			if concl == nil || abs(c.Effect.DeltaFrac) > abs(concl.Effect.DeltaFrac) {
+				concl = c
+			}
+		}
+		if concl == nil {
+			return nil, nil, fmt.Errorf("hypothesis %s has no reviewed supported conclusion — dispatch the gate reviewer before applying", hypID)
+		}
+	}
+	exp, err := s.ReadExperiment(concl.CandidateExp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read candidate experiment %s: %w", concl.CandidateExp, err)
+	}
+	return concl, exp, nil
+}
+
 func abs(f float64) float64 {
 	if f < 0 {
 		return -f
@@ -596,24 +640,13 @@ Use --conclusion C-NNNN to pick a specific conclusion.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
-			s, err := openStore()
+			s, err := openStoreLive()
 			if err != nil {
 				return err
 			}
-			concl, exp, err := resolveWinningExperiment(s, args[0], conclusionID)
+			concl, exp, err := resolveReviewedWinningExperiment(s, args[0], conclusionID)
 			if err != nil {
 				return err
-			}
-			if concl == nil || concl.Verdict != entity.VerdictSupported {
-				return fmt.Errorf("hypothesis %s has no supported conclusion — nothing to apply", args[0])
-			}
-			// Gate: hypothesis must have been reviewed (not still "unreviewed").
-			hyp, err := s.ReadHypothesis(args[0])
-			if err != nil {
-				return err
-			}
-			if hyp.Status == entity.StatusUnreviewed {
-				return fmt.Errorf("hypothesis %s is unreviewed — dispatch the gate reviewer to review %s first (or self-review with `conclusion accept %s --reviewed-by ...`)", args[0], concl.ID, concl.ID)
 			}
 			source := conclusionMeasuredCandidateRef(concl, exp)
 			if source == "" {

@@ -1,6 +1,7 @@
 package readmodel
 
 import (
+	"encoding/json"
 	"sort"
 	"time"
 
@@ -241,7 +242,7 @@ func FindStaleExperimentsForRead(exps []*entity.Experiment, classByID map[string
 		if !ExperimentReadClassForID(classByID, e.ID).LoopActionable() {
 			continue
 		}
-		ts, kind := FindLastEventForExperiment(events, e.ID)
+		ts, kind := FindLastActivityForExperiment(events, e.ID)
 		if ts == nil {
 			continue
 		}
@@ -258,6 +259,37 @@ func FindStaleExperimentsForRead(exps []*entity.Experiment, classByID map[string
 		})
 	}
 	return stale
+}
+
+// FindLastActivityForExperiment scans backward for the most recent event that
+// changes or records activity for expID. Most experiment events use the
+// experiment as subject; observation.record uses the observation ID as subject
+// and carries the experiment in its payload.
+func FindLastActivityForExperiment(events []store.Event, expID string) (ts *time.Time, kind string) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if eventReferencesExperiment(e, expID) {
+			t := e.Ts
+			return &t, e.Kind
+		}
+	}
+	return nil, ""
+}
+
+func eventReferencesExperiment(e store.Event, expID string) bool {
+	if e.Subject == expID {
+		return true
+	}
+	if e.Kind != "observation.record" || len(e.Data) == 0 {
+		return false
+	}
+	var payload struct {
+		Experiment string `json:"experiment"`
+	}
+	if err := json.Unmarshal(e.Data, &payload); err != nil {
+		return false
+	}
+	return payload.Experiment == expID
 }
 
 // FindLastEventForExperiment scans a pre-loaded event list backward for the

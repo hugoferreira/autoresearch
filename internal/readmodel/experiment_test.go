@@ -94,6 +94,30 @@ func TestFindStaleExperimentsForRead_ExcludesNonActionableWork(t *testing.T) {
 	}
 }
 
+func TestFindStaleExperimentsForRead_CountsObservationRecordAsActivity(t *testing.T) {
+	now := time.Date(2026, 4, 18, 20, 0, 0, 0, time.UTC)
+	exps := []*entity.Experiment{
+		{ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured},
+	}
+	classByID := map[string]ExperimentReadClass{
+		"E-0001": ClassifyHypothesisStatusForExperimentRead(entity.StatusOpen),
+	}
+	events := []store.Event{
+		{Ts: now.Add(-10 * time.Minute), Kind: "experiment.implement", Subject: "E-0001"},
+		{
+			Ts:      now.Add(-1 * time.Minute),
+			Kind:    "observation.record",
+			Subject: "O-0001",
+			Data:    []byte(`{"experiment":"E-0001"}`),
+		},
+	}
+
+	stale := FindStaleExperimentsForRead(exps, classByID, events, 5*time.Minute, now)
+	if len(stale) != 0 {
+		t.Fatalf("stale len = %d, want 0 after recent observation.record activity: %+v", len(stale), stale)
+	}
+}
+
 func TestBuildInFlightExperiments_FiltersAndSorts(t *testing.T) {
 	now := time.Date(2026, 4, 18, 20, 0, 0, 0, time.UTC)
 	exps := []*entity.Experiment{

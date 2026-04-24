@@ -319,7 +319,11 @@ output report which baseline source was used and any fallback note.`,
 			}
 			switch decision.FinalVerdict {
 			case entity.VerdictSupported, entity.VerdictRefuted:
-				hyp.Status = entity.StatusUnreviewed
+				if strings.TrimSpace(reviewedBy) != "" {
+					hyp.Status = decision.FinalVerdict
+				} else {
+					hyp.Status = entity.StatusUnreviewed
+				}
 			default:
 				hyp.Status = decision.FinalVerdict
 			}
@@ -377,6 +381,9 @@ output report which baseline source was used and any fallback note.`,
 			}
 			if decision.RescuedBy != "" {
 				eventData["rescued_by"] = decision.RescuedBy
+			}
+			if strings.TrimSpace(reviewedBy) != "" {
+				eventData["reviewed_by"] = reviewedBy
 			}
 			if strictRec.Directional {
 				eventData["directional"] = true
