@@ -6,113 +6,49 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = testkit.Spec("TestComputeLessonAccuracy", func(t testkit.T) {
-	tests := []struct {
-		name            string
-		deltas          []float64
-		wantTrend       string
-		wantHit         int
-		wantOvershoot   int
-		wantUndershoot  int
-		wantComparisons int
-	}{
-		{
-			name:            "no comparisons",
-			deltas:          nil,
-			wantTrend:       lessonAccuracyTrendNone,
-			wantComparisons: 0,
-		},
-		{
-			name:            "overshoot only",
-			deltas:          []float64{-0.05},
-			wantTrend:       lessonAccuracyTrendDown,
-			wantOvershoot:   1,
-			wantComparisons: 1,
-		},
-		{
-			name:            "undershoot only",
-			deltas:          []float64{-0.25},
-			wantTrend:       lessonAccuracyTrendUp,
-			wantUndershoot:  1,
-			wantComparisons: 1,
-		},
-		{
-			name:            "overshoot majority",
-			deltas:          []float64{-0.05, -0.03, -0.25},
-			wantTrend:       lessonAccuracyTrendDown,
-			wantOvershoot:   2,
-			wantUndershoot:  1,
-			wantComparisons: 3,
-		},
-		{
-			name:            "undershoot majority",
-			deltas:          []float64{-0.25, -0.30, -0.05},
-			wantTrend:       lessonAccuracyTrendUp,
-			wantOvershoot:   1,
-			wantUndershoot:  2,
-			wantComparisons: 3,
-		},
-		{
-			name:            "tie",
-			deltas:          []float64{-0.05, -0.25},
-			wantTrend:       lessonAccuracyTrendNone,
-			wantOvershoot:   1,
-			wantUndershoot:  1,
-			wantComparisons: 2,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t testkit.T) {
-			s := mustCreateCLIStore(t)
-			lesson, nextAt := seedLessonAccuracyFixture(t, s)
-			for i, delta := range tc.deltas {
-				addInspiredConclusion(t, s, lesson.ID, i+2, nextAt.Add(time.Duration(i)*time.Minute), delta)
+var _ = Describe("lesson accuracy", func() {
+	DescribeTable("summarizes follow-up conclusion deltas against predicted effect bands",
+		func(deltas []float64, wantTrend string, wantHit, wantOvershoot, wantUndershoot, wantComparisons int) {
+			s := createCLIStore()
+			lesson, nextAt := seedLessonAccuracyFixture(s)
+			for i, delta := range deltas {
+				addInspiredConclusion(s, lesson.ID, i+2, nextAt.Add(time.Duration(i)*time.Minute), delta)
 			}
 
 			lessons, concls, hyps, err := collectLessonAccuracyInputs(s)
-			if err != nil {
-				t.Fatal(err)
-			}
+			Expect(err).NotTo(HaveOccurred())
 			reports, summaries, err := computeLessonAccuracy(s, lessons, concls, buildLessonLinkIndex(hyps))
-			if err != nil {
-				t.Fatal(err)
-			}
+			Expect(err).NotTo(HaveOccurred())
 
 			summary, ok := summaries[lesson.ID]
-			if tc.wantComparisons == 0 {
-				if ok {
-					t.Fatalf("summary = %+v, want no summary for %s", summary, lesson.ID)
-				}
-				if len(reports) != 0 {
-					t.Fatalf("reports = %+v, want no reports", reports)
-				}
+			if wantComparisons == 0 {
+				Expect(ok).To(BeFalse())
+				Expect(reports).To(BeEmpty())
 				return
 			}
-			if !ok {
-				t.Fatalf("missing summary for %s", lesson.ID)
-			}
-			if got := summary.trend(); got != tc.wantTrend {
-				t.Fatalf("trend = %q, want %q", got, tc.wantTrend)
-			}
-			if summary.Hit != tc.wantHit || summary.Overshoot != tc.wantOvershoot || summary.Undershoot != tc.wantUndershoot {
-				t.Fatalf("summary counts = %+v", summary)
-			}
-			if len(reports) != 1 {
-				t.Fatalf("reports len = %d, want 1", len(reports))
-			}
-			if got := len(reports[0].Comparisons); got != tc.wantComparisons {
-				t.Fatalf("comparisons len = %d, want %d", got, tc.wantComparisons)
-			}
-		})
-	}
+			Expect(ok).To(BeTrue())
+			Expect(summary.trend()).To(Equal(wantTrend))
+			Expect(summary.Hit).To(Equal(wantHit))
+			Expect(summary.Overshoot).To(Equal(wantOvershoot))
+			Expect(summary.Undershoot).To(Equal(wantUndershoot))
+			Expect(reports).To(HaveLen(1))
+			Expect(reports[0].Comparisons).To(HaveLen(wantComparisons))
+		},
+		Entry("no comparisons", nil, lessonAccuracyTrendNone, 0, 0, 0, 0),
+		Entry("overshoot only", []float64{-0.05}, lessonAccuracyTrendDown, 0, 1, 0, 1),
+		Entry("undershoot only", []float64{-0.25}, lessonAccuracyTrendUp, 0, 0, 1, 1),
+		Entry("overshoot majority", []float64{-0.05, -0.03, -0.25}, lessonAccuracyTrendDown, 0, 2, 1, 3),
+		Entry("undershoot majority", []float64{-0.25, -0.30, -0.05}, lessonAccuracyTrendUp, 0, 1, 2, 3),
+		Entry("tie", []float64{-0.05, -0.25}, lessonAccuracyTrendNone, 0, 1, 1, 2),
+	)
 })
 
-func seedLessonAccuracyFixture(t testkit.T, s *store.Store) (*entity.Lesson, time.Time) {
-	t.Helper()
+func seedLessonAccuracyFixture(s *store.Store) (*entity.Lesson, time.Time) {
+	GinkgoHelper()
 	base := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 
 	sourceHyp := &entity.Hypothesis{
@@ -124,9 +60,7 @@ func seedLessonAccuracyFixture(t testkit.T, s *store.Store) (*entity.Lesson, tim
 		Author:    "agent:orchestrator",
 		CreatedAt: base,
 	}
-	if err := s.WriteHypothesis(sourceHyp); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteHypothesis(sourceHyp)).To(Succeed())
 
 	sourceConc := &entity.Conclusion{
 		ID:         "C-0001",
@@ -137,9 +71,7 @@ func seedLessonAccuracyFixture(t testkit.T, s *store.Store) (*entity.Lesson, tim
 		Author:     "agent:critic",
 		CreatedAt:  base.Add(time.Minute),
 	}
-	if err := s.WriteConclusion(sourceConc); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteConclusion(sourceConc)).To(Succeed())
 
 	lesson := &entity.Lesson{
 		ID:       "L-0001",
@@ -157,15 +89,13 @@ func seedLessonAccuracyFixture(t testkit.T, s *store.Store) (*entity.Lesson, tim
 		Author:     "agent:orchestrator",
 		CreatedAt:  base.Add(2 * time.Minute),
 	}
-	if err := s.WriteLesson(lesson); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteLesson(lesson)).To(Succeed())
 
 	return lesson, lesson.CreatedAt.Add(time.Minute)
 }
 
-func addInspiredConclusion(t testkit.T, s *store.Store, lessonID string, n int, createdAt time.Time, delta float64) {
-	t.Helper()
+func addInspiredConclusion(s *store.Store, lessonID string, n int, createdAt time.Time, delta float64) {
+	GinkgoHelper()
 
 	hyp := &entity.Hypothesis{
 		ID:         fmt.Sprintf("H-%04d", n),
@@ -177,9 +107,7 @@ func addInspiredConclusion(t testkit.T, s *store.Store, lessonID string, n int, 
 		Author:     "agent:orchestrator",
 		CreatedAt:  createdAt,
 	}
-	if err := s.WriteHypothesis(hyp); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteHypothesis(hyp)).To(Succeed())
 
 	conclusion := &entity.Conclusion{
 		ID:         fmt.Sprintf("C-%04d", n),
@@ -189,7 +117,5 @@ func addInspiredConclusion(t testkit.T, s *store.Store, lessonID string, n int, 
 		Author:     "agent:analyst",
 		CreatedAt:  createdAt.Add(time.Second),
 	}
-	if err := s.WriteConclusion(conclusion); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteConclusion(conclusion)).To(Succeed())
 }
