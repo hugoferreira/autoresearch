@@ -7,7 +7,6 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/testkit"
-	"github.com/onsi/ginkgo/v2"
 )
 
 func setupConcludeReviewedRegressionStore(t testkit.T) (string, string) {
@@ -126,34 +125,30 @@ func setupConcludeReviewedRegressionStore(t testkit.T) (string, string) {
 	return dir, candObs.ID
 }
 
-var _ = ginkgo.Describe("TestConcludeReviewedByPromotesHypothesisConsistently", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestConcludeReviewedByPromotesHypothesisConsistently", func(t testkit.T) {
+	saveGlobals(t)
+	dir, obsID := setupConcludeReviewedRegressionStore(t)
 
-		saveGlobals(t)
-		dir, obsID := setupConcludeReviewedRegressionStore(t)
+	resp := runCLIJSON[concludeJSONResponse](t, dir,
+		"conclude", "H-0001",
+		"--verdict", "supported",
+		"--baseline-experiment", "E-0001",
+		"--observations", obsID,
+		"--reviewed-by", "human:gate",
+	)
+	if resp.Conclusion.ReviewedBy != "human:gate" {
+		t.Fatalf("conclusion reviewed_by = %q, want human:gate", resp.Conclusion.ReviewedBy)
+	}
 
-		resp := runCLIJSON[concludeJSONResponse](t, dir,
-			"conclude", "H-0001",
-			"--verdict", "supported",
-			"--baseline-experiment", "E-0001",
-			"--observations", obsID,
-			"--reviewed-by", "human:gate",
-		)
-		if resp.Conclusion.ReviewedBy != "human:gate" {
-			t.Fatalf("conclusion reviewed_by = %q, want human:gate", resp.Conclusion.ReviewedBy)
-		}
-
-		s, err := store.Open(dir)
-		if err != nil {
-			t.Fatalf("store.Open: %v", err)
-		}
-		hyp, err := s.ReadHypothesis("H-0001")
-		if err != nil {
-			t.Fatalf("ReadHypothesis: %v", err)
-		}
-		if got, want := hyp.Status, entity.StatusSupported; got != want {
-			t.Fatalf("hypothesis status after reviewed conclusion = %q, want %q", got, want)
-		}
-	})
+	s, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	hyp, err := s.ReadHypothesis("H-0001")
+	if err != nil {
+		t.Fatalf("ReadHypothesis: %v", err)
+	}
+	if got, want := hyp.Status, entity.StatusSupported; got != want {
+		t.Fatalf("hypothesis status after reviewed conclusion = %q, want %q", got, want)
+	}
 })

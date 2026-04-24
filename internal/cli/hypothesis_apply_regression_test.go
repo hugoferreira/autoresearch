@@ -8,7 +8,6 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/testkit"
-	"github.com/onsi/ginkgo/v2"
 )
 
 func setupApplyRegressionStore(t testkit.T, paused bool) string {
@@ -119,53 +118,41 @@ func setupApplyRegressionStore(t testkit.T, paused bool) string {
 	return dir
 }
 
-var _ = ginkgo.Describe("TestHypothesisApplySelectsReviewedConclusionOverStrongerUnreviewedOne", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestHypothesisApplySelectsReviewedConclusionOverStrongerUnreviewedOne", func(t testkit.T) {
+	saveGlobals(t)
+	dir := setupApplyRegressionStore(t, false)
 
-		saveGlobals(t)
-		dir := setupApplyRegressionStore(t, false)
-
-		stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001")
-		if !errors.Is(err, ErrDryRun) {
-			t.Fatalf("hypothesis apply error = %v, want dry-run after selecting reviewed conclusion\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-		}
-		if !strings.Contains(stdout, "C-0001") || strings.Contains(stdout, "C-0002") {
-			t.Fatalf("hypothesis apply should select reviewed C-0001 and ignore unreviewed C-0002\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-		}
-	})
+	stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001")
+	if !errors.Is(err, ErrDryRun) {
+		t.Fatalf("hypothesis apply error = %v, want dry-run after selecting reviewed conclusion\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "C-0001") || strings.Contains(stdout, "C-0002") {
+		t.Fatalf("hypothesis apply should select reviewed C-0001 and ignore unreviewed C-0002\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
 })
 
-var _ = ginkgo.Describe("TestHypothesisApplyRejectsExplicitUnreviewedConclusion", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestHypothesisApplyRejectsExplicitUnreviewedConclusion", func(t testkit.T) {
+	saveGlobals(t)
+	dir := setupApplyRegressionStore(t, false)
 
-		saveGlobals(t)
-		dir := setupApplyRegressionStore(t, false)
-
-		stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0002")
-		if err == nil {
-			t.Fatalf("hypothesis apply unexpectedly accepted unreviewed conclusion\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-		}
-		if errors.Is(err, ErrDryRun) {
-			t.Fatalf("hypothesis apply reached dry-run instead of rejecting unreviewed conclusion\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-		}
-		if !strings.Contains(err.Error(), "review") {
-			t.Fatalf("hypothesis apply error = %v, want review gate error\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-		}
-	})
+	stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0002")
+	if err == nil {
+		t.Fatalf("hypothesis apply unexpectedly accepted unreviewed conclusion\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if errors.Is(err, ErrDryRun) {
+		t.Fatalf("hypothesis apply reached dry-run instead of rejecting unreviewed conclusion\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if !strings.Contains(err.Error(), "review") {
+		t.Fatalf("hypothesis apply error = %v, want review gate error\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
 })
 
-var _ = ginkgo.Describe("TestHypothesisApplyHonorsPausedStore", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestHypothesisApplyHonorsPausedStore", func(t testkit.T) {
+	saveGlobals(t)
+	dir := setupApplyRegressionStore(t, true)
 
-		saveGlobals(t)
-		dir := setupApplyRegressionStore(t, true)
-
-		stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0001")
-		if !errors.Is(err, ErrPaused) {
-			t.Fatalf("hypothesis apply error = %v, want ErrPaused\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-		}
-	})
+	stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0001")
+	if !errors.Is(err, ErrPaused) {
+		t.Fatalf("hypothesis apply error = %v, want ErrPaused\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
 })

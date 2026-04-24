@@ -46,6 +46,16 @@ func NewT() T {
 	return ginkgoT{t: ginkgo.GinkgoT(1)}
 }
 
+// Spec registers a single Ginkgo spec while keeping the old helper-friendly
+// test handle explicit at the call site.
+func Spec(name string, fn func(T)) bool {
+	return ginkgo.Describe(name, func() {
+		ginkgo.It("runs", func() {
+			fn(NewT())
+		})
+	})
+}
+
 func (g ginkgoT) Cleanup(fn func())                 { g.t.Cleanup(fn) }
 func (g ginkgoT) Chdir(dir string)                  { g.t.Chdir(dir) }
 func (g ginkgoT) Context() context.Context          { return g.t.Context() }

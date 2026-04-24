@@ -10,7 +10,6 @@ import (
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/testkit"
-	"github.com/onsi/ginkgo/v2"
 )
 
 type baselineFixture struct {
@@ -201,268 +200,236 @@ func (f *baselineFixture) appendBaselineEvent(t testkit.T, expID, goalID string)
 	}
 }
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_UsesCandidateRecordedWhenUsable", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_UsesCandidateRecordedWhenUsable", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
-		parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
-		current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
+	goalBaseline := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	f.writeObservation(t, "O-0001", goalBaseline.ID, "timing")
 
-		goalBaseline := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
-		f.writeObservation(t, "O-0001", goalBaseline.ID, "timing")
+	ancestorExp := f.writeExperiment(t, "E-0002", parent.ID, "", "", false)
+	f.writeObservation(t, "O-0002", ancestorExp.ID, "timing")
+	f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
 
-		ancestorExp := f.writeExperiment(t, "E-0002", parent.ID, "", "", false)
-		f.writeObservation(t, "O-0002", ancestorExp.ID, "timing")
-		f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
+	recorded := f.writeExperiment(t, "E-0003", "", "G-0001", "", true)
+	f.writeObservation(t, "O-0003", recorded.ID, "timing")
 
-		recorded := f.writeExperiment(t, "E-0003", "", "G-0001", "", true)
-		f.writeObservation(t, "O-0003", recorded.ID, "timing")
+	candidate := f.writeExperiment(t, "E-0004", current.ID, "", recorded.ID, false)
 
-		candidate := f.writeExperiment(t, "E-0004", current.ID, "", recorded.ID, false)
-
-		got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got == nil {
-			t.Fatal("ResolveInferredBaseline returned nil result")
-		}
-		if got.ExperimentID != recorded.ID {
-			t.Fatalf("experiment = %q, want %q", got.ExperimentID, recorded.ID)
-		}
-		if got.Source != BaselineSourceCandidateRecorded {
-			t.Fatalf("source = %q, want %q", got.Source, BaselineSourceCandidateRecorded)
-		}
-	})
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != recorded.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, recorded.ID)
+	}
+	if got.Source != BaselineSourceCandidateRecorded {
+		t.Fatalf("source = %q, want %q", got.Source, BaselineSourceCandidateRecorded)
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_PrefersNearestAcceptedSupportedAncestor", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_PrefersNearestAcceptedSupportedAncestor", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
+	root := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	mid := f.writeHypothesis(t, "H-0002", "G-0001", root.ID)
+	current := f.writeHypothesis(t, "H-0003", "G-0001", mid.ID)
 
-		root := f.writeHypothesis(t, "H-0001", "G-0001", "")
-		mid := f.writeHypothesis(t, "H-0002", "G-0001", root.ID)
-		current := f.writeHypothesis(t, "H-0003", "G-0001", mid.ID)
+	rootExp := f.writeExperiment(t, "E-0001", root.ID, "", "", false)
+	midExp := f.writeExperiment(t, "E-0002", mid.ID, "", "", false)
+	f.writeObservation(t, "O-0001", rootExp.ID, "timing")
+	f.writeObservation(t, "O-0002", midExp.ID, "timing")
+	f.writeConclusion(t, "C-0001", root.ID, rootExp.ID, true)
+	f.writeConclusion(t, "C-0002", mid.ID, midExp.ID, true)
 
-		rootExp := f.writeExperiment(t, "E-0001", root.ID, "", "", false)
-		midExp := f.writeExperiment(t, "E-0002", mid.ID, "", "", false)
-		f.writeObservation(t, "O-0001", rootExp.ID, "timing")
-		f.writeObservation(t, "O-0002", midExp.ID, "timing")
-		f.writeConclusion(t, "C-0001", root.ID, rootExp.ID, true)
-		f.writeConclusion(t, "C-0002", mid.ID, midExp.ID, true)
+	candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
 
-		candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
-
-		got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got == nil {
-			t.Fatal("ResolveInferredBaseline returned nil result")
-		}
-		if got.ExperimentID != midExp.ID {
-			t.Fatalf("experiment = %q, want %q", got.ExperimentID, midExp.ID)
-		}
-		if got.Source != BaselineSourceAncestorSupported {
-			t.Fatalf("source = %q, want %q", got.Source, BaselineSourceAncestorSupported)
-		}
-		if got.AncestorHypothesis != mid.ID {
-			t.Fatalf("ancestor hypothesis = %q, want %q", got.AncestorHypothesis, mid.ID)
-		}
-		if got.AncestorConclusion != "C-0002" {
-			t.Fatalf("ancestor conclusion = %q, want %q", got.AncestorConclusion, "C-0002")
-		}
-	})
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != midExp.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, midExp.ID)
+	}
+	if got.Source != BaselineSourceAncestorSupported {
+		t.Fatalf("source = %q, want %q", got.Source, BaselineSourceAncestorSupported)
+	}
+	if got.AncestorHypothesis != mid.ID {
+		t.Fatalf("ancestor hypothesis = %q, want %q", got.AncestorHypothesis, mid.ID)
+	}
+	if got.AncestorConclusion != "C-0002" {
+		t.Fatalf("ancestor conclusion = %q, want %q", got.AncestorConclusion, "C-0002")
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_DedupesSupportedConclusionsOnSameAncestorExperiment", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_DedupesSupportedConclusionsOnSameAncestorExperiment", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
+	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
 
-		parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
-		current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
+	ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", "", false)
+	f.writeObservation(t, "O-0001", ancestorExp.ID, "timing")
+	f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
+	f.now = f.now.Add(time.Minute)
+	f.writeConclusion(t, "C-0002", parent.ID, ancestorExp.ID, true)
 
-		ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", "", false)
-		f.writeObservation(t, "O-0001", ancestorExp.ID, "timing")
-		f.writeConclusion(t, "C-0001", parent.ID, ancestorExp.ID, true)
-		f.now = f.now.Add(time.Minute)
-		f.writeConclusion(t, "C-0002", parent.ID, ancestorExp.ID, true)
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", "", false)
 
-		candidate := f.writeExperiment(t, "E-0002", current.ID, "", "", false)
-
-		got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got == nil {
-			t.Fatal("ResolveInferredBaseline returned nil result")
-		}
-		if got.ExperimentID != ancestorExp.ID {
-			t.Fatalf("experiment = %q, want %q", got.ExperimentID, ancestorExp.ID)
-		}
-		if got.Source != BaselineSourceAncestorSupported {
-			t.Fatalf("source = %q, want %q", got.Source, BaselineSourceAncestorSupported)
-		}
-		if got.AncestorConclusion != "C-0002" {
-			t.Fatalf("ancestor conclusion = %q, want %q", got.AncestorConclusion, "C-0002")
-		}
-	})
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != ancestorExp.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, ancestorExp.ID)
+	}
+	if got.Source != BaselineSourceAncestorSupported {
+		t.Fatalf("source = %q, want %q", got.Source, BaselineSourceAncestorSupported)
+	}
+	if got.AncestorConclusion != "C-0002" {
+		t.Fatalf("ancestor conclusion = %q, want %q", got.AncestorConclusion, "C-0002")
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_UsesAcceptedAncestorScope", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_UsesAcceptedAncestorScope", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
+	parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
 
-		parent := f.writeHypothesis(t, "H-0001", "G-0001", "")
-		current := f.writeHypothesis(t, "H-0002", "G-0001", parent.ID)
+	ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", "", false)
+	scopeA := ObservationScope{
+		Experiment: ancestorExp.ID,
+		Attempt:    1,
+		Ref:        "refs/heads/candidate/E-0001-a1",
+		SHA:        "1111111111111111111111111111111111111111",
+	}
+	scopeB := ObservationScope{
+		Experiment: ancestorExp.ID,
+		Attempt:    2,
+		Ref:        "refs/heads/candidate/E-0001-a2",
+		SHA:        "2222222222222222222222222222222222222222",
+	}
+	f.writeScopedObservation(t, "O-0001", ancestorExp.ID, "timing", scopeA.Attempt, scopeA.Ref, scopeA.SHA)
+	f.writeScopedObservation(t, "O-0002", ancestorExp.ID, "timing", scopeB.Attempt, scopeB.Ref, scopeB.SHA)
+	f.writeScopedConclusion(t, "C-0001", parent.ID, "O-0001", scopeA, true)
 
-		ancestorExp := f.writeExperiment(t, "E-0001", parent.ID, "", "", false)
-		scopeA := ObservationScope{
-			Experiment: ancestorExp.ID,
-			Attempt:    1,
-			Ref:        "refs/heads/candidate/E-0001-a1",
-			SHA:        "1111111111111111111111111111111111111111",
-		}
-		scopeB := ObservationScope{
-			Experiment: ancestorExp.ID,
-			Attempt:    2,
-			Ref:        "refs/heads/candidate/E-0001-a2",
-			SHA:        "2222222222222222222222222222222222222222",
-		}
-		f.writeScopedObservation(t, "O-0001", ancestorExp.ID, "timing", scopeA.Attempt, scopeA.Ref, scopeA.SHA)
-		f.writeScopedObservation(t, "O-0002", ancestorExp.ID, "timing", scopeB.Attempt, scopeB.Ref, scopeB.SHA)
-		f.writeScopedConclusion(t, "C-0001", parent.ID, "O-0001", scopeA, true)
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", "", false)
 
-		candidate := f.writeExperiment(t, "E-0002", current.ID, "", "", false)
-
-		got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got == nil {
-			t.Fatal("ResolveInferredBaseline returned nil result")
-		}
-		if got.ExperimentID != ancestorExp.ID {
-			t.Fatalf("experiment = %q, want %q", got.ExperimentID, ancestorExp.ID)
-		}
-		if got.Attempt != scopeA.Attempt || got.Ref != scopeA.Ref || got.SHA != scopeA.SHA {
-			t.Fatalf("ancestor scope = %+v, want %+v", got.Scope(), scopeA)
-		}
-	})
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != ancestorExp.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, ancestorExp.ID)
+	}
+	if got.Attempt != scopeA.Attempt || got.Ref != scopeA.Ref || got.SHA != scopeA.SHA {
+		t.Fatalf("ancestor scope = %+v, want %+v", got.Scope(), scopeA)
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_UsesGoalScopedBaselineMapping", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_UsesGoalScopedBaselineMapping", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+	f.writeGoal(t, "G-0002")
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
-		f.writeGoal(t, "G-0002")
+	otherBase := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	wantBase := f.writeExperiment(t, "E-0002", "", "G-0002", "", true)
+	f.writeObservation(t, "O-0001", otherBase.ID, "timing")
+	f.writeObservation(t, "O-0002", wantBase.ID, "timing")
 
-		otherBase := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
-		wantBase := f.writeExperiment(t, "E-0002", "", "G-0002", "", true)
-		f.writeObservation(t, "O-0001", otherBase.ID, "timing")
-		f.writeObservation(t, "O-0002", wantBase.ID, "timing")
+	current := f.writeHypothesis(t, "H-0001", "G-0002", "")
+	candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
 
-		current := f.writeHypothesis(t, "H-0001", "G-0002", "")
-		candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
-
-		got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got == nil {
-			t.Fatal("ResolveInferredBaseline returned nil result")
-		}
-		if got.ExperimentID != wantBase.ID {
-			t.Fatalf("experiment = %q, want %q", got.ExperimentID, wantBase.ID)
-		}
-		if got.Source != BaselineSourceGoalBaseline {
-			t.Fatalf("source = %q, want %q", got.Source, BaselineSourceGoalBaseline)
-		}
-	})
+	got, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("ResolveInferredBaseline returned nil result")
+	}
+	if got.ExperimentID != wantBase.ID {
+		t.Fatalf("experiment = %q, want %q", got.ExperimentID, wantBase.ID)
+	}
+	if got.Source != BaselineSourceGoalBaseline {
+		t.Fatalf("source = %q, want %q", got.Source, BaselineSourceGoalBaseline)
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_ErrorsOnAmbiguousGoalBaseline", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_ErrorsOnAmbiguousGoalBaseline", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
+	baseA := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	baseB := f.writeExperiment(t, "E-0002", "", "G-0001", "", true)
+	f.writeObservation(t, "O-0001", baseA.ID, "timing")
+	f.writeObservation(t, "O-0002", baseB.ID, "timing")
 
-		baseA := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
-		baseB := f.writeExperiment(t, "E-0002", "", "G-0001", "", true)
-		f.writeObservation(t, "O-0001", baseA.ID, "timing")
-		f.writeObservation(t, "O-0002", baseB.ID, "timing")
+	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
 
-		current := f.writeHypothesis(t, "H-0001", "G-0001", "")
-		candidate := f.writeExperiment(t, "E-0003", current.ID, "", "", false)
-
-		_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err == nil {
-			t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
-		}
-		if !strings.Contains(err.Error(), "multiple baseline scopes") {
-			t.Fatalf("error = %q, want multiple baseline scopes", err)
-		}
-	})
+	_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err == nil {
+		t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "multiple baseline scopes") {
+		t.Fatalf("error = %q, want multiple baseline scopes", err)
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_ErrorsOnAmbiguousCandidateRecordedScope", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_ErrorsOnAmbiguousCandidateRecordedScope", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
-		current := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	recorded := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
+	f.writeScopedObservation(t, "O-0001", recorded.ID, "timing", 1, "refs/heads/baseline/E-0001-a1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	f.writeScopedObservation(t, "O-0002", recorded.ID, "timing", 2, "refs/heads/baseline/E-0001-a2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 
-		recorded := f.writeExperiment(t, "E-0001", "", "G-0001", "", true)
-		f.writeScopedObservation(t, "O-0001", recorded.ID, "timing", 1, "refs/heads/baseline/E-0001-a1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-		f.writeScopedObservation(t, "O-0002", recorded.ID, "timing", 2, "refs/heads/baseline/E-0001-a2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	candidate := f.writeExperiment(t, "E-0002", current.ID, "", recorded.ID, false)
 
-		candidate := f.writeExperiment(t, "E-0002", current.ID, "", recorded.ID, false)
-
-		_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err == nil {
-			t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
-		}
-		if !strings.Contains(err.Error(), "multiple observation scopes") {
-			t.Fatalf("error = %q, want multiple observation scopes", err)
-		}
-	})
+	_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err == nil {
+		t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "multiple observation scopes") {
+		t.Fatalf("error = %q, want multiple observation scopes", err)
+	}
 })
 
-var _ = ginkgo.Describe("TestResolveInferredBaseline_PropagatesObservationReadErrors", func() {
-	ginkgo.It("runs", func() {
-		t := testkit.NewT()
+var _ = testkit.Spec("TestResolveInferredBaseline_PropagatesObservationReadErrors", func(t testkit.T) {
+	f := newBaselineFixture(t)
+	f.writeGoal(t, "G-0001")
+	current := f.writeHypothesis(t, "H-0001", "G-0001", "")
+	candidate := f.writeExperiment(t, "E-0001", current.ID, "", "", false)
 
-		f := newBaselineFixture(t)
-		f.writeGoal(t, "G-0001")
-		current := f.writeHypothesis(t, "H-0001", "G-0001", "")
-		candidate := f.writeExperiment(t, "E-0001", current.ID, "", "", false)
+	badPath := filepath.Join(f.s.ObservationsDir(), "O-9999.json")
+	if err := os.WriteFile(badPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-		badPath := filepath.Join(f.s.ObservationsDir(), "O-9999.json")
-		if err := os.WriteFile(badPath, []byte("{not json"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
-		if err == nil {
-			t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
-		}
-		if !strings.Contains(err.Error(), "parse observation") {
-			t.Fatalf("error = %q, want parse observation", err)
-		}
-	})
+	_, err := ResolveInferredBaseline(f.s, current, candidate, "timing")
+	if err == nil {
+		t.Fatal("ResolveInferredBaseline unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "parse observation") {
+		t.Fatalf("error = %q, want parse observation", err)
+	}
 })
