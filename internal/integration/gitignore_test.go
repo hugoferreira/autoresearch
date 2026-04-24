@@ -3,139 +3,168 @@ package integration_test
 import (
 	"os"
 	"path/filepath"
-	"testing"
 
 	"github.com/bytter/autoresearch/internal/integration"
+	"github.com/bytter/autoresearch/internal/testkit"
+	"github.com/onsi/ginkgo/v2"
 )
 
-func TestEnsureGitignoreLine_Created(t *testing.T) {
-	dir := t.TempDir()
-	r, err := integration.EnsureGitignoreLine(dir, ".research/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Created || r.Added || r.AlreadyPresent {
-		t.Errorf("expected Created, got %+v", r)
-	}
-	b, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) != ".research/\n" {
-		t.Errorf("file contents: %q", string(b))
-	}
-}
+var _ = ginkgo.Describe("TestEnsureGitignoreLine_Created", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-func TestEnsureGitignoreLine_AppendWithTrailingNewline(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".gitignore")
-	const pre = "node_modules/\n*.log\n"
-	if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureGitignoreLine(dir, ".research/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Added {
-		t.Errorf("expected Added, got %+v", r)
-	}
-	b, _ := os.ReadFile(path)
-	want := pre + ".research/\n"
-	if string(b) != want {
-		t.Errorf("contents: got %q want %q", string(b), want)
-	}
-}
+		dir := t.TempDir()
+		r, err := integration.EnsureGitignoreLine(dir, ".research/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Created || r.Added || r.AlreadyPresent {
+			t.Errorf("expected Created, got %+v", r)
+		}
+		b, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != ".research/\n" {
+			t.Errorf("file contents: %q", string(b))
+		}
+	})
+})
 
-func TestEnsureGitignoreLine_AppendWithoutTrailingNewline(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".gitignore")
-	const pre = "node_modules/"
-	if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureGitignoreLine(dir, ".research/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Added {
-		t.Errorf("expected Added, got %+v", r)
-	}
-	b, _ := os.ReadFile(path)
-	want := "node_modules/\n.research/\n"
-	if string(b) != want {
-		t.Errorf("contents: got %q want %q", string(b), want)
-	}
-}
+var _ = ginkgo.Describe("TestEnsureGitignoreLine_AppendWithTrailingNewline", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-func TestEnsureGitignoreLine_AlreadyPresentMiddleOfFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".gitignore")
-	const pre = "node_modules/\n.research/\n*.log\n"
-	if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureGitignoreLine(dir, ".research/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.AlreadyPresent {
-		t.Errorf("expected AlreadyPresent, got %+v", r)
-	}
-	b, _ := os.ReadFile(path)
-	if string(b) != pre {
-		t.Errorf("file mutated unexpectedly: %q", string(b))
-	}
-}
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".gitignore")
+		const pre = "node_modules/\n*.log\n"
+		if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := integration.EnsureGitignoreLine(dir, ".research/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Added {
+			t.Errorf("expected Added, got %+v", r)
+		}
+		b, _ := os.ReadFile(path)
+		want := pre + ".research/\n"
+		if string(b) != want {
+			t.Errorf("contents: got %q want %q", string(b), want)
+		}
+	})
+})
 
-func TestEnsureGitignoreLine_AlreadyPresentWithWhitespace(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".gitignore")
-	const pre = "  .research/  \n"
-	if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureGitignoreLine(dir, ".research/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.AlreadyPresent {
-		t.Errorf("whitespace-trimmed match should be recognized, got %+v", r)
-	}
-}
+var _ = ginkgo.Describe("TestEnsureGitignoreLine_AppendWithoutTrailingNewline", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-func TestPreviewGitignoreLine(t *testing.T) {
-	dir := t.TempDir()
-	// Absent → Created
-	r, err := integration.PreviewGitignoreLine(dir, ".research/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Created {
-		t.Errorf("absent: %+v", r)
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err == nil {
-		t.Error("preview should not create")
-	}
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".gitignore")
+		const pre = "node_modules/"
+		if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := integration.EnsureGitignoreLine(dir, ".research/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Added {
+			t.Errorf("expected Added, got %+v", r)
+		}
+		b, _ := os.ReadFile(path)
+		want := "node_modules/\n.research/\n"
+		if string(b) != want {
+			t.Errorf("contents: got %q want %q", string(b), want)
+		}
+	})
+})
 
-	// Present → AlreadyPresent
-	_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".research/\n"), 0o644)
-	r, _ = integration.PreviewGitignoreLine(dir, ".research/")
-	if !r.AlreadyPresent {
-		t.Errorf("present: %+v", r)
-	}
+var _ = ginkgo.Describe("TestEnsureGitignoreLine_AlreadyPresentMiddleOfFile", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
 
-	// Exists without line → Added
-	_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0o644)
-	r, _ = integration.PreviewGitignoreLine(dir, ".research/")
-	if !r.Added {
-		t.Errorf("missing: %+v", r)
-	}
-}
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".gitignore")
+		const pre = "node_modules/\n.research/\n*.log\n"
+		if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := integration.EnsureGitignoreLine(dir, ".research/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.AlreadyPresent {
+			t.Errorf("expected AlreadyPresent, got %+v", r)
+		}
+		b, _ := os.ReadFile(path)
+		if string(b) != pre {
+			t.Errorf("file mutated unexpectedly: %q", string(b))
+		}
+	})
+})
 
-func TestEnsureGitignoreLine_RejectsNewline(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := integration.EnsureGitignoreLine(dir, "foo\nbar"); err == nil {
-		t.Error("should reject lines with newlines")
-	}
-}
+var _ = ginkgo.Describe("TestEnsureGitignoreLine_AlreadyPresentWithWhitespace", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".gitignore")
+		const pre = "  .research/  \n"
+		if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := integration.EnsureGitignoreLine(dir, ".research/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.AlreadyPresent {
+			t.Errorf("whitespace-trimmed match should be recognized, got %+v", r)
+		}
+	})
+})
+
+var _ = ginkgo.Describe("TestPreviewGitignoreLine", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
+
+		dir := t.TempDir()
+		// Absent → Created
+		r, err := integration.PreviewGitignoreLine(dir, ".research/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Created {
+			t.Errorf("absent: %+v", r)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err == nil {
+			t.Error("preview should not create")
+		}
+
+		// Present → AlreadyPresent
+		_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".research/\n"), 0o644)
+		r, _ = integration.PreviewGitignoreLine(dir, ".research/")
+		if !r.AlreadyPresent {
+			t.Errorf("present: %+v", r)
+		}
+
+		// Exists without line → Added
+		_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0o644)
+		r, _ = integration.PreviewGitignoreLine(dir, ".research/")
+		if !r.Added {
+			t.Errorf("missing: %+v", r)
+		}
+	})
+})
+
+var _ = ginkgo.Describe("TestEnsureGitignoreLine_RejectsNewline", func() {
+	ginkgo.It("runs", func() {
+		t := testkit.NewT()
+
+		dir := t.TempDir()
+		if _, err := integration.EnsureGitignoreLine(dir, "foo\nbar"); err == nil {
+			t.Error("should reject lines with newlines")
+		}
+	})
+})
