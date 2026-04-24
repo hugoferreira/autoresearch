@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"strings"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 func testReportWithObservationEvidenceFailures(failures ...entity.EvidenceFailure) *reportData {
@@ -46,41 +46,22 @@ func testReportWithObservationEvidenceFailures(failures ...entity.EvidenceFailur
 	}
 }
 
-var _ = testkit.Spec("TestRenderReportMarkdown_ShowsObservationEvidenceFailures", func(t testkit.T) {
-	report := testReportWithObservationEvidenceFailures(entity.EvidenceFailure{
-		Name:     testEvidenceName,
-		ExitCode: 7,
-		Error:    "trace collection failed",
-	})
-
-	out := renderReportMarkdown(report)
-	for _, want := range []string{
-		"## Experiments",
-		"O-0001 `timing` = 80 ns",
-		"Evidence failures:",
-		testEvidenceName + " (exit 7): trace collection failed",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("report missing %q:\n%s", want, out)
-		}
-	}
-})
-
-var _ = testkit.Spec("TestRenderReportMarkdown_ShowsObservationEvidenceSpawnFailure", func(t testkit.T) {
-	report := testReportWithObservationEvidenceFailures(entity.EvidenceFailure{
-		Name:  testEvidenceName,
-		Error: testEvidenceSpawnTraceErr,
-	})
-
-	out := renderReportMarkdown(report)
-	for _, want := range []string{
-		"## Experiments",
-		"O-0001 `timing` = 80 ns",
-		"Evidence failures:",
-		testEvidenceName + ": " + testEvidenceSpawnTraceErr,
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("report missing %q:\n%s", want, out)
-		}
-	}
+var _ = Describe("report markdown rendering", func() {
+	DescribeTable("shows observation evidence failures",
+		func(failure entity.EvidenceFailure, wantFailure string) {
+			out := renderReportMarkdown(testReportWithObservationEvidenceFailures(failure))
+			Expect(out).To(ContainSubstring("## Experiments"))
+			Expect(out).To(ContainSubstring("O-0001 `timing` = 80 ns"))
+			Expect(out).To(ContainSubstring("Evidence failures:"))
+			Expect(out).To(ContainSubstring(wantFailure))
+		},
+		Entry("exit plus stderr",
+			entity.EvidenceFailure{Name: testEvidenceName, ExitCode: 7, Error: "trace collection failed"},
+			testEvidenceName+" (exit 7): trace collection failed",
+		),
+		Entry("spawn failure without exit code",
+			entity.EvidenceFailure{Name: testEvidenceName, Error: testEvidenceSpawnTraceErr},
+			testEvidenceName+": "+testEvidenceSpawnTraceErr,
+		),
+	)
 })
