@@ -3,104 +3,78 @@ package integration_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/bytter/autoresearch/internal/integration"
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = testkit.Spec("TestEnsureCodexInstructions_Created", func(t testkit.T) {
-	dir := t.TempDir()
-	r, err := integration.EnsureCodexInstructions(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Created || r.Added || r.Updated || r.AlreadyOK {
-		t.Fatalf("expected Created, got %+v", r)
-	}
-	body, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
-	if !strings.Contains(text, ".codex/autoresearch.md") {
-		t.Fatalf("missing codex doc reference: %s", text)
-	}
-	if !strings.Contains(text, "spawn_agent") {
-		t.Fatalf("missing spawn_agent guidance: %s", text)
-	}
-	for _, needle := range []string{
-		".codex/agents/research-orchestrator.toml",
-		"Budgets are caps, not quotas",
-		"review pending",
-		"--inspired-by",
-		"Choose lesson scope conservatively",
-		"measurement caveats",
-		"prefer hypothesis scope",
-		"Do not spend early turns probing `--help`",
-		"exact `agent_type` name",
-		"Do not emulate those roles by spawning `explorer`",
-		"one-cycle leaf role",
-		"parent/main session owns the next handoff",
-		"nested `spawn_agent` / `send_input` / `wait_agent`",
-		"main checkout as read-only during research",
-		"main_checkout_dirty_paths",
-		"bootstrap/harness files",
-	} {
-		if !strings.Contains(text, needle) {
-			t.Fatalf("managed block missing %q: %s", needle, text)
+var _ = Describe("Codex AGENTS.md instructions", func() {
+	It("creates the managed block with the current research guidance", func() {
+		dir := GinkgoT().TempDir()
+		r, err := integration.EnsureCodexInstructions(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Created).To(BeTrue())
+		Expect(r.Added).To(BeFalse())
+		Expect(r.Updated).To(BeFalse())
+		Expect(r.AlreadyOK).To(BeFalse())
+
+		body, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		Expect(err).NotTo(HaveOccurred())
+		text := string(body)
+		for _, needle := range []string{
+			".codex/autoresearch.md",
+			"spawn_agent",
+			".codex/agents/research-orchestrator.toml",
+			"Budgets are caps, not quotas",
+			"review pending",
+			"--inspired-by",
+			"Choose lesson scope conservatively",
+			"measurement caveats",
+			"prefer hypothesis scope",
+			"Do not spend early turns probing `--help`",
+			"exact `agent_type` name",
+			"Do not emulate those roles by spawning `explorer`",
+			"one-cycle leaf role",
+			"parent/main session owns the next handoff",
+			"nested `spawn_agent` / `send_input` / `wait_agent`",
+			"main checkout as read-only during research",
+			"main_checkout_dirty_paths",
+			"bootstrap/harness files",
+		} {
+			Expect(text).To(ContainSubstring(needle))
 		}
-	}
-})
+	})
 
-var _ = testkit.Spec("TestEnsureCodexInstructions_AppendsManagedBlock", func(t testkit.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "AGENTS.md")
-	const pre = "# Team Notes\n\nKeep tests deterministic.\n"
-	if err := os.WriteFile(path, []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureCodexInstructions(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Added {
-		t.Fatalf("expected Added, got %+v", r)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
-	if !strings.HasPrefix(text, pre) {
-		t.Fatalf("user content not preserved: %q", text)
-	}
-})
+	It("appends the managed block without rewriting user content", func() {
+		dir := GinkgoT().TempDir()
+		path := filepath.Join(dir, "AGENTS.md")
+		const pre = "# Team Notes\n\nKeep tests deterministic.\n"
+		Expect(os.WriteFile(path, []byte(pre), 0o644)).To(Succeed())
 
-var _ = testkit.Spec("TestEnsureCodexInstructions_Idempotent", func(t testkit.T) {
-	dir := t.TempDir()
-	if _, err := integration.EnsureCodexInstructions(dir); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureCodexInstructions(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.AlreadyOK {
-		t.Fatalf("expected AlreadyOK, got %+v", r)
-	}
-})
+		r, err := integration.EnsureCodexInstructions(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Added).To(BeTrue())
+		body, err := os.ReadFile(path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(HavePrefix(pre))
+	})
 
-var _ = testkit.Spec("TestPreviewCodexInstructions", func(t testkit.T) {
-	dir := t.TempDir()
-	r, err := integration.PreviewCodexInstructions(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Created {
-		t.Fatalf("expected Created, got %+v", r)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err == nil {
-		t.Fatal("preview should not create AGENTS.md")
-	}
+	It("is idempotent once the managed block is current", func() {
+		dir := GinkgoT().TempDir()
+		_, err := integration.EnsureCodexInstructions(dir)
+		Expect(err).NotTo(HaveOccurred())
+		r, err := integration.EnsureCodexInstructions(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.AlreadyOK).To(BeTrue())
+	})
+
+	It("previews creation without writing AGENTS.md", func() {
+		dir := GinkgoT().TempDir()
+		r, err := integration.PreviewCodexInstructions(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Created).To(BeTrue())
+		_, err = os.Stat(filepath.Join(dir, "AGENTS.md"))
+		Expect(os.IsNotExist(err)).To(BeTrue())
+	})
 })
