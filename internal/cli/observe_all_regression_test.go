@@ -1,76 +1,61 @@
 package cli
 
 import (
-	"strings"
-
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = testkit.Spec("TestObserveAllEnforcesStrictMinSamples", func(t testkit.T) {
-	saveGlobals(t)
-	dir := setupObserveScenarioStore(t)
-	runCLI(t, dir,
-		"instrument", "register", "timing",
-		"--cmd", "sh",
-		"--cmd", "-c",
-		"--cmd", "cat timing.txt",
-		"--parser", "builtin:scalar",
-		"--pattern", "([0-9]+)",
-		"--unit", "ns",
-		"--min-samples", "5",
-	)
-	scenario := setupObserveScenarioExperiment(t, dir, "timing", "--constraint-max", "timing=1000")
-	writeScenarioMetrics(t, scenario.Worktree, "80\n", "900\n")
-	gitCommitAll(t, scenario.Worktree, "candidate")
-	candidateRef := gitCreateCandidateRef(t, scenario.Worktree, "candidate/observe-all-min-samples")
+var _ = Describe("observe --all regressions", func() {
+	BeforeEach(saveGlobals)
 
-	stdout, stderr, err := runCLIResult(t, dir,
-		"observe", scenario.ExpID,
-		"--all",
-		"--candidate-ref", candidateRef,
-		"--samples", "1",
-	)
-	if err == nil {
-		t.Fatalf("observe --all unexpectedly accepted --samples below min_samples\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(err.Error(), "requires at least 5 samples") {
-		t.Fatalf("observe --all error = %v, want strict min_samples error\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-})
+	It("enforces each instrument's strict min_samples", func() {
+		dir := setupObserveScenarioStore()
+		runCLI(dir,
+			"instrument", "register", "timing",
+			"--cmd", "sh",
+			"--cmd", "-c",
+			"--cmd", "cat timing.txt",
+			"--parser", "builtin:scalar",
+			"--pattern", "([0-9]+)",
+			"--unit", "ns",
+			"--min-samples", "5",
+		)
+		scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "timing=1000")
+		writeScenarioMetrics(scenario.Worktree, "80\n", "900\n")
+		gitCommitAll(scenario.Worktree, "candidate")
+		candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/observe-all-min-samples")
 
-var _ = testkit.Spec("TestObserveAllRequiresImplementedExperimentStatus", func(t testkit.T) {
-	saveGlobals(t)
-	dir := setupObserveScenarioStore(t)
-	registerScenarioTimingInstrument(t, dir)
-	scenario := setupObserveScenarioExperiment(t, dir, "timing", "--constraint-max", "timing=1000")
-	writeScenarioMetrics(t, scenario.Worktree, "80\n", "900\n")
-	gitCommitAll(t, scenario.Worktree, "candidate")
-	candidateRef := gitCreateCandidateRef(t, scenario.Worktree, "candidate/observe-all-status")
+		_, _, err := runCLIResult(dir,
+			"observe", scenario.ExpID,
+			"--all",
+			"--candidate-ref", candidateRef,
+			"--samples", "1",
+		)
+		Expect(err).To(MatchError(ContainSubstring("requires at least 5 samples")))
+	})
 
-	s, err := store.Open(dir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	exp, err := s.ReadExperiment(scenario.ExpID)
-	if err != nil {
-		t.Fatalf("ReadExperiment: %v", err)
-	}
-	exp.Status = entity.ExpDesigned
-	if err := s.WriteExperiment(exp); err != nil {
-		t.Fatalf("WriteExperiment: %v", err)
-	}
+	It("requires implemented experiment status before recording", func() {
+		dir := setupObserveScenarioStore()
+		registerScenarioTimingInstrument(dir)
+		scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "timing=1000")
+		writeScenarioMetrics(scenario.Worktree, "80\n", "900\n")
+		gitCommitAll(scenario.Worktree, "candidate")
+		candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/observe-all-status")
 
-	stdout, stderr, err := runCLIResult(t, dir,
-		"observe", scenario.ExpID,
-		"--all",
-		"--candidate-ref", candidateRef,
-	)
-	if err == nil {
-		t.Fatalf("observe --all unexpectedly accepted experiment in designed status\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(err.Error(), "status") || !strings.Contains(err.Error(), "implemented") {
-		t.Fatalf("observe --all error = %v, want experiment status error\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
+		s, err := store.Open(dir)
+		Expect(err).NotTo(HaveOccurred())
+		exp, err := s.ReadExperiment(scenario.ExpID)
+		Expect(err).NotTo(HaveOccurred())
+		exp.Status = entity.ExpDesigned
+		Expect(s.WriteExperiment(exp)).To(Succeed())
+
+		_, _, err = runCLIResult(dir,
+			"observe", scenario.ExpID,
+			"--all",
+			"--candidate-ref", candidateRef,
+		)
+		Expect(err).To(MatchError(And(ContainSubstring("status"), ContainSubstring("implemented"))))
+	})
 })

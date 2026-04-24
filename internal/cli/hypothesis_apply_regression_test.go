@@ -7,20 +7,19 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func setupApplyRegressionStore(t testkit.T, paused bool) string {
-	t.Helper()
+func setupApplyRegressionStore(paused bool) string {
+	GinkgoHelper()
 
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	s, err := store.Create(dir, store.Config{
 		Build: store.CommandSpec{Command: "true"},
 		Test:  store.CommandSpec{Command: "true"},
 	})
-	if err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	now := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
 	h := &entity.Hypothesis{
@@ -38,9 +37,7 @@ func setupApplyRegressionStore(t testkit.T, paused bool) string {
 		},
 		KillIf: []string{"tests fail"},
 	}
-	if err := s.WriteHypothesis(h); err != nil {
-		t.Fatalf("WriteHypothesis: %v", err)
-	}
+	Expect(s.WriteHypothesis(h)).To(Succeed())
 
 	exps := []*entity.Experiment{
 		{
@@ -67,9 +64,7 @@ func setupApplyRegressionStore(t testkit.T, paused bool) string {
 		},
 	}
 	for _, e := range exps {
-		if err := s.WriteExperiment(e); err != nil {
-			t.Fatalf("WriteExperiment(%s): %v", e.ID, err)
-		}
+		Expect(s.WriteExperiment(e)).To(Succeed())
 	}
 
 	concls := []*entity.Conclusion{
@@ -100,59 +95,45 @@ func setupApplyRegressionStore(t testkit.T, paused bool) string {
 		},
 	}
 	for _, c := range concls {
-		if err := s.WriteConclusion(c); err != nil {
-			t.Fatalf("WriteConclusion(%s): %v", c.ID, err)
-		}
+		Expect(s.WriteConclusion(c)).To(Succeed())
 	}
 
 	if paused {
-		if err := s.UpdateState(func(st *store.State) error {
+		Expect(s.UpdateState(func(st *store.State) error {
 			st.Paused = true
 			st.PauseReason = "review pending"
 			return nil
-		}); err != nil {
-			t.Fatalf("UpdateState(paused): %v", err)
-		}
+		})).To(Succeed())
 	}
 
 	return dir
 }
 
-var _ = testkit.Spec("TestHypothesisApplySelectsReviewedConclusionOverStrongerUnreviewedOne", func(t testkit.T) {
-	saveGlobals(t)
-	dir := setupApplyRegressionStore(t, false)
+var _ = Describe("hypothesis apply review gate", func() {
+	BeforeEach(saveGlobals)
 
-	stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001")
-	if !errors.Is(err, ErrDryRun) {
-		t.Fatalf("hypothesis apply error = %v, want dry-run after selecting reviewed conclusion\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "C-0001") || strings.Contains(stdout, "C-0002") {
-		t.Fatalf("hypothesis apply should select reviewed C-0001 and ignore unreviewed C-0002\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-})
+	It("selects a reviewed conclusion over a stronger unreviewed one", func() {
+		dir := setupApplyRegressionStore(false)
 
-var _ = testkit.Spec("TestHypothesisApplyRejectsExplicitUnreviewedConclusion", func(t testkit.T) {
-	saveGlobals(t)
-	dir := setupApplyRegressionStore(t, false)
+		stdout, _, err := runCLIResult(dir, "--dry-run", "hypothesis", "apply", "H-0001")
+		Expect(errors.Is(err, ErrDryRun)).To(BeTrue(), "expected dry-run after selecting reviewed conclusion, got %v", err)
+		Expect(stdout).To(ContainSubstring("C-0001"))
+		Expect(stdout).NotTo(ContainSubstring("C-0002"))
+	})
 
-	stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0002")
-	if err == nil {
-		t.Fatalf("hypothesis apply unexpectedly accepted unreviewed conclusion\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if errors.Is(err, ErrDryRun) {
-		t.Fatalf("hypothesis apply reached dry-run instead of rejecting unreviewed conclusion\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-	}
-	if !strings.Contains(err.Error(), "review") {
-		t.Fatalf("hypothesis apply error = %v, want review gate error\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
-})
+	It("rejects an explicitly selected unreviewed conclusion", func() {
+		dir := setupApplyRegressionStore(false)
 
-var _ = testkit.Spec("TestHypothesisApplyHonorsPausedStore", func(t testkit.T) {
-	saveGlobals(t)
-	dir := setupApplyRegressionStore(t, true)
+		_, _, err := runCLIResult(dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0002")
+		Expect(err).To(HaveOccurred())
+		Expect(errors.Is(err, ErrDryRun)).To(BeFalse())
+		Expect(err).To(MatchError(ContainSubstring("review")))
+	})
 
-	stdout, stderr, err := runCLIResult(t, dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0001")
-	if !errors.Is(err, ErrPaused) {
-		t.Fatalf("hypothesis apply error = %v, want ErrPaused\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
-	}
+	It("honors the pause gate", func() {
+		dir := setupApplyRegressionStore(true)
+
+		_, _, err := runCLIResult(dir, "--dry-run", "hypothesis", "apply", "H-0001", "--conclusion", "C-0001")
+		Expect(errors.Is(err, ErrPaused)).To(BeTrue(), "expected ErrPaused, got %v", err)
+	})
 })
