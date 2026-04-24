@@ -4,207 +4,124 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
-	"strings"
 
-	"github.com/bytter/autoresearch/internal/testkit"
 	"github.com/bytter/autoresearch/internal/worktree"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func gitInit(t testkit.T) string {
-	t.Helper()
-	dir := t.TempDir()
+func gitInit() string {
+	GinkgoHelper()
+	dir := GinkgoT().TempDir()
 	for _, args := range [][]string{
 		{"init", "--initial-branch=main"},
 		{"config", "user.email", "test@example.com"},
 		{"config", "user.name", "test"},
 		{"config", "commit.gpgsign", "false"},
 	} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		runGit(dir, args...)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"add", "README.md"},
-		{"commit", "-m", "init"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+	Expect(os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello"), 0o644)).To(Succeed())
+	runGit(dir, "add", "README.md")
+	runGit(dir, "commit", "-m", "init")
 	return dir
 }
 
-var _ = testkit.Spec("TestIsRepo", func(t testkit.T) {
-	dir := gitInit(t)
-	if !worktree.IsRepo(dir) {
-		t.Error("expected IsRepo to be true")
-	}
-	if worktree.IsRepo(t.TempDir()) {
-		t.Error("expected empty dir to not be a repo")
-	}
-})
-
-var _ = testkit.Spec("TestAddAndRemove", func(t testkit.T) {
-	dir := gitInit(t)
-	sha, err := worktree.ResolveRef(dir, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sha) < 40 {
-		t.Errorf("short SHA: %q", sha)
-	}
-
-	wtPath := filepath.Join(dir, ".research", "worktrees", "E-0001")
-	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := worktree.Add(dir, wtPath, "autoresearch/E-0001", sha); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(wtPath, "README.md")); err != nil {
-		t.Errorf("worktree should contain README.md: %v", err)
-	}
-
-	if err := worktree.Remove(dir, wtPath); err != nil {
-		t.Errorf("Remove: %v", err)
-	}
-	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
-		t.Errorf("worktree should be gone: %v", err)
-	}
-})
-
-var _ = testkit.Spec("TestSymbolicFullName", func(t testkit.T) {
-	dir := gitInit(t)
-
-	got, err := worktree.SymbolicFullName(dir, "main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "refs/heads/main" {
-		t.Fatalf("SymbolicFullName(main) = %q, want %q", got, "refs/heads/main")
-	}
-
-	got, err = worktree.SymbolicFullName(dir, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "refs/heads/main" {
-		t.Fatalf("SymbolicFullName(HEAD) = %q, want %q", got, "refs/heads/main")
-	}
-})
-
-func gitCommit(t testkit.T, dir, file, body, msg string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"add", file},
-		{"commit", "-m", msg},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+func gitCommit(dir, file, body, msg string) {
+	GinkgoHelper()
+	Expect(os.WriteFile(filepath.Join(dir, file), []byte(body), 0o644)).To(Succeed())
+	runGit(dir, "add", file)
+	runGit(dir, "commit", "-m", msg)
 }
 
-var _ = testkit.Spec("TestDiff", func(t testkit.T) {
-	dir := gitInit(t)
-	baseSHA, err := worktree.ResolveRef(dir, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
+func runGit(dir string, args ...string) {
+	GinkgoHelper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "git %v failed:\n%s", args, out)
+}
 
-	cmd := exec.Command("git", "-C", dir, "checkout", "-b", "feature")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout -b: %v\n%s", err, out)
-	}
-	gitCommit(t, dir, "feature.txt", "feature\n", "add feature")
+var _ = Describe("git worktree integration", func() {
+	It("detects git repositories", func() {
+		dir := gitInit()
+		Expect(worktree.IsRepo(dir)).To(BeTrue())
+		Expect(worktree.IsRepo(GinkgoT().TempDir())).To(BeFalse())
+	})
 
-	diff, err := worktree.Diff(dir, baseSHA, "feature")
-	if err != nil {
-		t.Fatalf("Diff: %v", err)
-	}
-	if !strings.Contains(diff, "feature.txt") {
-		t.Errorf("diff should mention feature.txt, got: %q", diff)
-	}
-	if !strings.Contains(diff, "+feature") {
-		t.Errorf("diff should contain the new line, got: %q", diff)
-	}
-})
+	It("adds and removes experiment worktrees at a resolved baseline SHA", func() {
+		dir := gitInit()
+		sha, err := worktree.ResolveRef(dir, "HEAD")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sha).To(HaveLen(40))
 
-var _ = testkit.Spec("TestCherryPick", func(t testkit.T) {
-	dir := gitInit(t)
+		wtPath := filepath.Join(dir, ".research", "worktrees", "E-0001")
+		Expect(os.MkdirAll(filepath.Dir(wtPath), 0o755)).To(Succeed())
+		Expect(worktree.Add(dir, wtPath, "autoresearch/E-0001", sha)).To(Succeed())
+		Expect(filepath.Join(wtPath, "README.md")).To(BeAnExistingFile())
 
-	cmd := exec.Command("git", "-C", dir, "checkout", "-b", "feature")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout -b feature: %v\n%s", err, out)
-	}
-	featureBaseSHA, err := worktree.ResolveRef(dir, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	gitCommit(t, dir, "feature.txt", "feature\n", "add feature")
+		Expect(worktree.Remove(dir, wtPath)).To(Succeed())
+		Expect(wtPath).NotTo(BeAnExistingFile())
+	})
 
-	cmd = exec.Command("git", "-C", dir, "checkout", "main")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout main: %v\n%s", err, out)
-	}
+	It("resolves branch names and HEAD to full symbolic refs", func() {
+		dir := gitInit()
 
-	if _, err := worktree.CherryPick(dir, featureBaseSHA, "feature"); err != nil {
-		t.Fatalf("CherryPick: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); err != nil {
-		t.Errorf("cherry-pick should have created feature.txt: %v", err)
-	}
-})
+		got, err := worktree.SymbolicFullName(dir, "main")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("refs/heads/main"))
 
-var _ = testkit.Spec("TestMerge", func(t testkit.T) {
-	dir := gitInit(t)
+		got, err = worktree.SymbolicFullName(dir, "HEAD")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("refs/heads/main"))
+	})
 
-	cmd := exec.Command("git", "-C", dir, "checkout", "-b", "feature")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout -b feature: %v\n%s", err, out)
-	}
-	gitCommit(t, dir, "feature.txt", "feature\n", "add feature")
+	It("returns diffs between a baseline SHA and a branch", func() {
+		dir := gitInit()
+		baseSHA, err := worktree.ResolveRef(dir, "HEAD")
+		Expect(err).NotTo(HaveOccurred())
 
-	cmd = exec.Command("git", "-C", dir, "checkout", "main")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout main: %v\n%s", err, out)
-	}
+		runGit(dir, "checkout", "-b", "feature")
+		gitCommit(dir, "feature.txt", "feature\n", "add feature")
 
-	if _, err := worktree.Merge(dir, "feature"); err != nil {
-		t.Fatalf("Merge: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); err != nil {
-		t.Errorf("merge should have brought in feature.txt: %v", err)
-	}
-})
+		diff, err := worktree.Diff(dir, baseSHA, "feature")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diff).To(ContainSubstring("feature.txt"))
+		Expect(diff).To(ContainSubstring("+feature"))
+	})
 
-var _ = testkit.Spec("TestDirtyPaths", func(t testkit.T) {
-	dir := gitInit(t)
+	It("cherry-picks commits made after a feature branch base", func() {
+		dir := gitInit()
 
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\nupdated\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("draft\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+		runGit(dir, "checkout", "-b", "feature")
+		featureBaseSHA, err := worktree.ResolveRef(dir, "HEAD")
+		Expect(err).NotTo(HaveOccurred())
+		gitCommit(dir, "feature.txt", "feature\n", "add feature")
+		runGit(dir, "checkout", "main")
 
-	got, err := worktree.DirtyPaths(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+		_, err = worktree.CherryPick(dir, featureBaseSHA, "feature")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(filepath.Join(dir, "feature.txt")).To(BeAnExistingFile())
+	})
 
-	want := []string{"README.md", "notes.txt"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("DirtyPaths() = %v, want %v", got, want)
-	}
+	It("merges feature branches into the current checkout", func() {
+		dir := gitInit()
+
+		runGit(dir, "checkout", "-b", "feature")
+		gitCommit(dir, "feature.txt", "feature\n", "add feature")
+		runGit(dir, "checkout", "main")
+
+		_, err := worktree.Merge(dir, "feature")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(filepath.Join(dir, "feature.txt")).To(BeAnExistingFile())
+	})
+
+	It("lists modified and untracked paths in status order", func() {
+		dir := gitInit()
+		Expect(os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\nupdated\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("draft\n"), 0o644)).To(Succeed())
+
+		got, err := worktree.DirtyPaths(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal([]string{"README.md", "notes.txt"}))
+	})
 })
