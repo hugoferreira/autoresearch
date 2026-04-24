@@ -9,14 +9,15 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 // researchHash walks .research/ under dir and returns a content hash over
 // (relpath + size + mode + sha256 of bytes). Used to assert that a
 // --dry-run invocation leaves the durable store byte-for-byte unchanged.
-func researchHash(t testkit.T, dir string) string {
-	t.Helper()
+func researchHash(dir string) string {
+	GinkgoHelper()
 	root := filepath.Join(dir, ".research")
 	h := sha256.New()
 	var entries []string
@@ -41,9 +42,7 @@ func researchHash(t testkit.T, dir string) string {
 		entries = append(entries, fmt.Sprintf("f:%s:%d:%o:%x", rel, info.Size(), info.Mode(), fh))
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "walk %s", root)
 	sort.Strings(entries)
 	for _, e := range entries {
 		h.Write([]byte(e))
@@ -61,109 +60,113 @@ func researchHash(t testkit.T, dir string) string {
 // whatever w.Emit() returned (nil on success), so every `if err :=
 // dryRun(...); err != nil { return err }` guard fell through and the
 // mutation ran despite the preview being printed.
-var _ = testkit.Spec("TestDryRun_ShortCircuitsAllMutatingVerbs", func(t testkit.T) {
+var _ = Describe("dry-run mode", func() {
 	type verbCase struct {
-		name string
-		// setup runs against an already-initialized store with an active
-		// goal and returns any extra args the verb needs (e.g. a
-		// hypothesis ID the verb will mutate).
-		setup func(t testkit.T, dir string) []string
-		// argsTail is appended to the base args after setup.
-		argsTail func(ids []string) []string
+		name    string
+		setup   func(dir string) []string
+		argTail func(ids []string) []string
 	}
 
-	cases := []verbCase{
-		{
-			name: "hypothesis_add",
-			argsTail: func(_ []string) []string {
-				return []string{
-					"hypothesis", "add",
-					"--claim", "tighten inner loop",
-					"--predicts-instrument", "timing",
-					"--predicts-target", "fir",
-					"--predicts-direction", "decrease",
-					"--predicts-min-effect", "0.05",
-					"--kill-if", "tests fail",
-				}
-			},
-		},
-		{
-			name:  "hypothesis_kill",
-			setup: setupHypothesis,
-			argsTail: func(ids []string) []string {
-				return []string{"hypothesis", "kill", ids[0], "--reason", "stale"}
-			},
-		},
-		{
-			name:  "hypothesis_reopen",
-			setup: setupKilledHypothesis,
-			argsTail: func(ids []string) []string {
-				return []string{"hypothesis", "reopen", ids[0], "--reason", "back on"}
-			},
-		},
-		{
-			name: "instrument_register",
-			argsTail: func(_ []string) []string {
-				return []string{
-					"instrument", "register", "extra",
-					"--cmd", "true",
-					"--parser", "builtin:passfail",
-					"--unit", "bool",
-				}
-			},
-		},
-		{
-			name: "pause",
-			argsTail: func(_ []string) []string {
-				return []string{"pause", "--reason", "dry-run probe"}
-			},
-		},
-		{
-			name:  "resume",
-			setup: setupPaused,
-			argsTail: func(_ []string) []string {
-				return []string{"resume"}
-			},
-		},
-	}
+	BeforeEach(saveGlobals)
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t testkit.T) {
-			saveGlobals(t)
-			dir, _ := setupGoalStore(t)
-
+	DescribeTable("short-circuits mutating verbs without changing .research",
+		func(tc verbCase) {
+			dir, _ := setupGoalStore()
 			var ids []string
 			if tc.setup != nil {
-				ids = tc.setup(t, dir)
+				ids = tc.setup(dir)
 			}
 
 			root := Root()
-			args := append([]string{"-C", dir, "--dry-run"}, tc.argsTail(ids)...)
-			root.SetArgs(args)
+			root.SetArgs(append([]string{"-C", dir, "--dry-run"}, tc.argTail(ids)...))
 
-			before := researchHash(t, dir)
-
+			before := researchHash(dir)
 			err := root.Execute()
-			if err == nil {
-				t.Fatalf("expected ErrDryRun, got nil")
-			}
-			if !errors.Is(err, ErrDryRun) {
-				t.Fatalf("expected ErrDryRun, got %v", err)
-			}
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, ErrDryRun)).To(BeTrue(), "expected ErrDryRun, got %v", err)
+			Expect(researchHash(dir)).To(Equal(before))
+		},
+		Entry("hypothesis add",
+			verbCase{name: "hypothesis_add",
+				argTail: func(_ []string) []string {
+					return []string{
+						"hypothesis", "add",
+						"--claim", "tighten inner loop",
+						"--predicts-instrument", "timing",
+						"--predicts-target", "fir",
+						"--predicts-direction", "decrease",
+						"--predicts-min-effect", "0.05",
+						"--kill-if", "tests fail",
+					}
+				},
+			},
+		),
+		Entry("hypothesis kill",
+			verbCase{
+				name:  "hypothesis_kill",
+				setup: setupHypothesis,
+				argTail: func(ids []string) []string {
+					return []string{"hypothesis", "kill", ids[0], "--reason", "stale"}
+				},
+			}),
+		Entry("hypothesis reopen",
+			verbCase{
+				name:  "hypothesis_reopen",
+				setup: setupKilledHypothesis,
+				argTail: func(ids []string) []string {
+					return []string{"hypothesis", "reopen", ids[0], "--reason", "back on"}
+				},
+			}),
+		Entry("instrument register",
+			verbCase{name: "instrument_register",
+				argTail: func(_ []string) []string {
+					return []string{
+						"instrument", "register", "extra",
+						"--cmd", "true",
+						"--parser", "builtin:passfail",
+						"--unit", "bool",
+					}
+				},
+			},
+		),
+		Entry("pause",
+			verbCase{name: "pause",
+				argTail: func(_ []string) []string {
+					return []string{"pause", "--reason", "dry-run probe"}
+				},
+			},
+		),
+		Entry("resume",
+			verbCase{
+				name:  "resume",
+				setup: setupPaused,
+				argTail: func(_ []string) []string {
+					return []string{"resume"}
+				},
+			}),
+	)
 
-			after := researchHash(t, dir)
-			if before != after {
-				t.Errorf(".research/ changed under --dry-run\n  before=%s\n   after=%s", before, after)
-			}
-		})
-	}
+	It("still mutates state when --dry-run is not set", func() {
+		dir, _ := setupGoalStore()
+		before := researchHash(dir)
+
+		runCLI(dir,
+			"hypothesis", "add",
+			"--claim", "non-dry-run",
+			"--predicts-instrument", "timing",
+			"--predicts-target", "fir",
+			"--predicts-direction", "decrease",
+			"--predicts-min-effect", "0.05",
+			"--kill-if", "tests fail",
+		)
+
+		Expect(researchHash(dir)).NotTo(Equal(before))
+	})
 })
 
-func setupHypothesis(t testkit.T, dir string) []string {
-	t.Helper()
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
+func setupHypothesis(dir string) []string {
+	GinkgoHelper()
+	runCLI(dir,
 		"hypothesis", "add",
 		"--claim", "setup hypothesis",
 		"--predicts-instrument", "timing",
@@ -171,68 +174,24 @@ func setupHypothesis(t testkit.T, dir string) []string {
 		"--predicts-direction", "decrease",
 		"--predicts-min-effect", "0.05",
 		"--kill-if", "tests fail",
-	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("setup hypothesis add: %v", err)
-	}
+	)
 	return []string{"H-0001"}
 }
 
-func setupKilledHypothesis(t testkit.T, dir string) []string {
-	t.Helper()
-	ids := setupHypothesis(t, dir)
-
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
+func setupKilledHypothesis(dir string) []string {
+	GinkgoHelper()
+	ids := setupHypothesis(dir)
+	runCLI(dir,
 		"hypothesis", "kill", ids[0],
 		"--reason", "prereq for test",
-	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("setup kill: %v", err)
-	}
+	)
 	return ids
 }
 
-func setupPaused(t testkit.T, dir string) []string {
-	t.Helper()
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
+func setupPaused(dir string) []string {
+	GinkgoHelper()
+	runCLI(dir,
 		"pause", "--reason", "setup",
-	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("setup pause: %v", err)
-	}
+	)
 	return nil
 }
-
-// TestDryRun_NonDryRunStillMutates sanity-checks that the fix didn't
-// accidentally break the non-dry-run path — a mutating verb without
-// --dry-run must still mutate state.
-var _ = testkit.Spec("TestDryRun_NonDryRunStillMutates", func(t testkit.T) {
-	saveGlobals(t)
-	dir, _ := setupGoalStore(t)
-
-	before := researchHash(t, dir)
-
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"hypothesis", "add",
-		"--claim", "non-dry-run",
-		"--predicts-instrument", "timing",
-		"--predicts-target", "fir",
-		"--predicts-direction", "decrease",
-		"--predicts-min-effect", "0.05",
-		"--kill-if", "tests fail",
-	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("hypothesis add: %v", err)
-	}
-
-	after := researchHash(t, dir)
-	if before == after {
-		t.Error("non-dry-run hypothesis add did not change .research/")
-	}
-})

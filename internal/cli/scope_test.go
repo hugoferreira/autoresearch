@@ -5,19 +5,18 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
-	"github.com/bytter/autoresearch/internal/testkit"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func scopedFixtureStore(t testkit.T) *store.Store {
-	t.Helper()
+func scopedFixtureStore() *store.Store {
+	GinkgoHelper()
 
-	s, err := store.Create(t.TempDir(), store.Config{
+	s, err := store.Create(GinkgoT().TempDir(), store.Config{
 		Build: store.CommandSpec{Command: "true"},
 		Test:  store.CommandSpec{Command: "true"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	now := time.Now().UTC()
 	g1 := &entity.Goal{
@@ -39,16 +38,12 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 		},
 	}
 	for _, g := range []*entity.Goal{g1, g2} {
-		if err := s.WriteGoal(g); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteGoal(g)).To(Succeed())
 	}
-	if err := s.UpdateState(func(st *store.State) error {
+	Expect(s.UpdateState(func(st *store.State) error {
 		st.CurrentGoalID = g2.ID
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})).To(Succeed())
 
 	h1 := &entity.Hypothesis{
 		ID: "H-0001", GoalID: g1.ID, Claim: "goal 1 hypothesis", Status: entity.StatusOpen, Author: "human", CreatedAt: now,
@@ -59,9 +54,7 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 		Predicts: entity.Predicts{Instrument: "qemu_cycles", Target: "fir", Direction: "decrease"},
 	}
 	for _, h := range []*entity.Hypothesis{h1, h2} {
-		if err := s.WriteHypothesis(h); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteHypothesis(h)).To(Succeed())
 	}
 
 	base := &entity.Experiment{
@@ -83,21 +76,15 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 		Author:      "system", CreatedAt: now,
 	}
 	for _, e := range []*entity.Experiment{base, e1, e2} {
-		if err := s.WriteExperiment(e); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteExperiment(e)).To(Succeed())
 	}
 
-	if err := s.WriteObservation(&entity.Observation{
+	Expect(s.WriteObservation(&entity.Observation{
 		ID: "O-0001", Experiment: base.ID, Instrument: "host_timing", MeasuredAt: now, Value: 1.0, Unit: "s", Samples: 3, Author: "system",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.WriteObservation(&entity.Observation{
+	})).To(Succeed())
+	Expect(s.WriteObservation(&entity.Observation{
 		ID: "O-0002", Experiment: e2.ID, Instrument: "qemu_cycles", MeasuredAt: now, Value: 100, Unit: "cycles", Samples: 3, Author: "system",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})).To(Succeed())
 
 	c1 := &entity.Conclusion{
 		ID: "C-0001", Hypothesis: h1.ID, Verdict: entity.VerdictSupported,
@@ -110,9 +97,7 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 		StatTest: "welch", Author: "agent:analyst", CreatedAt: now,
 	}
 	for _, c := range []*entity.Conclusion{c1, c2} {
-		if err := s.WriteConclusion(c); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteConclusion(c)).To(Succeed())
 	}
 
 	l1 := &entity.Lesson{
@@ -128,9 +113,7 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 		Status: entity.LessonStatusActive, Author: "agent:analyst", CreatedAt: now,
 	}
 	for _, l := range []*entity.Lesson{l1, l2, l3} {
-		if err := s.WriteLesson(l); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteLesson(l)).To(Succeed())
 	}
 
 	events := []store.Event{
@@ -145,9 +128,7 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 		{Ts: now, Kind: "pause", Actor: "human"},
 	}
 	for _, ev := range events {
-		if err := s.AppendEvent(ev); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.AppendEvent(ev)).To(Succeed())
 	}
 
 	return s
@@ -155,16 +136,14 @@ func scopedFixtureStore(t testkit.T) *store.Store {
 
 func ptrFloat(v float64) *float64 { return &v }
 
-func scopedSystemLessonAccuracyFixtureStore(t testkit.T) (*store.Store, goalScope) {
-	t.Helper()
+func scopedSystemLessonAccuracyFixtureStore() (*store.Store, goalScope) {
+	GinkgoHelper()
 
-	s, err := store.Create(t.TempDir(), store.Config{
+	s, err := store.Create(GinkgoT().TempDir(), store.Config{
 		Build: store.CommandSpec{Command: "true"},
 		Test:  store.CommandSpec{Command: "true"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	base := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	g1 := &entity.Goal{
@@ -180,9 +159,7 @@ func scopedSystemLessonAccuracyFixtureStore(t testkit.T) (*store.Store, goalScop
 		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
 	}
 	for _, g := range []*entity.Goal{g1, g2} {
-		if err := s.WriteGoal(g); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteGoal(g)).To(Succeed())
 	}
 
 	// Legacy malformed system lesson: read surfaces should still avoid
@@ -202,9 +179,7 @@ func scopedSystemLessonAccuracyFixtureStore(t testkit.T) (*store.Store, goalScop
 		Author:     "agent:analyst",
 		CreatedAt:  base.Add(time.Minute),
 	}
-	if err := s.WriteLesson(lesson); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteLesson(lesson)).To(Succeed())
 
 	inScope := &entity.Hypothesis{
 		ID: "H-0103", GoalID: g1.ID, Claim: "in-scope unrelated hypothesis",
@@ -218,9 +193,7 @@ func scopedSystemLessonAccuracyFixtureStore(t testkit.T) (*store.Store, goalScop
 		Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease", MinEffect: 0.1},
 	}
 	for _, h := range []*entity.Hypothesis{inScope, outOfScopeLinked} {
-		if err := s.WriteHypothesis(h); err != nil {
-			t.Fatal(err)
-		}
+		Expect(s.WriteHypothesis(h)).To(Succeed())
 	}
 
 	unrelatedConclusion := &entity.Conclusion{
@@ -231,206 +204,124 @@ func scopedSystemLessonAccuracyFixtureStore(t testkit.T) (*store.Store, goalScop
 		Author:     "agent:analyst",
 		CreatedAt:  base.Add(3 * time.Minute),
 	}
-	if err := s.WriteConclusion(unrelatedConclusion); err != nil {
-		t.Fatal(err)
-	}
+	Expect(s.WriteConclusion(unrelatedConclusion)).To(Succeed())
 
 	return s, goalScope{GoalID: g1.ID}
 }
 
-var _ = testkit.Spec("TestResolveGoalScope_DefaultsAndAll", func(t testkit.T) {
-	s, err := store.Create(t.TempDir(), store.Config{
-		Build: store.CommandSpec{Command: "true"},
-		Test:  store.CommandSpec{Command: "true"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+var _ = Describe("goal scoping", func() {
+	It("defaults to all without an active goal and supports explicit all", func() {
+		s, err := store.Create(GinkgoT().TempDir(), store.Config{
+			Build: store.CommandSpec{Command: "true"},
+			Test:  store.CommandSpec{Command: "true"},
+		})
+		Expect(err).NotTo(HaveOccurred())
 
-	scope, err := resolveGoalScope(s, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !scope.All {
-		t.Fatalf("empty scope with no active goal should default to all, got %+v", scope)
-	}
+		scope, err := resolveGoalScope(s, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(scope.All).To(BeTrue())
 
-	now := time.Now().UTC()
-	goal := &entity.Goal{
-		ID: "G-0001", Status: entity.GoalStatusActive, CreatedAt: &now,
-		Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
-	}
-	if err := s.WriteGoal(goal); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UpdateState(func(st *store.State) error {
-		st.CurrentGoalID = goal.ID
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	scope, err = resolveGoalScope(s, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scope.All || scope.GoalID != goal.ID {
-		t.Fatalf("default scope = %+v, want %s", scope, goal.ID)
-	}
-
-	scope, err = resolveGoalScope(s, goalScopeAll)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !scope.All {
-		t.Fatalf("--goal all should resolve to all, got %+v", scope)
-	}
-
-	if _, err := resolveGoalScope(s, "G-9999"); err == nil {
-		t.Fatal("expected unknown explicit goal to fail")
-	}
-})
-
-var _ = testkit.Spec("TestGoalScopeResolver_FiltersBaselineLessonsAndEvents", func(t testkit.T) {
-	s := scopedFixtureStore(t)
-	r := newGoalScopeResolver(s, goalScope{GoalID: "G-0001"})
-
-	exps, err := s.ListExperiments()
-	if err != nil {
-		t.Fatal(err)
-	}
-	exps, err = r.filterExperiments(exps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(exps) != 2 {
-		t.Fatalf("scoped experiments = %d, want 2", len(exps))
-	}
-	if exps[0].ID != "E-0001" || exps[1].ID != "E-0002" {
-		t.Fatalf("unexpected scoped experiments: %s, %s", exps[0].ID, exps[1].ID)
-	}
-
-	obs, err := s.ListObservations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	obs, err = r.filterObservations(obs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(obs) != 1 || obs[0].ID != "O-0001" {
-		t.Fatalf("scoped observations = %+v, want O-0001 only", obs)
-	}
-
-	lessons, err := s.ListLessons()
-	if err != nil {
-		t.Fatal(err)
-	}
-	lessons, err = r.filterLessons(lessons)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(lessons) != 2 {
-		t.Fatalf("scoped lessons = %d, want 2", len(lessons))
-	}
-	if lessons[0].ID != "L-0001" || lessons[1].ID != "L-0002" {
-		t.Fatalf("unexpected lesson scope: %s, %s", lessons[0].ID, lessons[1].ID)
-	}
-
-	events, err := s.Events(0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	events, err = r.filterEvents(events)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{
-		"goal.new:G-0001":            true,
-		"hypothesis.add:H-0001":      true,
-		"experiment.baseline:E-0001": true,
-		"observation.record:O-0001":  true,
-		"lesson.add:L-0001":          true,
-		"lesson.add:L-0002":          true,
-	}
-	if len(events) != len(want) {
-		t.Fatalf("scoped events = %d, want %d", len(events), len(want))
-	}
-	for _, ev := range events {
-		key := ev.Kind + ":" + ev.Subject
-		if !want[key] {
-			t.Fatalf("unexpected scoped event %s", key)
+		now := time.Now().UTC()
+		goal := &entity.Goal{
+			ID: "G-0001", Status: entity.GoalStatusActive, CreatedAt: &now,
+			Objective: entity.Objective{Instrument: "host_timing", Direction: "decrease"},
 		}
-	}
-})
+		Expect(s.WriteGoal(goal)).To(Succeed())
+		Expect(s.UpdateState(func(st *store.State) error {
+			st.CurrentGoalID = goal.ID
+			return nil
+		})).To(Succeed())
 
-var _ = testkit.Spec("TestCaptureDashboard_DefaultScopeTracksActiveGoal", func(t testkit.T) {
-	s := scopedFixtureStore(t)
+		scope, err = resolveGoalScope(s, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(scope.All).To(BeFalse())
+		Expect(scope.GoalID).To(Equal(goal.ID))
 
-	snap, err := captureDashboard(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snap.ScopeAll || snap.ScopeGoalID != "G-0002" {
-		t.Fatalf("dashboard scope = %+v, want goal G-0002", snap)
-	}
-	if got := snap.Counts["hypotheses"]; got != 1 {
-		t.Fatalf("scoped hypothesis count = %d, want 1", got)
-	}
-	if len(snap.Tree) != 1 || snap.Tree[0].ID != "H-0002" {
-		t.Fatalf("scoped tree = %+v, want H-0002 only", snap.Tree)
-	}
-	if got := len(snap.RecentLessons); got != 2 {
-		t.Fatalf("scoped lessons = %d, want goal lesson + system lesson", got)
-	}
+		scope, err = resolveGoalScope(s, goalScopeAll)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(scope.All).To(BeTrue())
 
-	allSnap, err := captureDashboardScoped(s, goalScope{All: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !allSnap.ScopeAll {
-		t.Fatalf("all-goal dashboard should report scope_all=true")
-	}
-	if got := allSnap.Counts["hypotheses"]; got != 2 {
-		t.Fatalf("all-goal hypothesis count = %d, want 2", got)
-	}
-	if got := len(allSnap.RecentLessons); got != 3 {
-		t.Fatalf("all-goal lessons = %d, want 3", got)
-	}
-})
+		_, err = resolveGoalScope(s, "G-9999")
+		Expect(err).To(HaveOccurred())
+	})
 
-var _ = testkit.Spec("TestCaptureDashboardScoped_SystemLessonAccuracyUsesGlobalLinks", func(t testkit.T) {
-	s, scope := scopedSystemLessonAccuracyFixtureStore(t)
+	It("filters baselines, lessons, and events to the requested goal", func() {
+		s := scopedFixtureStore()
+		r := newGoalScopeResolver(s, goalScope{GoalID: "G-0001"})
 
-	snap, err := captureDashboardScoped(s, scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := len(snap.RecentLessons); got != 1 {
-		t.Fatalf("scoped lessons = %d, want 1 malformed system lesson", got)
-	}
-	if snap.RecentLessons[0].ID != "L-0007" {
-		t.Fatalf("scoped lesson id = %s, want L-0007", snap.RecentLessons[0].ID)
-	}
-	if _, ok := snap.recentLessonAccuracy["L-0007"]; ok {
-		t.Fatalf("dashboard scoped accuracy should ignore unrelated in-scope conclusions when only out-of-scope linked hypotheses exist: %+v", snap.recentLessonAccuracy["L-0007"])
-	}
-})
+		exps, err := s.ListExperiments()
+		Expect(err).NotTo(HaveOccurred())
+		exps, err = r.filterExperiments(exps)
+		Expect(err).NotTo(HaveOccurred())
+		Expect([]string{exps[0].ID, exps[1].ID}).To(Equal([]string{"E-0001", "E-0002"}))
 
-var _ = testkit.Spec("TestLessonListViewInit_SystemLessonAccuracyUsesGlobalLinks", func(t testkit.T) {
-	s, scope := scopedSystemLessonAccuracyFixtureStore(t)
+		obs, err := s.ListObservations()
+		Expect(err).NotTo(HaveOccurred())
+		obs, err = r.filterObservations(obs)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(obs).To(HaveLen(1))
+		Expect(obs[0].ID).To(Equal("O-0001"))
 
-	msg := newLessonListView(scope).init(s)().(lessonListLoadedMsg)
-	if msg.err != nil {
-		t.Fatal(msg.err)
-	}
-	if got := len(msg.list); got != 1 {
-		t.Fatalf("lesson list loaded %d lessons, want 1", got)
-	}
-	if msg.list[0].ID != "L-0007" {
-		t.Fatalf("lesson list loaded %s, want L-0007", msg.list[0].ID)
-	}
-	if _, ok := msg.accuracy["L-0007"]; ok {
-		t.Fatalf("lesson list scoped accuracy should ignore unrelated in-scope conclusions when only out-of-scope linked hypotheses exist: %+v", msg.accuracy["L-0007"])
-	}
+		lessons, err := s.ListLessons()
+		Expect(err).NotTo(HaveOccurred())
+		lessons, err = r.filterLessons(lessons)
+		Expect(err).NotTo(HaveOccurred())
+		Expect([]string{lessons[0].ID, lessons[1].ID}).To(Equal([]string{"L-0001", "L-0002"}))
+
+		events, err := s.Events(0)
+		Expect(err).NotTo(HaveOccurred())
+		events, err = r.filterEvents(events)
+		Expect(err).NotTo(HaveOccurred())
+		var keys []string
+		for _, ev := range events {
+			keys = append(keys, ev.Kind+":"+ev.Subject)
+		}
+		Expect(keys).To(ConsistOf(
+			"goal.new:G-0001",
+			"hypothesis.add:H-0001",
+			"experiment.baseline:E-0001",
+			"observation.record:O-0001",
+			"lesson.add:L-0001",
+			"lesson.add:L-0002",
+		))
+	})
+
+	It("uses the active goal as the default dashboard scope", func() {
+		s := scopedFixtureStore()
+
+		snap, err := captureDashboard(s)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snap.ScopeAll).To(BeFalse())
+		Expect(snap.ScopeGoalID).To(Equal("G-0002"))
+		Expect(snap.Counts).To(HaveKeyWithValue("hypotheses", 1))
+		Expect(snap.Tree).To(HaveLen(1))
+		Expect(snap.Tree[0].ID).To(Equal("H-0002"))
+		Expect(snap.RecentLessons).To(HaveLen(2))
+
+		allSnap, err := captureDashboardScoped(s, goalScope{All: true})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(allSnap.ScopeAll).To(BeTrue())
+		Expect(allSnap.Counts).To(HaveKeyWithValue("hypotheses", 2))
+		Expect(allSnap.RecentLessons).To(HaveLen(3))
+	})
+
+	It("uses global hypothesis links for scoped system lesson accuracy in dashboard data", func() {
+		s, scope := scopedSystemLessonAccuracyFixtureStore()
+
+		snap, err := captureDashboardScoped(s, scope)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snap.RecentLessons).To(HaveLen(1))
+		Expect(snap.RecentLessons[0].ID).To(Equal("L-0007"))
+		Expect(snap.recentLessonAccuracy).NotTo(HaveKey("L-0007"))
+	})
+
+	It("uses global hypothesis links for scoped system lesson accuracy in the TUI lesson list", func() {
+		s, scope := scopedSystemLessonAccuracyFixtureStore()
+
+		msg := newLessonListView(scope).init(s)().(lessonListLoadedMsg)
+		Expect(msg.err).NotTo(HaveOccurred())
+		Expect(msg.list).To(HaveLen(1))
+		Expect(msg.list[0].ID).To(Equal("L-0007"))
+		Expect(msg.accuracy).NotTo(HaveKey("L-0007"))
+	})
 })
