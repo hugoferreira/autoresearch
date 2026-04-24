@@ -26,7 +26,8 @@ positives, which are far more expensive than false negatives.
 2. `autoresearch conclusion show <C-id> --json` — the verdict, effect
    (vs absolute baseline), `incremental_effect` (vs frontier best, if
    present), `strict_check` (firewall's own assessment), interpretation,
-   author, plus evidence-side join fields for cited observations:
+   author, measured candidate provenance (`candidate_ref`, `candidate_sha`),
+   plus evidence-side join fields for cited observations:
    `observation_artifacts`, `observation_evidence_failures`, and
    `observation_read_issues`.
 3. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
@@ -34,6 +35,7 @@ positives, which are far more expensive than false negatives.
 4. Read the stats from `autoresearch analyze` yourself:
 
        autoresearch analyze <candidate-exp-id> \
+           --candidate-ref <candidate-ref> \
            --baseline <baseline-exp-id> \
            --instrument <name> --json
 
@@ -80,7 +82,8 @@ the needed flag is genuinely absent from those references.
 7. **Review the code change for correctness and gaming** — this is as
    important as the statistics:
 
-       git show autoresearch/<candidate-exp-id>
+       git show <candidate-ref>
+       git rev-parse <candidate-ref>   # should match candidate_sha from conclusion show
 
    Check:
    - **Mechanism match**: Does the diff implement what the interpretation
@@ -144,7 +147,7 @@ a reason. Good reasons:
 - **Goodharting**: "Reduction is in LOC / complexity, a static proxy.
   No runtime instrument shows improvement."
 - **Mechanism mismatch**: "Interpretation claims loop unrolling, but
-  the diff (git show autoresearch/E-NNNN) shows the inner loop is
+  the diff (git show <candidate-ref>) shows the inner loop is
   unchanged — the actual change was a deleted debug branch."
 - **Unsupported mechanism**: "Interpretation claims SIMPLIFY_TRACE
   collapsed 14 redundant expressions, but no evidence artifact was

@@ -111,9 +111,13 @@ func TestEmbeddedAgents_GateReviewerStatsAuthorityContract(t *testing.T) {
 		}
 		for _, needle := range []string{
 			"Treat `autoresearch analyze` as the authoritative stats source.",
+			"--candidate-ref <candidate-ref>",
 			"Do not spend tokens re-coding",
 			"bootstrap CI or Mann-Whitney U",
 			"Inspect the raw samples for sanity",
+			"measured candidate provenance (`candidate_ref`, `candidate_sha`)",
+			"git show <candidate-ref>",
+			"git rev-parse <candidate-ref>",
 		} {
 			if !bytes.Contains(content, []byte(needle)) {
 				t.Fatalf("%s research-gate-reviewer missing %q", chk.label, needle)
@@ -121,6 +125,9 @@ func TestEmbeddedAgents_GateReviewerStatsAuthorityContract(t *testing.T) {
 		}
 		if bytes.Contains(content, []byte("Recompute the stats yourself:")) {
 			t.Fatalf("%s research-gate-reviewer still tells reviewers to recompute stats", chk.label)
+		}
+		if bytes.Contains(content, []byte("git show autoresearch/<candidate-exp-id>")) {
+			t.Fatalf("%s research-gate-reviewer still inspects mutable experiment branches", chk.label)
 		}
 	}
 }
