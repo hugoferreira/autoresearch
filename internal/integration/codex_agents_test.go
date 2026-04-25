@@ -70,6 +70,15 @@ var _ = Describe("Codex embedded agents", func() {
 		}
 	})
 
+	It("propagates runtime shell discipline", func() {
+		for _, a := range mustEmbeddedCodexAgents() {
+			content := string(a.Content)
+			for _, needle := range shellDisciplineNeedles() {
+				Expect(content).To(ContainSubstring(needle), "codex %s brief", a.Name)
+			}
+		}
+	})
+
 	It("keeps delegation handoff responsibility with the parent session", func() {
 		orchestrator := agentContentByName(mustEmbeddedCodexAgents())["research-orchestrator"]
 		Expect(orchestrator).NotTo(BeEmpty())
