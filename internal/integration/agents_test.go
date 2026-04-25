@@ -29,6 +29,13 @@ var _ = Describe("Claude embedded agents", func() {
 		}
 	})
 
+	It("tells the orchestrator to start from cycle-context", func() {
+		orchestrator := agentContentByName(mustEmbeddedAgents())["research-orchestrator"]
+		Expect(orchestrator).To(ContainSubstring("autoresearch cycle-context --json"))
+		Expect(orchestrator).To(ContainSubstring("trusted boot snapshot"))
+		Expect(orchestrator).To(ContainSubstring("Use specialized read surfaces"))
+	})
+
 	It("has valid frontmatter and role-appropriate tool permissions", func() {
 		for _, a := range mustEmbeddedAgents() {
 			Expect(a.Content).NotTo(BeEmpty(), a.Name)

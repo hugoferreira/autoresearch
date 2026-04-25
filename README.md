@@ -257,7 +257,7 @@ probe, and `--append` when you intentionally want another fresh run.
 
 | Group | Verbs |
 | --- | --- |
-| **lifecycle** | `init`, `status`, `pause`, `resume` |
+| **lifecycle** | `init`, `status`, `cycle-context`, `pause`, `resume` |
 | **goal** | `goal set`, `goal new`, `goal show`, `goal list`, `goal conclude`, `goal abandon` |
 | **steering** | `steering show`, `steering append` |
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
@@ -279,6 +279,11 @@ probe, and `--append` when you intentionally want another fresh run.
 
 Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,
 `4` budget exhausted. The orchestrator loop uses 3/4 to decide when to stop.
+
+`cycle-context --json` is the one-shot boot snapshot for research agents:
+pause state, main checkout cleanliness, active goal, frontier best, open
+hypotheses, active lesson summaries, instruments, in-flight work, and
+budget/count status.
 
 For shell-heavy work, prefer terse experiment projections over scraping
 human text:
@@ -315,10 +320,10 @@ names them.
 
 Read surfaces that aggregate goal-derived entities default to the active goal:
 `hypothesis list`, `experiment list`, `conclusion list`, `lesson list`,
-`artifact list`, `log`, `status`, `dashboard`, `dashboard tui`, `tree`, and
-`frontier`. Pass `--goal G-NNNN` to inspect a historical goal or `--goal all`
-to broaden the view across goals. System lessons remain visible in scoped
-views.
+`artifact list`, `log`, `status`, `cycle-context`, `dashboard`,
+`dashboard tui`, `tree`, and `frontier`. Pass `--goal G-NNNN` to inspect a
+historical goal or `--goal all` to broaden the view across goals. System
+lessons remain visible in scoped views.
 
 ## Goal format
 

@@ -33,6 +33,8 @@ var _ = Describe("Codex AGENTS.md instructions", func() {
 			"measurement caveats",
 			"prefer hypothesis scope",
 			"Do not spend early turns probing `--help`",
+			"autoresearch cycle-context --json",
+			"active_lessons",
 			"exact `agent_type` name",
 			"Do not emulate those roles by spawning `explorer`",
 			"one-cycle leaf role",

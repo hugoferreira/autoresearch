@@ -133,6 +133,7 @@ Reasons are required on every backward move and recorded in ` + "`events.jsonl`"
 
 For the routine optimization loop, the canonical command spine is:
 
+    autoresearch cycle-context --json                                    # boot snapshot for orchestrators
     autoresearch experiment baseline --json                              # once per goal, if missing
     autoresearch hypothesis add ... --author agent:orchestrator --json
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
@@ -158,6 +159,7 @@ only when this reference does not answer the question you have.
 ### Lifecycle
     autoresearch init       --build-cmd ... --test-cmd ...
     autoresearch status     [--goal G-NNNN|all]
+    autoresearch cycle-context [--goal G-NNNN|all]  # one-shot agent boot snapshot
     autoresearch log        [--goal G-NNNN|all] [--tail N] [--kind prefix] [--since RFC3339]
     autoresearch pause      [--reason "..."]
     autoresearch resume
@@ -528,8 +530,10 @@ example.
 
 **3. The reading contract.** Lessons are load-bearing, not decorative:
 
-- The **orchestrator** MUST run ` + "`lesson list --status active --summary --json`" + ` at
-  the start of every cycle. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
+- The **orchestrator** MUST read active lesson summaries at the start of
+  every cycle. ` + "`cycle-context --json`" + ` provides them in ` + "`active_lessons`" + `;
+  use ` + "`lesson list --status active --summary --json`" + ` only when deeper
+  lesson detail is needed. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
   either cite a lesson ID or explicitly note "no relevant lesson". When
   citing lessons, pass their IDs via ` + "`--inspired-by L-XXXX,L-YYYY`" + ` to
   create a structured link. ` + "`lesson accuracy`" + ` uses this link to compare

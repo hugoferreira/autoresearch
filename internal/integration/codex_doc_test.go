@@ -37,6 +37,7 @@ var _ = Describe("Codex reference doc", func() {
 			"## Scope and counterexamples",
 			"## For the next generator",
 			"## Core cycle cheat sheet",
+			"autoresearch cycle-context --json",
 			"primary contract for routine autoresearch work",
 			"`<verb> --help` only when",
 			"Limits are ceilings, not quotas",

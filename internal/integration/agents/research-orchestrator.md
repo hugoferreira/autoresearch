@@ -41,32 +41,30 @@ in shells that implement `[[ ... ]]`.
 
 ## Before each cycle
 
-Read in this order, every time. Do not skip steps — the notebook layer is
-load-bearing.
+Read in this order, every time. Do not skip steps — the snapshot and
+notebook layers are load-bearing.
 
 1. `@.claude/autoresearch.md` — the full CLI and firewall reference.
-2. `autoresearch status --json` — if `main_checkout_dirty` is true, stop.
-   Research assumes the target project's main checkout stays read-only.
-   Do not patch bootstrap/harness/instrument-definition files there
-   mid-run; surface any setup drift as explicit maintenance instead.
-3. `autoresearch goal show` — the objective, constraints, steering.
-4. `autoresearch lesson list --status active --summary --json` — the cumulative
-   notebook. If a lesson rules out a class of intervention, do not
-   propose that class without new evidence. If a lesson recommends a
+2. `autoresearch cycle-context --json` — the trusted boot snapshot:
+   pause state, main checkout cleanliness, active goal, frontier best,
+   open hypotheses, active lesson summaries, registered instruments,
+   in-flight work, and budget/count status. If `main_checkout_dirty` is
+   true, stop. Research assumes the target project's main checkout stays
+   read-only. Do not patch bootstrap/harness/instrument-definition files
+   there mid-run; surface any setup drift as explicit maintenance
+   instead. If `active_lessons` rules out a class of intervention, do
+   not propose that class without new evidence. If a lesson recommends a
    direction, lean into it.
-5. `autoresearch lesson accuracy --json` — if lessons have predicted
+3. `autoresearch lesson accuracy --json` — if lessons have predicted
    effects, check whether predictions are consistently overshooting.
    If so, the current direction may be hitting diminishing returns.
-6. `autoresearch tree --json` — every existing hypothesis. Do not
-   duplicate open work.
-7. `autoresearch frontier --json` — the current best (if any), the
-   `stalled_for` counter, and `goal_assessment`. If the threshold is met
-   and the recommended action is `ask_human` or `stop`, do not start
-   another cycle. If `stalled_for` is climbing, diversify.
-8. `autoresearch instrument list --json` — what you can measure.
-9. Critic feedback from previous cycles — see the subsection below.
-10. Enough of the codebase (via Read / Grep / Glob) to understand what's
+4. Critic feedback from previous cycles — see the subsection below.
+5. Enough of the codebase (via Read / Grep / Glob) to understand what's
     being optimized. Focus on `goal.objective.target`.
+
+Use specialized read surfaces (`status`, `goal show`, `tree`,
+`frontier`, `lesson list`, `instrument list`) only when `cycle-context`
+does not include the deeper detail you need.
 
 ### Read the critic feedback before proposing the next hypothesis
 
@@ -576,7 +574,7 @@ if none exists.
   experiment remains or review is pending.
 - **Patch the target project's main checkout during research.** Outside
   autoresearch-managed setup files, experiment and harness changes
-  belong in experiment worktrees. If `status --json` reports
+  belong in experiment worktrees. If `cycle-context --json` reports
   `main_checkout_dirty_paths`, stop and yield so the main session can
   decide whether to do explicit maintenance.
 - **Propose feature-delivery hypotheses.** If the goal reads like
