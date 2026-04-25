@@ -73,25 +73,39 @@ var _ = Describe("analyze command", func() {
 		Expect(err).To(MatchError(ContainSubstring("baseline experiment " + baselineID + " has observations for multiple recorded scopes")))
 	})
 
-	It("rejects filtering observations that mix candidate attempts", func() {
-		obs := []*entity.Observation{
-			{
-				ID:           "O-0001",
-				Attempt:      1,
-				CandidateRef: "refs/heads/candidate/E-0001-a1",
-				CandidateSHA: "0123456789abcdef0123456789abcdef01234567",
-			},
-			{
-				ID:           "O-0002",
-				Attempt:      2,
-				CandidateRef: "refs/heads/candidate/E-0001-a1",
-				CandidateSHA: "0123456789abcdef0123456789abcdef01234567",
-			},
+	It("rejects a candidate ref that maps to multiple recorded scopes", func() {
+		dir, s := createCLIStoreDir()
+		now := time.Now().UTC()
+		ref := "refs/heads/candidate/E-0001-a1"
+		Expect(s.WriteExperiment(&entity.Experiment{
+			ID:          "E-0001",
+			GoalID:      "G-0001",
+			Hypothesis:  "H-0001",
+			Status:      entity.ExpMeasured,
+			Baseline:    entity.Baseline{Ref: "HEAD"},
+			Instruments: []string{"timing"},
+			Author:      "test",
+			CreatedAt:   now,
+		})).To(Succeed())
+		for _, o := range []*entity.Observation{
+			{ID: "O-0001", Attempt: 1, CandidateSHA: "1111111111111111111111111111111111111111"},
+			{ID: "O-0002", Attempt: 2, CandidateSHA: "2222222222222222222222222222222222222222"},
+		} {
+			o.Experiment = "E-0001"
+			o.Instrument = "timing"
+			o.MeasuredAt = now
+			o.Value = 90
+			o.Unit = "ns"
+			o.Samples = 1
+			o.CandidateRef = ref
+			o.Author = "test"
+			Expect(s.WriteObservation(o)).To(Succeed())
 		}
 
-		_, err := filterAnalyzeObservationsByCandidateRef(obs, "refs/heads/candidate/E-0001-a1")
-		Expect(err).To(MatchError(ContainSubstring("multiple recorded candidate scopes")))
+		_, _, err := runCLIResult(dir, "analyze", "E-0001", "--candidate-ref", ref)
+		Expect(err).To(MatchError(ContainSubstring("candidate ref " + ref + " maps to multiple recorded candidate scopes")))
 	})
+
 })
 
 func setupAnalyzeAmbiguousBaseline() (string, string) {

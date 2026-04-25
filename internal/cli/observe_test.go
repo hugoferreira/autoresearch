@@ -14,7 +14,6 @@ import (
 type observeRecordJSON struct {
 	Action       string               `json:"action"`
 	ID           string               `json:"id"`
-	IDs          []string             `json:"ids"`
 	SamplesAdded int                  `json:"samples_added"`
 	Observation  entity.Observation   `json:"observation"`
 	Observations []entity.Observation `json:"observations"`
@@ -24,72 +23,8 @@ type observeCheckJSON struct {
 	Check observeSampleCheck `json:"check"`
 }
 
-type observeScenarioExperiment struct {
-	ExpID    string
-	Worktree string
-}
-
 func timingSampleTotal(observations []*entity.Observation) int {
 	return samplesForObservedInstrument(store.Instrument{Parser: "builtin:scalar"}, observations, "timing")
-}
-
-func setupObserveScenarioStore() string {
-	GinkgoHelper()
-	dir := gitInitScenarioRepo()
-	_, err := store.Create(dir, store.Config{
-		Build:     store.CommandSpec{Command: "true"},
-		Test:      store.CommandSpec{Command: "true"},
-		Worktrees: store.WorktreesConfig{Root: filepath.Join(GinkgoT().TempDir(), "worktrees")},
-	})
-	Expect(err).NotTo(HaveOccurred())
-	return dir
-}
-
-func setupObserveScenarioExperiment(dir, instruments string, goalArgs ...string) observeScenarioExperiment {
-	GinkgoHelper()
-
-	args := []string{
-		"goal", "set",
-		"--objective-instrument", "timing",
-		"--objective-target", "kernel",
-		"--objective-direction", "decrease",
-	}
-	args = append(args, goalArgs...)
-	runCLIJSON[cliIDResponse](dir, args...)
-
-	hyp := runCLIJSON[cliIDResponse](dir,
-		"hypothesis", "add",
-		"--claim", "tighten the hot loop",
-		"--predicts-instrument", "timing",
-		"--predicts-target", "kernel",
-		"--predicts-direction", "decrease",
-		"--predicts-min-effect", "0.1",
-		"--kill-if", "tests fail",
-	)
-	exp := runCLIJSON[cliIDResponse](dir,
-		"experiment", "design", hyp.ID,
-		"--baseline", "HEAD",
-		"--instruments", instruments,
-	)
-	impl := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp.ID)
-	return observeScenarioExperiment{
-		ExpID:    exp.ID,
-		Worktree: impl.Worktree,
-	}
-}
-
-func setupTimingObserveScenario() (string, observeScenarioExperiment) {
-	GinkgoHelper()
-	dir := setupObserveScenarioStore()
-	registerScenarioInstruments(dir)
-	return dir, setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
-}
-
-func commitScenarioMetricsCandidate(worktree, refName, message, timing, size string) string {
-	GinkgoHelper()
-	writeScenarioMetrics(worktree, timing, size)
-	gitCommitAll(worktree, message)
-	return gitCreateCandidateRef(worktree, refName)
 }
 
 func setupObserveFixture() (string, *store.Store) {

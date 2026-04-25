@@ -1,45 +1,9 @@
 package cli
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
-
-type cliIDResponse struct {
-	ID string `json:"id"`
-}
-
-type cliImplementResponse struct {
-	ID       string `json:"id"`
-	Worktree string `json:"worktree"`
-	Branch   string `json:"branch"`
-}
-
-type cliObserveAllResponse struct {
-	Action             string   `json:"action"`
-	Observations       []string `json:"observations"`
-	NewObservations    []string `json:"new_observations"`
-	ReusedObservations []string `json:"reused_observations"`
-	Results            []struct {
-		ID     string   `json:"id"`
-		IDs    []string `json:"ids"`
-		Inst   string   `json:"instrument"`
-		Action string   `json:"action"`
-	} `json:"results"`
-}
-
-type cliAnalyzeResponse struct {
-	Rows []struct {
-		Instrument string `json:"instrument"`
-		Comparison *struct {
-			DeltaFrac float64 `json:"delta_frac"`
-		} `json:"comparison,omitempty"`
-	} `json:"rows"`
-}
 
 type cliExperimentListRow struct {
 	ID               string `json:"id"`
@@ -86,7 +50,6 @@ type cliLifecycleFixture struct {
 type cliLifecycleCandidate struct {
 	HypothesisID string
 	ExperimentID string
-	Worktree     string
 	CandidateRef string
 }
 
@@ -116,7 +79,11 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 		})
 		obs1 := observeLifecycleCandidate(dir, win)
 		analyze1 := runCLIJSON[cliAnalyzeResponse](dir, "analyze", win.ExperimentID, "--candidate-ref", win.CandidateRef, "--baseline", fixture.BaselineID)
-		Expect(analyze1.Rows).To(HaveLen(3))
+		Expect(analyze1.Rows).To(ConsistOf(
+			HaveField("Instrument", "timing"),
+			HaveField("Instrument", "binary_size"),
+			HaveField("Instrument", "host_test"),
+		))
 		Expect(analyzeComparisonDeltaFrac(analyze1, "timing")).To(BeNumerically("<", 0))
 		concl1 := runCLIJSON[cliIDResponse](dir,
 			"conclude", win.HypothesisID,
@@ -214,10 +181,9 @@ func expectLifecycleReadSurfacesAgree(dir, goalID, candidateID, conclusionID str
 
 	Expect(frontier.ScopeGoalID).To(Equal(goalID))
 	Expect(frontier.GoalID).To(Equal(goalID))
-	Expect(dashboard.ScopeGoalID).To(Equal(frontier.ScopeGoalID))
-	Expect(status.ScopeGoalID).To(Equal(frontier.ScopeGoalID))
+	Expect(dashboard.ScopeGoalID).To(Equal(goalID))
+	Expect(status.ScopeGoalID).To(Equal(goalID))
 	Expect(status.MainCheckoutDirty).To(BeFalse())
-
 	Expect(frontier.GoalAssessment.Met).To(BeTrue())
 	Expect(frontier.GoalAssessment.MetByConclusion).To(Equal(conclusionID))
 	Expect(frontier.StalledFor).To(Equal(stalledFor))
@@ -288,7 +254,6 @@ func setupLifecycleCandidate(dir string, spec cliLifecycleCandidateSpec) cliLife
 	return cliLifecycleCandidate{
 		HypothesisID: hyp.ID,
 		ExperimentID: exp.ID,
-		Worktree:     impl.Worktree,
 		CandidateRef: candidateRef,
 	}
 }
@@ -296,99 +261,6 @@ func setupLifecycleCandidate(dir string, spec cliLifecycleCandidateSpec) cliLife
 func observeLifecycleCandidate(dir string, candidate cliLifecycleCandidate) cliObserveAllResponse {
 	GinkgoHelper()
 	return runCLIJSON[cliObserveAllResponse](dir, "observe", candidate.ExperimentID, "--all", "--candidate-ref", candidate.CandidateRef)
-}
-
-func registerScenarioInstruments(dir string) {
-	GinkgoHelper()
-	registerScenarioTimingInstrument(dir)
-	registerScenarioSupportInstruments(dir)
-}
-
-func registerScenarioTimingInstrument(dir string, evidence ...string) {
-	GinkgoHelper()
-	args := []string{
-		"instrument", "register", "timing",
-		"--cmd", "sh",
-		"--cmd", "-c",
-		"--cmd", "cat timing.txt",
-		"--parser", "builtin:scalar",
-		"--pattern", "([0-9]+)",
-		"--unit", "ns",
-	}
-	for _, ev := range evidence {
-		args = append(args, "--evidence", ev)
-	}
-	runCLI(dir, args...)
-}
-
-func registerScenarioSupportInstruments(dir string) {
-	GinkgoHelper()
-	runCLI(dir,
-		"instrument", "register", "binary_size",
-		"--cmd", "sh",
-		"--cmd", "-c",
-		"--cmd", "cat size.txt",
-		"--parser", "builtin:scalar",
-		"--pattern", "([0-9]+)",
-		"--unit", "bytes",
-	)
-	runCLI(dir,
-		"instrument", "register", "host_test",
-		"--cmd", "sh",
-		"--cmd", "-c",
-		"--cmd", "test -f PASS",
-		"--parser", "builtin:passfail",
-		"--unit", "bool",
-	)
-}
-
-func gitInitScenarioRepo() string {
-	GinkgoHelper()
-	dir := GinkgoT().TempDir()
-	for _, args := range [][]string{
-		{"init", "--initial-branch=main"},
-		{"config", "user.email", "test@example.com"},
-		{"config", "user.name", "test"},
-		{"config", "commit.gpgsign", "false"},
-	} {
-		gitRun(dir, args...)
-	}
-	writeScenarioMetrics(dir, "100\n", "900\n")
-	Expect(os.WriteFile(filepath.Join(dir, "PASS"), []byte("ok\n"), 0o644)).To(Succeed())
-	Expect(os.WriteFile(filepath.Join(dir, "README.md"), []byte("baseline\n"), 0o644)).To(Succeed())
-	gitRun(dir, "add", "timing.txt", "size.txt", "PASS", "README.md")
-	gitRun(dir, "commit", "-m", "init")
-	return dir
-}
-
-func writeScenarioMetrics(dir, timing, size string) {
-	GinkgoHelper()
-	Expect(os.WriteFile(filepath.Join(dir, "timing.txt"), []byte(timing), 0o644)).To(Succeed())
-	Expect(os.WriteFile(filepath.Join(dir, "size.txt"), []byte(size), 0o644)).To(Succeed())
-}
-
-func writeScenarioMechanism(dir, content string) {
-	GinkgoHelper()
-	Expect(os.WriteFile(filepath.Join(dir, "mechanism.txt"), []byte(content), 0o644)).To(Succeed())
-}
-
-func gitCommitAll(dir, msg string) {
-	GinkgoHelper()
-	gitRun(dir, "add", "timing.txt", "size.txt")
-	gitRun(dir, "commit", "-m", msg)
-}
-
-func gitCreateCandidateRef(dir, ref string) string {
-	GinkgoHelper()
-	gitRun(dir, "branch", ref, "HEAD")
-	return ref
-}
-
-func gitRun(dir string, args ...string) {
-	GinkgoHelper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.CombinedOutput()
-	Expect(err).NotTo(HaveOccurred(), "git %v failed:\n%s", args, out)
 }
 
 func observeResultID(resp cliObserveAllResponse, inst string) string {

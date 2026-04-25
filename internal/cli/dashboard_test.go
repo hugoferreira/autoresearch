@@ -11,22 +11,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func dashboardInFlightIDs(rows []dashboardInFlight) []string {
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.ID)
-	}
-	return ids
-}
-
-func dashboardStaleIDs(rows []staleExperimentView) []string {
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.ID)
-	}
-	return ids
-}
-
 func baseSnapshot() *dashboardSnapshot {
 	now := time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC)
 	return &dashboardSnapshot{
@@ -139,7 +123,10 @@ var _ = Describe("dashboard capture", func() {
 
 		snap, err := captureDashboard(s)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(dashboardInFlightIDs(snap.InFlight)).To(ConsistOf("E-0002", "E-0003"), "in-flight experiment IDs")
+		Expect(snap.InFlight).To(ConsistOf(
+			HaveField("ID", "E-0002"),
+			HaveField("ID", "E-0003"),
+		), "in-flight experiments")
 	})
 
 	It("limits stale experiments to work that is still actionable", func() {
@@ -177,8 +164,8 @@ var _ = Describe("dashboard capture", func() {
 
 		snap, err := captureDashboard(s)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(dashboardInFlightIDs(snap.InFlight)).To(ConsistOf("E-0003"), "in-flight experiment IDs")
-		Expect(dashboardStaleIDs(snap.StaleExperiments)).To(ConsistOf("E-0003"), "stale experiment IDs")
+		Expect(snap.InFlight).To(ConsistOf(HaveField("ID", "E-0003")), "in-flight experiments")
+		Expect(snap.StaleExperiments).To(ConsistOf(HaveField("ID", "E-0003")), "stale experiments")
 	})
 
 	It("captures an empty initialized store", func() {

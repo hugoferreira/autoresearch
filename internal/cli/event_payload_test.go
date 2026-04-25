@@ -12,59 +12,38 @@ import (
 var _ = Describe("event payloads", func() {
 	BeforeEach(saveGlobals)
 
-	It("records from, to, and reason on hypothesis kill", func() {
-		dir, s := setupGoalStore()
+	DescribeTable("records hypothesis status transition payloads",
+		func(action, from, to, reason string) {
+			dir, s := setupGoalStore()
+			Expect(s.WriteHypothesis(&entity.Hypothesis{
+				ID:     "H-0001",
+				GoalID: "G-0001",
+				Claim:  "tighten loop",
+				Predicts: entity.Predicts{
+					Instrument: "timing", Target: "fir", Direction: "decrease", MinEffect: 0.1,
+				},
+				KillIf:    []string{"tests fail"},
+				Status:    from,
+				Author:    "human",
+				CreatedAt: time.Now().UTC(),
+			})).To(Succeed())
+			Expect(s.UpdateState(func(st *store.State) error {
+				st.Counters["H"] = 1
+				return nil
+			})).To(Succeed())
 
-		runCLI(dir,
-			"hypothesis", "add",
-			"--claim", "tighten loop",
-			"--predicts-instrument", "timing",
-			"--predicts-target", "fir",
-			"--predicts-direction", "decrease",
-			"--predicts-min-effect", "0.1",
-			"--kill-if", "tests fail",
-		)
-		runCLI(dir, "hypothesis", "kill", "H-0001", "--reason", "obsolete")
+			runCLI(dir, "hypothesis", action, "H-0001", "--reason", reason)
 
-		event := findLastEvent(s, "hypothesis.kill")
-		Expect(event).NotTo(BeNil())
-		payload := decodePayload(event)
-		Expect(payload).To(HaveKeyWithValue("from", entity.StatusOpen))
-		Expect(payload).To(HaveKeyWithValue("to", entity.StatusKilled))
-		Expect(payload).To(HaveKeyWithValue("reason", "obsolete"))
-	})
-
-	It("records from and to on hypothesis reopen", func() {
-		dir, s := setupGoalStore()
-
-		// Seed a killed hypothesis directly so we don't need to run kill first.
-		now := time.Now().UTC()
-		h := &entity.Hypothesis{
-			ID:     "H-0001",
-			GoalID: "G-0001",
-			Claim:  "tighten loop",
-			Predicts: entity.Predicts{
-				Instrument: "timing", Target: "fir", Direction: "decrease", MinEffect: 0.1,
-			},
-			KillIf:    []string{"tests fail"},
-			Status:    entity.StatusKilled,
-			Author:    "human",
-			CreatedAt: now,
-		}
-		Expect(s.WriteHypothesis(h)).To(Succeed())
-		Expect(s.UpdateState(func(st *store.State) error {
-			st.Counters["H"] = 1
-			return nil
-		})).To(Succeed())
-
-		runCLI(dir, "hypothesis", "reopen", "H-0001", "--reason", "new evidence")
-
-		event := findLastEvent(s, "hypothesis.reopen")
-		Expect(event).NotTo(BeNil())
-		payload := decodePayload(event)
-		Expect(payload).To(HaveKeyWithValue("from", entity.StatusKilled))
-		Expect(payload).To(HaveKeyWithValue("to", entity.StatusOpen))
-	})
+			event := findLastEvent(s, "hypothesis."+action)
+			Expect(event).NotTo(BeNil())
+			payload := decodePayload(event)
+			Expect(payload).To(HaveKeyWithValue("from", from))
+			Expect(payload).To(HaveKeyWithValue("to", to))
+			Expect(payload).To(HaveKeyWithValue("reason", reason))
+		},
+		Entry("kill", "kill", entity.StatusOpen, entity.StatusKilled, "obsolete"),
+		Entry("reopen", "reopen", entity.StatusKilled, entity.StatusOpen, "new evidence"),
+	)
 
 	It("emits a lowercase field map for instrument registration", func() {
 		dir := GinkgoT().TempDir()
