@@ -42,6 +42,51 @@ func baseSnapshot() *dashboardSnapshot {
 	}
 }
 
+func populatedDashboardSnapshot() *dashboardSnapshot {
+	snap := baseSnapshot()
+	flash := 65536.0
+	impAt := snap.CapturedAt.Add(-2 * time.Minute)
+	snap.Goal = &entity.Goal{
+		Objective: entity.Objective{
+			Instrument: "qemu_cycles",
+			Target:     "dsp_fir",
+			Direction:  "decrease",
+		},
+		Completion: &entity.Completion{
+			Threshold:   0.2,
+			OnThreshold: entity.GoalOnThresholdAskHuman,
+		},
+		Constraints: []entity.Constraint{
+			{Instrument: "size_flash", Max: &flash},
+			{Instrument: "host_test", Require: "pass"},
+		},
+	}
+	snap.Counts = map[string]int{"hypotheses": 3, "experiments": 5, "observations": 12, "conclusions": 2}
+	snap.Budgets.Limits.MaxExperiments = 20
+	snap.Budgets.Limits.MaxWallTimeH = 8
+	snap.Budgets.Limits.FrontierStallK = 5
+	snap.Budgets.Usage.Experiments = 5
+	snap.Budgets.Usage.ElapsedH = 1.2
+	snap.Tree = []*treeNode{
+		{ID: "H-0001", Claim: "unrolling dsp_fir", Status: entity.StatusSupported, Author: "human"},
+		{ID: "H-0002", Claim: "fixed-point rewrite", Status: entity.StatusOpen, Author: "agent:gen",
+			Children: []*treeNode{
+				{ID: "H-0003", Claim: "sub: Q15 only", Status: entity.StatusInconclusive, Author: "agent:gen"},
+			}},
+	}
+	snap.Frontier = []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}}
+	snap.StalledFor = 2
+	snap.InFlight = []dashboardInFlight{{
+		ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
+		Instruments: []string{"qemu_cycles", "host_test"}, ImplementedAt: &impAt, ElapsedS: 120,
+	}}
+	snap.RecentEvents = []store.Event{
+		{Ts: snap.CapturedAt.Add(time.Second), Kind: "experiment.design", Actor: "agent:des", Subject: "E-0007"},
+		{Ts: snap.CapturedAt, Kind: "hypothesis.add", Actor: "agent:gen", Subject: "H-0003"},
+	}
+	return snap
+}
+
 func newStoreWithBuiltins() *store.Store {
 	GinkgoHelper()
 	s := createCLIStore()
@@ -242,53 +287,7 @@ var _ = Describe("dashboard rendering", func() {
 	})
 
 	It("renders a populated snapshot with goal, budget, tree, frontier, activity, and events", func() {
-		snap := baseSnapshot()
-		flash := 65536.0
-		snap.Goal = &entity.Goal{
-			Objective: entity.Objective{
-				Instrument: "qemu_cycles",
-				Target:     "dsp_fir",
-				Direction:  "decrease",
-			},
-			Completion: &entity.Completion{
-				Threshold:   0.20,
-				OnThreshold: entity.GoalOnThresholdAskHuman,
-			},
-			Constraints: []entity.Constraint{
-				{Instrument: "size_flash", Max: &flash},
-				{Instrument: "host_test", Require: "pass"},
-			},
-		}
-		snap.Counts = map[string]int{"hypotheses": 3, "experiments": 5, "observations": 12, "conclusions": 2}
-		snap.Budgets.Limits.MaxExperiments = 20
-		snap.Budgets.Limits.MaxWallTimeH = 8
-		snap.Budgets.Limits.FrontierStallK = 5
-		snap.Budgets.Usage.Experiments = 5
-		snap.Budgets.Usage.ElapsedH = 1.2
-		snap.Tree = []*treeNode{
-			{ID: "H-0001", Claim: "unrolling dsp_fir", Status: entity.StatusSupported, Author: "human:alice"},
-			{ID: "H-0002", Claim: "fixed-point rewrite", Status: entity.StatusOpen, Author: "agent:generator",
-				Children: []*treeNode{
-					{ID: "H-0003", Claim: "sub: Q15 only", Status: entity.StatusInconclusive, Author: "agent:generator"},
-				}},
-		}
-		snap.Frontier = []frontierRow{
-			{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25},
-		}
-		snap.StalledFor = 2
-		impAt := time.Now().UTC().Add(-2*time.Minute - 14*time.Second)
-		snap.InFlight = []dashboardInFlight{
-			{
-				ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
-				Instruments:   []string{"qemu_cycles", "host_test"},
-				ImplementedAt: &impAt,
-				ElapsedS:      time.Since(impAt).Seconds(),
-			},
-		}
-		snap.RecentEvents = []store.Event{
-			{Ts: time.Date(2026, 4, 11, 18, 42, 1, 0, time.UTC), Kind: "hypothesis.add", Actor: "agent:generator", Subject: "H-0003"},
-			{Ts: time.Date(2026, 4, 11, 18, 42, 5, 0, time.UTC), Kind: "experiment.design", Actor: "agent:designer", Subject: "E-0007"},
-		}
+		snap := populatedDashboardSnapshot()
 
 		var buf bytes.Buffer
 		renderDashboard(&buf, snap, 120, "refreshing every 2s", nil)

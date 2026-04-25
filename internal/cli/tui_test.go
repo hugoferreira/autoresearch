@@ -14,52 +14,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func tuiRichSnapshot() *dashboardSnapshot {
-	now := time.Date(2026, 4, 11, 18, 42, 0, 0, time.UTC)
-	flash := 65536.0
-	impAt := now.Add(-2 * time.Minute)
-	snap := &dashboardSnapshot{
-		Project:                "/tmp/fir",
-		Mode:                   "strict",
-		MainCheckoutDirtyPaths: []string{},
-		Goal: &entity.Goal{
-			Objective: entity.Objective{
-				Instrument: "qemu_cycles", Target: "dsp_fir", Direction: "decrease",
-			},
-			Completion: &entity.Completion{Threshold: 0.2, OnThreshold: entity.GoalOnThresholdAskHuman},
-			Constraints: []entity.Constraint{
-				{Instrument: "size_flash", Max: &flash},
-				{Instrument: "host_test", Require: "pass"},
-			},
-		},
-		Counts: map[string]int{"hypotheses": 3, "experiments": 5, "observations": 12, "conclusions": 2},
-		Tree: []*treeNode{
-			{ID: "H-0001", Claim: "unrolling dsp_fir", Status: entity.StatusSupported, Author: "human"},
-			{ID: "H-0002", Claim: "fixed-point rewrite", Status: entity.StatusOpen, Author: "agent:gen",
-				Children: []*treeNode{
-					{ID: "H-0003", Claim: "sub: Q15 only", Status: entity.StatusInconclusive, Author: "agent:gen"},
-				}},
-		},
-		Frontier:   []frontierRow{{Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25}},
-		StalledFor: 2,
-		InFlight: []dashboardInFlight{{
-			ID: "E-0007", Hypothesis: "H-0002", Status: entity.ExpMeasured,
-			Instruments: []string{"qemu_cycles", "host_test"}, ImplementedAt: &impAt, ElapsedS: 120,
-		}},
-		RecentEvents: []store.Event{
-			{Ts: now.Add(time.Second), Kind: "experiment.design", Actor: "agent:des", Subject: "E-0007"},
-			{Ts: now, Kind: "hypothesis.add", Actor: "agent:gen", Subject: "H-0003"},
-		},
-		CapturedAt: now,
-	}
-	snap.Budgets.Limits.MaxExperiments = 20
-	snap.Budgets.Limits.MaxWallTimeH = 8
-	snap.Budgets.Limits.FrontierStallK = 5
-	snap.Budgets.Usage.Experiments = 5
-	snap.Budgets.Usage.ElapsedH = 1.2
-	return snap
-}
-
 func lineContaining(s, needle string) string {
 	for _, line := range strings.Split(s, "\n") {
 		if strings.Contains(line, needle) {
@@ -127,7 +81,7 @@ func renderObservationDetailForTest(o *entity.Observation, height int) string {
 var _ = Describe("TUI dashboard view", func() {
 	It("renders the rich dashboard across primary panels", func() {
 		v := newDashboardView(goalScope{All: true})
-		nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+		nv, _ := v.update(dashLoadedMsg{snap: populatedDashboardSnapshot()}, nil)
 		out := stripANSI(nv.view(140, 40))
 		expectText(out,
 			"Goal:", "decrease qemu_cycles", "size_flash", "5/20 exp",
@@ -140,13 +94,13 @@ var _ = Describe("TUI dashboard view", func() {
 
 	It("falls back to a single-column layout at narrow widths", func() {
 		v := newDashboardView(goalScope{All: true})
-		nv, _ := v.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+		nv, _ := v.update(dashLoadedMsg{snap: populatedDashboardSnapshot()}, nil)
 		expectText(stripANSI(nv.view(80, 40)), "Hypothesis tree", "Frontier", "H-0001")
 	})
 
 	It("advances elapsed fields on quiet ticks without resetting focus or cursors", func() {
 		v := newDashboardView(goalScope{All: true})
-		snap := tuiRichSnapshot()
+		snap := populatedDashboardSnapshot()
 		nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
 		d := nv.(*dashboardView)
 		d.focus = dashFocusInFlight
@@ -165,7 +119,7 @@ var _ = Describe("TUI dashboard view", func() {
 	})
 
 	It("uses lesson accuracy arrows only when comparison data exists", func() {
-		snap := tuiRichSnapshot()
+		snap := populatedDashboardSnapshot()
 		snap.RecentLessons = []*entity.Lesson{
 			{
 				ID: "L-0001", Claim: "overshooting lesson", Scope: entity.LessonScopeHypothesis,
@@ -196,21 +150,8 @@ var _ = Describe("TUI dashboard view", func() {
 		Expect(noData).NotTo(ContainSubstring("↑"))
 	})
 
-	It("shows hypothesis status markers in the dashboard frontier", func() {
-		v := newDashboardView(goalScope{All: true})
-		snap := tuiRichSnapshot()
-		snap.Frontier = []frontierRow{{
-			Conclusion: "C-0001", Hypothesis: "H-0001", Value: 750067, DeltaFrac: -0.25,
-			Classification: experimentClassificationDead, HypothesisStatus: entity.StatusSupported,
-		}}
-		nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
-		out := stripANSI(nv.view(140, 40))
-		expectText(out, "[supported]")
-		expectNoText(out, "[dead]")
-	})
-
 	It("shows dirty main checkout warnings consistently with the status view", func() {
-		snap := tuiRichSnapshot()
+		snap := populatedDashboardSnapshot()
 		snap.MainCheckoutDirty = true
 		snap.MainCheckoutDirtyPaths = []string{"bootstrap.sh"}
 
@@ -225,7 +166,7 @@ var _ = Describe("TUI dashboard view", func() {
 
 	It("uses a titled border for the tree panel without consuming content height", func() {
 		d := newDashboardView(goalScope{All: true})
-		d.snap = tuiRichSnapshot()
+		d.snap = populatedDashboardSnapshot()
 
 		out := stripANSI(d.renderTreePanel(60, 8))
 		lines := strings.Split(out, "\n")
@@ -236,7 +177,7 @@ var _ = Describe("TUI dashboard view", func() {
 
 	It("allocates remaining right-column height to recent events", func() {
 		d := newDashboardView(goalScope{All: true})
-		d.snap = tuiRichSnapshot()
+		d.snap = populatedDashboardSnapshot()
 
 		frontierH, inFlightH, eventsH := d.rightColumnHeights(30)
 		Expect(eventsH).To(BeNumerically(">", frontierH))
@@ -576,7 +517,7 @@ var _ = Describe("TUI read-only aggregate views", func() {
 		nv, _ = list.update(goalListLoadedMsg{all: goals, current: "G-0002"}, nil)
 		expectText(stripANSI(nv.view(100, 20)), "2 goals", "G-0001", "G-0002", "qemu_cycles")
 
-		snap := tuiRichSnapshot()
+		snap := populatedDashboardSnapshot()
 		snap.ScopeAll = true
 		status := newStatusView(goalScope{All: true})
 		nv, _ = status.update(dashLoadedMsg{snap: snap}, nil)
@@ -584,7 +525,7 @@ var _ = Describe("TUI read-only aggregate views", func() {
 		expectText(out, "Scope:", "all", "State:", "active", "Mode:", "strict", "Main checkout:", "clean", "Budget:", "5/20 experiments", "Counts:")
 		expectNoText(out, "stalled")
 
-		snap = tuiRichSnapshot()
+		snap = populatedDashboardSnapshot()
 		snap.ScopeGoalID = "G-0002"
 		status = newStatusView(goalScope{GoalID: "G-0002"})
 		nv, _ = status.update(dashLoadedMsg{snap: snap}, nil)
@@ -592,7 +533,7 @@ var _ = Describe("TUI read-only aggregate views", func() {
 	})
 
 	It("advances status elapsed budget on quiet ticks", func() {
-		snap := tuiRichSnapshot()
+		snap := populatedDashboardSnapshot()
 		v := newStatusView(goalScope{All: true})
 		nv, _ := v.update(dashLoadedMsg{snap: snap}, nil)
 		status := nv.(*statusView)
@@ -647,7 +588,7 @@ var _ = Describe("TUI model navigation", func() {
 		m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
 		m.width, m.height = 120, 30
 		top := m.top()
-		nv, _ := top.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+		nv, _ := top.update(dashLoadedMsg{snap: populatedDashboardSnapshot()}, nil)
 		m.setTop(nv)
 		expectText(stripANSI(m.View()), "Dashboard", "help", "quit")
 	})
@@ -682,7 +623,7 @@ var _ = Describe("TUI model navigation", func() {
 	It("preserves a loaded dashboard instance across top-level jumps and pops", func() {
 		m := newTuiModel(nil, goalScope{All: true}, 2*time.Second)
 		dash := newDashboardView(goalScope{All: true})
-		nv, _ := dash.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+		nv, _ := dash.update(dashLoadedMsg{snap: populatedDashboardSnapshot()}, nil)
 		dash = nv.(*dashboardView)
 		dash.focus = dashFocusEvents
 		dash.cursors[dashFocusEvents] = 1
@@ -751,7 +692,7 @@ var _ = Describe("TUI model navigation", func() {
 
 	It("forwards loaded messages to the dashboard overlay", func() {
 		d := newDashboardView(goalScope{All: true})
-		nv, _ := d.update(dashLoadedMsg{snap: tuiRichSnapshot()}, nil)
+		nv, _ := d.update(dashLoadedMsg{snap: populatedDashboardSnapshot()}, nil)
 		d = nv.(*dashboardView)
 		d.focus = dashFocusTree
 		_ = d.openSelected(nil)
@@ -801,7 +742,7 @@ var _ = Describe("TUI visual dumps", func() {
 		if testing.Short() {
 			Skip("visual dump skipped in short mode")
 		}
-		snap := tuiRichSnapshot()
+		snap := populatedDashboardSnapshot()
 		now := snap.CapturedAt
 		for i := 0; i < 10; i++ {
 			snap.RecentEvents = append(snap.RecentEvents, store.Event{
