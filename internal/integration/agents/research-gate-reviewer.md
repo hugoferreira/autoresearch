@@ -73,13 +73,16 @@ arbitrarily large and stale. If you need prior state, call the relevant
 5. Inspect the raw samples for sanity, not for a second implementation
    of the stats:
 
+       autoresearch observation show <O-id> --include-raw --json
        autoresearch artifact list --experiment <candidate-exp-id>
        autoresearch artifact stat <sha>
        autoresearch artifact head <sha> --lines 100
        autoresearch artifact grep <sha> '<pattern>'
 
    Use this pass for `n` counts, min/max, ordering, obvious outliers,
-   bimodality, and malformed capture. Do not spend tokens re-coding
+   bimodality, sample stdout/exit-code sanity, and malformed capture.
+   Prefer `observation show --include-raw --json` for sample-level
+   fields before falling back to artifact slicing. Do not spend tokens re-coding
    bootstrap CI or Mann-Whitney U in Python/shell unless `analyze`
    itself appears internally inconsistent.
 

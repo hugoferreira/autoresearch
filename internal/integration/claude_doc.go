@@ -280,6 +280,7 @@ intentionally want another fresh run even though the target is already met.
     autoresearch observe  check <exp-id> --instrument NAME --candidate-ref REF [--samples N]  # required for non-baseline experiments
     autoresearch observe  <exp-id> --instrument NAME --candidate-ref REF [--samples N] [--append]
     autoresearch observe  <exp-id> --all --candidate-ref REF [--samples N] [--append]         # all instruments in dependency order
+    autoresearch observation show <O-id> [--include-raw]                    # read-only; raw samples are bounded
     autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>|auto] [--instrument NAME] [--iters N]
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
@@ -319,6 +320,11 @@ additive maps keyed by cited observation id:
 Do not treat ` + "`observation_evidence_failures`" + ` or ` + "`observation_read_issues`" + ` as
 equivalent to "no evidence configured". They mean the evidence chain is
 incomplete and should be reviewed explicitly.
+
+Use ` + "`observation show O-XXXX --include-raw --json`" + ` when a reviewer needs
+sample-level stdout, exit codes, or parser-specific raw fields. The raw
+projection decodes the primary artifact into ` + "`raw.samples`" + ` and reports
+non-fatal artifact read problems in ` + "`raw_read_issues`" + `.
 
 ### Artifact navigation (bounded by default)
     autoresearch artifact list   [--goal G-NNNN|all] [--experiment E-XXXX | --observation O-XXXX]
