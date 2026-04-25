@@ -58,9 +58,7 @@ var _ = Describe("analyze command", func() {
 		)
 		impl := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp.ID)
 
-		writeScenarioMetrics(impl.Worktree, "90\n", "900\n")
-		gitCommitAll(impl.Worktree, "candidate a")
-		candidateRef := gitCreateCandidateRef(impl.Worktree, "candidate/analyze-ambiguous-baseline")
+		candidateRef := commitScenarioMetricsCandidate(impl.Worktree, "candidate/analyze-ambiguous-baseline", "candidate a", "90\n", "900\n")
 		runCLIJSON[observeRecordJSON](dir,
 			"observe", exp.ID,
 			"--instrument", "timing",

@@ -116,9 +116,7 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 			"--instruments", "timing,binary_size,host_test",
 		)
 		impl1 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp1.ID)
-		writeScenarioMetrics(impl1.Worktree, "80\n", "900\n")
-		gitCommitAll(impl1.Worktree, "improve timing")
-		candidateRef1 := gitCreateCandidateRef(impl1.Worktree, "candidate/lifecycle-e1")
+		candidateRef1 := commitScenarioMetricsCandidate(impl1.Worktree, "candidate/lifecycle-e1", "improve timing", "80\n", "900\n")
 
 		obs1 := runCLIJSON[cliObserveAllResponse](dir, "observe", exp1.ID, "--all", "--candidate-ref", candidateRef1)
 		analyze1 := runCLIJSON[cliAnalyzeResponse](dir, "analyze", exp1.ID, "--candidate-ref", candidateRef1, "--baseline", baseline.ID)
@@ -151,9 +149,7 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 			"--instruments", "timing,binary_size,host_test",
 		)
 		impl2 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp2.ID)
-		writeScenarioMetrics(impl2.Worktree, "95\n", "900\n")
-		gitCommitAll(impl2.Worktree, "small tweak")
-		candidateRef2 := gitCreateCandidateRef(impl2.Worktree, "candidate/lifecycle-e2")
+		candidateRef2 := commitScenarioMetricsCandidate(impl2.Worktree, "candidate/lifecycle-e2", "small tweak", "95\n", "900\n")
 
 		obs2 := runCLIJSON[cliObserveAllResponse](dir, "observe", exp2.ID, "--all", "--candidate-ref", candidateRef2)
 		runCLIJSON[cliIDResponse](dir,
@@ -289,9 +285,7 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 			"--instruments", "timing",
 		)
 		impl2 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp2.ID)
-		writeScenarioMetrics(impl2.Worktree, "95\n", "900\n")
-		gitCommitAll(impl2.Worktree, "small tweak")
-		candidateRef2 := gitCreateCandidateRef(impl2.Worktree, "candidate/evidence-e2")
+		candidateRef2 := commitScenarioMetricsCandidate(impl2.Worktree, "candidate/evidence-e2", "small tweak", "95\n", "900\n")
 		obs2 := runCLIJSON[cliIDResponse](dir, "observe", exp2.ID, "--instrument", "timing", "--candidate-ref", candidateRef2)
 		concl2 := runCLIJSON[cliIDResponse](dir,
 			"conclude", hyp2.ID,

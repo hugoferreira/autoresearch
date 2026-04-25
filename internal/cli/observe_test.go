@@ -356,9 +356,7 @@ var _ = Describe("observe command", func() {
 				"--constraint-max", "binary_size=1000",
 				"--constraint-require", "host_test=pass",
 			)
-			writeScenarioMetrics(scenario.Worktree, "80\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate")
-			candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/all-a")
+			candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/all-a", "candidate", "80\n", "900\n")
 
 			first := runCLIJSON[cliObserveAllResponse](dir, "observe", scenario.ExpID, "--all", "--candidate-ref", candidateRef)
 			Expect(first.Observations).To(HaveLen(3))

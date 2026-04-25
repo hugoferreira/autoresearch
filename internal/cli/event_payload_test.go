@@ -151,9 +151,7 @@ var _ = Describe("event payloads", func() {
 			"--instruments", "timing",
 		)
 		impl := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp.ID)
-		writeScenarioMetrics(impl.Worktree, "80\n", "900\n")
-		gitCommitAll(impl.Worktree, "improve timing")
-		candidateRef := gitCreateCandidateRef(impl.Worktree, "candidate/event-timing")
+		candidateRef := commitScenarioMetricsCandidate(impl.Worktree, "candidate/event-timing", "improve timing", "80\n", "900\n")
 		runCLI(dir, "observe", exp.ID, "--instrument", "timing", "--candidate-ref", candidateRef)
 
 		s, err := store.Open(dir)
