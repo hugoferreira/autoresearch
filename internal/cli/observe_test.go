@@ -156,10 +156,18 @@ var _ = Describe("observe command", func() {
 	})
 
 	Describe("sample accounting", func() {
-		It("skips recording when existing samples already satisfy the target", func() {
-			dir, s := setupObserveFixture()
-			candidateRef := gitCreateCandidateRef(dir, "candidate/e-0001-a1")
+		var (
+			dir          string
+			s            *store.Store
+			candidateRef string
+		)
 
+		BeforeEach(func() {
+			dir, s = setupObserveFixture()
+			candidateRef = gitCreateCandidateRef(dir, "candidate/e-0001-a1")
+		})
+
+		It("skips recording when existing samples already satisfy the target", func() {
 			first := runCLIJSON[observeRecordJSON](dir, "observe", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef)
 			Expect(first.Observation.Samples).To(Equal(5))
 
@@ -172,9 +180,6 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("tops up only the samples needed to reach an explicit target", func() {
-			dir, s := setupObserveFixture()
-			candidateRef := gitCreateCandidateRef(dir, "candidate/e-0001-a1")
-
 			runCLIJSON[observeRecordJSON](dir, "observe", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef)
 			resp := runCLIJSON[observeRecordJSON](dir, "observe", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef, "--samples", "7")
 
@@ -193,9 +198,6 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("appends a full additional run when requested", func() {
-			dir, s := setupObserveFixture()
-			candidateRef := gitCreateCandidateRef(dir, "candidate/e-0001-a1")
-
 			runCLIJSON[observeRecordJSON](dir, "observe", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef)
 			resp := runCLIJSON[observeRecordJSON](dir, "observe", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef, "--append")
 
@@ -208,9 +210,6 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("reports current, minimum, and requested sample counts from observe check", func() {
-			dir, _ := setupObserveFixture()
-			candidateRef := gitCreateCandidateRef(dir, "candidate/e-0001-a1")
-
 			runCLIJSON[observeRecordJSON](dir, "observe", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef)
 			resp := runCLIJSON[observeCheckJSON](dir, "observe", "check", "E-0001", "--instrument", "timing", "--candidate-ref", candidateRef, "--samples", "7")
 
@@ -235,86 +234,93 @@ var _ = Describe("observe command", func() {
 			Expect(err).To(MatchError(ContainSubstring("requires --candidate-ref")))
 		})
 
-		It("ignores observations from abandoned reset attempts", func() {
-			dir, scenario := setupTimingObserveScenario()
-			candidateRef1 := gitCreateCandidateRef(scenario.Worktree, "candidate/reset-a1")
-			first := runCLIJSON[observeRecordJSON](dir,
-				"observe", scenario.ExpID,
-				"--instrument", "timing",
-				"--candidate-ref", candidateRef1,
-				"--allow-unchanged",
+		Describe("recorded candidate scopes", func() {
+			var (
+				dir      string
+				scenario observeScenarioExperiment
 			)
-			Expect(first.ID).NotTo(BeEmpty())
 
-			runCLI(dir, "experiment", "reset", scenario.ExpID, "--reason", "retry measurement")
-			impl2 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", scenario.ExpID)
-			candidateRef2 := gitCreateCandidateRef(impl2.Worktree, "candidate/reset-a2")
+			BeforeEach(func() {
+				dir, scenario = setupTimingObserveScenario()
+			})
 
-			check := runCLIJSON[observeCheckJSON](dir,
-				"observe", "check", scenario.ExpID,
-				"--instrument", "timing",
-				"--candidate-ref", candidateRef2,
-			)
-			Expect(check.Check.CurrentSamples).To(Equal(0))
-			Expect(check.Check.TargetSatisfied).To(BeFalse())
+			It("ignores observations from abandoned reset attempts", func() {
+				candidateRef1 := gitCreateCandidateRef(scenario.Worktree, "candidate/reset-a1")
+				first := runCLIJSON[observeRecordJSON](dir,
+					"observe", scenario.ExpID,
+					"--instrument", "timing",
+					"--candidate-ref", candidateRef1,
+					"--allow-unchanged",
+				)
+				Expect(first.ID).NotTo(BeEmpty())
 
-			second := runCLIJSON[observeRecordJSON](dir,
-				"observe", scenario.ExpID,
-				"--instrument", "timing",
-				"--candidate-ref", candidateRef2,
-				"--allow-unchanged",
-			)
-			Expect(second.ID).NotTo(Equal(first.ID))
+				runCLI(dir, "experiment", "reset", scenario.ExpID, "--reason", "retry measurement")
+				impl2 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", scenario.ExpID)
+				candidateRef2 := gitCreateCandidateRef(impl2.Worktree, "candidate/reset-a2")
 
-			s, err := store.Open(dir)
-			Expect(err).NotTo(HaveOccurred())
-			expEntity, err := s.ReadExperiment(scenario.ExpID)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(expEntity.Attempt).To(Equal(2))
-		})
+				check := runCLIJSON[observeCheckJSON](dir,
+					"observe", "check", scenario.ExpID,
+					"--instrument", "timing",
+					"--candidate-ref", candidateRef2,
+				)
+				Expect(check.Check.CurrentSamples).To(Equal(0))
+				Expect(check.Check.TargetSatisfied).To(BeFalse())
 
-		It("ignores observations when the candidate commit changes", func() {
-			dir, scenario := setupTimingObserveScenario()
-			candidateRefA := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/commit-a", "candidate a", "90\n", "900\n")
-			runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRefA)
+				second := runCLIJSON[observeRecordJSON](dir,
+					"observe", scenario.ExpID,
+					"--instrument", "timing",
+					"--candidate-ref", candidateRef2,
+					"--allow-unchanged",
+				)
+				Expect(second.ID).NotTo(Equal(first.ID))
 
-			candidateRefB := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/commit-b", "candidate b", "85\n", "900\n")
+				s, err := store.Open(dir)
+				Expect(err).NotTo(HaveOccurred())
+				expEntity, err := s.ReadExperiment(scenario.ExpID)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(expEntity.Attempt).To(Equal(2))
+			})
 
-			check := runCLIJSON[observeCheckJSON](dir,
-				"observe", "check", scenario.ExpID,
-				"--instrument", "timing",
-				"--candidate-ref", candidateRefB,
-			)
-			Expect(check.Check.CurrentSamples).To(Equal(0))
-			Expect(check.Check.TargetSatisfied).To(BeFalse())
-		})
+			It("ignores observations when the candidate commit changes", func() {
+				candidateRefA := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/commit-a", "candidate a", "90\n", "900\n")
+				runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRefA)
 
-		It("does not reuse observations recorded under a different candidate ref, even for the same SHA", func() {
-			dir, scenario := setupTimingObserveScenario()
-			candidateRefA := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/ref-a", "candidate a", "90\n", "900\n")
-			runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRefA)
-			candidateRefB := gitCreateCandidateRef(scenario.Worktree, "candidate/ref-b")
+				candidateRefB := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/commit-b", "candidate b", "85\n", "900\n")
 
-			check := runCLIJSON[observeCheckJSON](dir,
-				"observe", "check", scenario.ExpID,
-				"--instrument", "timing",
-				"--candidate-ref", candidateRefB,
-			)
-			Expect(check.Check.CurrentSamples).To(Equal(0))
-			Expect(check.Check.TargetSatisfied).To(BeFalse())
-		})
+				check := runCLIJSON[observeCheckJSON](dir,
+					"observe", "check", scenario.ExpID,
+					"--instrument", "timing",
+					"--candidate-ref", candidateRefB,
+				)
+				Expect(check.Check.CurrentSamples).To(Equal(0))
+				Expect(check.Check.TargetSatisfied).To(BeFalse())
+			})
 
-		It("refuses measurement when HEAD no longer matches the supplied candidate ref", func() {
-			dir, scenario := setupTimingObserveScenario()
-			candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/mismatch-a", "candidate a", "90\n", "900\n")
-			commitScenarioMetricsCandidate(scenario.Worktree, "candidate/mismatch-b", "candidate b", "85\n", "900\n")
+			It("does not reuse observations recorded under a different candidate ref, even for the same SHA", func() {
+				candidateRefA := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/ref-a", "candidate a", "90\n", "900\n")
+				runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRefA)
+				candidateRefB := gitCreateCandidateRef(scenario.Worktree, "candidate/ref-b")
 
-			_, _, err := runCLIResult(dir,
-				"observe", scenario.ExpID,
-				"--instrument", "timing",
-				"--candidate-ref", candidateRef,
-			)
-			Expect(err).To(MatchError(ContainSubstring("does not match --candidate-ref")))
+				check := runCLIJSON[observeCheckJSON](dir,
+					"observe", "check", scenario.ExpID,
+					"--instrument", "timing",
+					"--candidate-ref", candidateRefB,
+				)
+				Expect(check.Check.CurrentSamples).To(Equal(0))
+				Expect(check.Check.TargetSatisfied).To(BeFalse())
+			})
+
+			It("refuses measurement when HEAD no longer matches the supplied candidate ref", func() {
+				candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/mismatch-a", "candidate a", "90\n", "900\n")
+				commitScenarioMetricsCandidate(scenario.Worktree, "candidate/mismatch-b", "candidate b", "85\n", "900\n")
+
+				_, _, err := runCLIResult(dir,
+					"observe", scenario.ExpID,
+					"--instrument", "timing",
+					"--candidate-ref", candidateRef,
+				)
+				Expect(err).To(MatchError(ContainSubstring("does not match --candidate-ref")))
+			})
 		})
 	})
 
