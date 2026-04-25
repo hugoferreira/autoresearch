@@ -14,59 +14,43 @@ var _ = Describe("conclusion show JSON", func() {
 
 	It("joins artifacts, evidence failures, and read issues for cited observations", func() {
 		dir, s := createCLIStoreDir()
+		now := time.Now().UTC()
+		writeObservation := func(id string, value float64, artifacts []entity.Artifact, failures []entity.EvidenceFailure) {
+			GinkgoHelper()
+			Expect(s.WriteObservation(&entity.Observation{
+				ID:               id,
+				Experiment:       "E-0001",
+				Instrument:       "timing",
+				MeasuredAt:       now,
+				Value:            value,
+				Unit:             "ns",
+				Samples:          1,
+				Artifacts:        artifacts,
+				EvidenceFailures: failures,
+				Command:          "echo cycles",
+				Author:           "test",
+			})).To(Succeed())
+		}
 
-		Expect(s.WriteObservation(&entity.Observation{
-			ID:         "O-0001",
-			Experiment: "E-0001",
-			Instrument: "timing",
-			MeasuredAt: time.Now().UTC(),
-			Value:      100,
-			Unit:       "ns",
-			Samples:    1,
-			Artifacts: []entity.Artifact{{
-				Name:  "scalar",
-				SHA:   "abc123",
-				Path:  "artifacts/ab/c123/scalar.json",
-				Bytes: 42,
-				Mime:  "application/json",
-			}},
-			Command: "echo cycles: 100",
-			Author:  "test",
-		})).To(Succeed())
-		Expect(s.WriteObservation(&entity.Observation{
-			ID:         "O-0002",
-			Experiment: "E-0001",
-			Instrument: "timing",
-			MeasuredAt: time.Now().UTC(),
-			Value:      101,
-			Unit:       "ns",
-			Samples:    1,
-			Command:    "echo cycles: 101",
-			Author:     "test",
-		})).To(Succeed())
-		Expect(s.WriteObservation(&entity.Observation{
-			ID:         "O-0003",
-			Experiment: "E-0001",
-			Instrument: "timing",
-			MeasuredAt: time.Now().UTC(),
-			Value:      102,
-			Unit:       "ns",
-			Samples:    1,
-			Artifacts: []entity.Artifact{{
-				Name:  "evidence/mechanism",
-				SHA:   "def456",
-				Path:  "artifacts/de/f456/mechanism.txt",
-				Bytes: 64,
-				Mime:  "text/plain",
-			}},
-			EvidenceFailures: []entity.EvidenceFailure{{
-				Name:     "profile",
-				ExitCode: 7,
-				Error:    "tool crashed",
-			}},
-			Command: "echo cycles: 102",
-			Author:  "test",
-		})).To(Succeed())
+		writeObservation("O-0001", 100, []entity.Artifact{{
+			Name:  "scalar",
+			SHA:   "abc123",
+			Path:  "artifacts/ab/c123/scalar.json",
+			Bytes: 42,
+			Mime:  "application/json",
+		}}, nil)
+		writeObservation("O-0002", 101, nil, nil)
+		writeObservation("O-0003", 102, []entity.Artifact{{
+			Name:  "evidence/mechanism",
+			SHA:   "def456",
+			Path:  "artifacts/de/f456/mechanism.txt",
+			Bytes: 64,
+			Mime:  "text/plain",
+		}}, []entity.EvidenceFailure{{
+			Name:     "profile",
+			ExitCode: 7,
+			Error:    "tool crashed",
+		}})
 		Expect(s.WriteConclusion(&entity.Conclusion{
 			ID:               "C-0001",
 			Hypothesis:       "H-0001",
@@ -96,18 +80,25 @@ var _ = Describe("conclusion show JSON", func() {
 			StatTest:  "mann_whitney_u",
 			Strict:    entity.Strict{Passed: true},
 			Author:    "agent:orchestrator",
-			CreatedAt: time.Now().UTC(),
+			CreatedAt: now,
 		})).To(Succeed())
 
 		got := runCLIJSON[conclusionShowJSON](dir, "conclusion", "show", "C-0001")
 		Expect(got.Conclusion).NotTo(BeNil())
 		Expect(got.Observations).To(Equal([]string{"O-0001", "O-0002", "O-0003", "O-9999"}))
-		Expect(got.ObservationArtifacts).To(HaveKeyWithValue("O-0001", ConsistOf(HaveField("Name", "scalar"))))
+		Expect(got.ObservationArtifacts).To(HaveKeyWithValue("O-0001", ConsistOf(SatisfyAll(
+			HaveField("Name", "scalar"),
+			HaveField("Bytes", int64(42)),
+		))))
 		Expect(got.ObservationArtifacts).To(HaveKeyWithValue("O-0002", BeEmpty()))
-		Expect(got.ObservationArtifacts).To(HaveKeyWithValue("O-0003", ConsistOf(HaveField("Name", "evidence/mechanism"))))
-		Expect(got.ObservationEvidenceFailures["O-0003"]).To(HaveLen(1))
-		Expect(got.ObservationEvidenceFailures["O-0003"][0].Name).To(Equal("profile"))
-		Expect(got.ObservationEvidenceFailures["O-0003"][0].ExitCode).To(Equal(7))
+		Expect(got.ObservationArtifacts).To(HaveKeyWithValue("O-0003", ConsistOf(SatisfyAll(
+			HaveField("Name", "evidence/mechanism"),
+			HaveField("Bytes", int64(64)),
+		))))
+		Expect(got.ObservationEvidenceFailures).To(HaveKeyWithValue("O-0003", ConsistOf(SatisfyAll(
+			HaveField("Name", "profile"),
+			HaveField("ExitCode", 7),
+		))))
 		Expect(got.ObservationReadIssues).To(HaveKeyWithValue("O-9999", "observation not found"))
 		Expect(got.ObservationReadIssues).NotTo(HaveKey("O-0001"))
 	})

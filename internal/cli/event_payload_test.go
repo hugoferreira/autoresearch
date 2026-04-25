@@ -96,42 +96,12 @@ var _ = Describe("event payloads", func() {
 	})
 
 	It("includes evidence failures and candidate scope in observation events", func() {
-		dir := gitInitScenarioRepo()
-		_, err := store.Create(dir, store.Config{
-			Build:     store.CommandSpec{Command: "true"},
-			Test:      store.CommandSpec{Command: "true"},
-			Worktrees: store.WorktreesConfig{Root: GinkgoT().TempDir()},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
+		dir := setupObserveScenarioStore()
 		registerScenarioTimingInstrument(dir, "broken=echo nope >&2; exit 7")
 		registerScenarioSupportInstruments(dir)
-		goal := runCLIJSON[cliIDResponse](dir,
-			"goal", "set",
-			"--objective-instrument", "timing",
-			"--objective-target", "kernel",
-			"--objective-direction", "decrease",
-			"--constraint-require", "host_test=pass",
-		)
-		Expect(goal.ID).NotTo(BeEmpty())
-
-		hyp := runCLIJSON[cliIDResponse](dir,
-			"hypothesis", "add",
-			"--claim", "tighten the hot loop",
-			"--predicts-instrument", "timing",
-			"--predicts-target", "kernel",
-			"--predicts-direction", "decrease",
-			"--predicts-min-effect", "0.1",
-			"--kill-if", "tests fail",
-		)
-		exp := runCLIJSON[cliIDResponse](dir,
-			"experiment", "design", hyp.ID,
-			"--baseline", "HEAD",
-			"--instruments", "timing",
-		)
-		impl := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp.ID)
-		candidateRef := commitScenarioMetricsCandidate(impl.Worktree, "candidate/event-timing", "improve timing", "80\n", "900\n")
-		runCLI(dir, "observe", exp.ID, "--instrument", "timing", "--candidate-ref", candidateRef)
+		scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-require", "host_test=pass")
+		candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/event-timing", "improve timing", "80\n", "900\n")
+		runCLI(dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRef)
 
 		s, err := store.Open(dir)
 		Expect(err).NotTo(HaveOccurred())

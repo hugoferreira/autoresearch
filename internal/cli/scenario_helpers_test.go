@@ -99,7 +99,8 @@ func setupTimingObserveScenario() (string, observeScenarioExperiment) {
 func commitScenarioMetricsCandidate(worktree, refName, message, timing, size string) string {
 	GinkgoHelper()
 	writeScenarioMetrics(worktree, timing, size)
-	gitCommitAll(worktree, message)
+	gitRun(worktree, "add", "timing.txt", "size.txt")
+	gitRun(worktree, "commit", "-m", message)
 	return gitCreateCandidateRef(worktree, refName)
 }
 
@@ -175,12 +176,6 @@ func writeScenarioMetrics(dir, timing, size string) {
 func writeScenarioMechanism(dir, content string) {
 	GinkgoHelper()
 	Expect(os.WriteFile(filepath.Join(dir, "mechanism.txt"), []byte(content), 0o644)).To(Succeed())
-}
-
-func gitCommitAll(dir, msg string) {
-	GinkgoHelper()
-	gitRun(dir, "add", "timing.txt", "size.txt")
-	gitRun(dir, "commit", "-m", msg)
 }
 
 func gitCreateCandidateRef(dir, ref string) string {
