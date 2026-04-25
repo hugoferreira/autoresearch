@@ -30,12 +30,13 @@ func installClaudeCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		entries := claudeAllowEntries(trustShell)
+		allowEntries := claudeAllowEntries(trustShell)
+		denyEntries := claudeDenyEntries()
 		var settingsRes integration.ClaudeSettingsResult
 		if globalDryRun {
-			settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
+			settingsRes, err = integration.PreviewClaudeSettingsPermissions(globalProjectDir, allowEntries, denyEntries)
 		} else {
-			settingsRes, err = integration.EnsureClaudeSettings(globalProjectDir, entries)
+			settingsRes, err = integration.EnsureClaudeSettingsPermissions(globalProjectDir, allowEntries, denyEntries)
 		}
 		if err != nil {
 			return fmt.Errorf("update claude settings: %w", err)
@@ -86,12 +87,13 @@ func installClaudeDocsCmd() *cobra.Command {
 			}
 
 			trustShell, _ := cmd.Flags().GetBool("trust-shell")
-			entries := claudeAllowEntries(trustShell)
+			allowEntries := claudeAllowEntries(trustShell)
+			denyEntries := claudeDenyEntries()
 			var settingsRes integration.ClaudeSettingsResult
 			if globalDryRun {
-				settingsRes, err = integration.PreviewClaudeSettings(globalProjectDir, entries)
+				settingsRes, err = integration.PreviewClaudeSettingsPermissions(globalProjectDir, allowEntries, denyEntries)
 			} else {
-				settingsRes, err = integration.EnsureClaudeSettings(globalProjectDir, entries)
+				settingsRes, err = integration.EnsureClaudeSettingsPermissions(globalProjectDir, allowEntries, denyEntries)
 			}
 			if err != nil {
 				return fmt.Errorf("update claude settings: %w", err)
@@ -174,11 +176,13 @@ updated prompts.`,
 func describeClaudeSettingsAction(r integration.ClaudeSettingsResult) string {
 	switch {
 	case r.Created:
-		return fmt.Sprintf("created %s with %d allow entry (entries=%v)", r.Path, len(r.Added), r.Added)
+		return fmt.Sprintf("created %s with %d allow and %d deny entry (allow=%v deny=%v)",
+			r.Path, len(r.AddedAllow), len(r.AddedDeny), r.AddedAllow, r.AddedDeny)
 	case r.Updated:
-		return fmt.Sprintf("added %d allow entry to %s (entries=%v)", len(r.Added), r.Path, r.Added)
+		return fmt.Sprintf("added %d allow and %d deny entry to %s (allow=%v deny=%v)",
+			len(r.AddedAllow), len(r.AddedDeny), r.Path, r.AddedAllow, r.AddedDeny)
 	case r.AlreadyOK:
-		return fmt.Sprintf("%s already has the autoresearch allow entry", r.Path)
+		return fmt.Sprintf("%s already has the autoresearch Claude permissions", r.Path)
 	default:
 		return "no change to " + r.Path
 	}
@@ -195,9 +199,11 @@ func claudeSettingsResultToMap(r integration.ClaudeSettingsResult) map[string]an
 		action = "already_ok"
 	}
 	return map[string]any{
-		"path":   r.Path,
-		"action": action,
-		"added":  r.Added,
+		"path":              r.Path,
+		"action":            action,
+		"added_permissions": r.AddedPermissions,
+		"added_allow":       r.AddedAllow,
+		"added_deny":        r.AddedDeny,
 	}
 }
 
@@ -215,6 +221,10 @@ func claudeAllowEntries(trustShell bool) []string {
 		}
 	}
 	return entries
+}
+
+func claudeDenyEntries() []string {
+	return []string{integration.ClaudeHarnessToolResultsDenyEntry}
 }
 
 // writeClaudeDoc writes .claude/autoresearch.md under projectDir.

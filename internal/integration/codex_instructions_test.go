@@ -43,6 +43,9 @@ var _ = Describe("Codex AGENTS.md instructions", func() {
 			"main checkout as read-only during research",
 			"main_checkout_dirty_paths",
 			"bootstrap/harness files",
+			"Never read agent runtime harness caches",
+			"~/.claude/projects/",
+			"~/.codex/",
 		} {
 			Expect(text).To(ContainSubstring(needle))
 		}

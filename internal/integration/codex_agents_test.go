@@ -80,6 +80,15 @@ var _ = Describe("Codex embedded agents", func() {
 		}
 	})
 
+	It("propagates runtime harness-cache discipline", func() {
+		for _, a := range mustEmbeddedCodexAgents() {
+			content := string(a.Content)
+			for _, needle := range harnessCacheNeedles() {
+				Expect(content).To(ContainSubstring(needle), "codex %s brief", a.Name)
+			}
+		}
+	})
+
 	It("keeps delegation handoff responsibility with the parent session", func() {
 		orchestrator := agentContentByName(mustEmbeddedCodexAgents())["research-orchestrator"]
 		Expect(orchestrator).NotTo(BeEmpty())

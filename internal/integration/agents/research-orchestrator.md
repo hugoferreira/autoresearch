@@ -39,6 +39,17 @@ executing the command:
 Only then use constructs that shell supports, such as `[[ "$x" == y ]]`
 in shells that implement `[[ ... ]]`.
 
+## Harness-cache discipline
+
+Never read agent runtime harness caches for research state. This includes
+Claude Code caches under `~/.claude/projects/` (especially
+`tool-results/`) and Codex session/log caches under `~/.codex/`. Do not
+use Read, Grep, Glob, or shell commands to inspect them. They can be
+arbitrarily large and stale. If you need prior state, call the relevant
+`autoresearch` read verb (`cycle-context`, `lesson list`, `experiment
+show`, `conclusion show`, `artifact ...`, etc.); those are the
+authoritative surfaces.
+
 ## Before each cycle
 
 Read in this order, every time. Do not skip steps — the snapshot and

@@ -175,6 +175,9 @@ autoresearch dashboard tui
 shell commands (make, gcc, git, etc.) in experiment worktrees without prompts.
 Omit it for a tighter permission model where each shell command is approved
 individually. You can add it later with `autoresearch install claude --trust-shell`.
+Claude installs also add a narrow `Read(~/.claude/projects/**/tool-results/**)`
+deny entry so agents do not accidentally inspect stale, oversized Claude
+harness-cache files instead of the authoritative `autoresearch` read surfaces.
 
 `autoresearch init` installs both agent integrations automatically. From that
 point on, stop typing mutating `autoresearch` verbs yourself. Open Claude Code
