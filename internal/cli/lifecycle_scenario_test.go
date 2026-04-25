@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/bytter/autoresearch/internal/store"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -48,6 +47,13 @@ type cliExperimentListRow struct {
 	HypothesisStatus string `json:"hypothesis_status,omitempty"`
 }
 
+type cliFrontierRow struct {
+	Conclusion       string `json:"conclusion"`
+	Candidate        string `json:"candidate_experiment"`
+	Classification   string `json:"classification"`
+	HypothesisStatus string `json:"hypothesis_status,omitempty"`
+}
+
 type cliFrontierResponse struct {
 	ScopeGoalID    string `json:"scope_goal_id,omitempty"`
 	GoalID         string `json:"goal_id"`
@@ -56,24 +62,14 @@ type cliFrontierResponse struct {
 		Met             bool   `json:"met"`
 		MetByConclusion string `json:"met_by_conclusion,omitempty"`
 	} `json:"goal_assessment"`
-	Frontier []struct {
-		Conclusion       string `json:"conclusion"`
-		Candidate        string `json:"candidate_experiment"`
-		Classification   string `json:"classification"`
-		HypothesisStatus string `json:"hypothesis_status,omitempty"`
-	} `json:"frontier"`
+	Frontier []cliFrontierRow `json:"frontier"`
 }
 
 type cliDashboardResponse struct {
-	ScopeGoalID string         `json:"scope_goal_id,omitempty"`
-	StalledFor  int            `json:"stalled_for"`
-	Counts      map[string]int `json:"counts"`
-	Frontier    []struct {
-		Conclusion       string `json:"conclusion"`
-		Candidate        string `json:"candidate_experiment"`
-		Classification   string `json:"classification"`
-		HypothesisStatus string `json:"hypothesis_status,omitempty"`
-	} `json:"frontier"`
+	ScopeGoalID string           `json:"scope_goal_id,omitempty"`
+	StalledFor  int              `json:"stalled_for"`
+	Counts      map[string]int   `json:"counts"`
+	Frontier    []cliFrontierRow `json:"frontier"`
 }
 
 type cliStatusResponse struct {
@@ -82,50 +78,50 @@ type cliStatusResponse struct {
 	Counts            map[string]int `json:"counts"`
 }
 
+type cliLifecycleFixture struct {
+	GoalID     string
+	BaselineID string
+}
+
+type cliLifecycleCandidate struct {
+	HypothesisID string
+	ExperimentID string
+	Worktree     string
+	CandidateRef string
+}
+
+type cliLifecycleCandidateSpec struct {
+	Claim       string
+	MinEffect   string
+	Instruments string
+	RefName     string
+	Message     string
+	Timing      string
+	Size        string
+	Mechanism   string
+}
+
 var _ = Describe("CLI lifecycle scenarios", func() {
 	BeforeEach(saveGlobals)
 
 	It("keeps read surfaces consistent after an accepted win and a later stall", func() {
 		dir := setupObserveScenarioStore()
 		registerScenarioInstruments(dir)
+		fixture := setupLifecycleFixture(dir)
 
-		goal := runCLIJSON[cliIDResponse](dir,
-			"goal", "set",
-			"--objective-instrument", "timing",
-			"--objective-target", "kernel",
-			"--objective-direction", "decrease",
-			"--success-threshold", "0.1",
-			"--on-success", "stop",
-			"--constraint-max", "binary_size=1000",
-			"--constraint-require", "host_test=pass",
-		)
-		baseline := runCLIJSON[cliIDResponse](dir, "experiment", "baseline")
-
-		hyp1 := runCLIJSON[cliIDResponse](dir,
-			"hypothesis", "add",
-			"--claim", "tighten the hot loop",
-			"--predicts-instrument", "timing",
-			"--predicts-target", "kernel",
-			"--predicts-direction", "decrease",
-			"--predicts-min-effect", "0.1",
-			"--kill-if", "tests fail",
-		)
-		exp1 := runCLIJSON[cliIDResponse](dir,
-			"experiment", "design", hyp1.ID,
-			"--baseline", "HEAD",
-			"--instruments", "timing,binary_size,host_test",
-		)
-		impl1 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp1.ID)
-		candidateRef1 := commitScenarioMetricsCandidate(impl1.Worktree, "candidate/lifecycle-e1", "improve timing", "80\n", "900\n")
-
-		obs1 := runCLIJSON[cliObserveAllResponse](dir, "observe", exp1.ID, "--all", "--candidate-ref", candidateRef1)
-		analyze1 := runCLIJSON[cliAnalyzeResponse](dir, "analyze", exp1.ID, "--candidate-ref", candidateRef1, "--baseline", baseline.ID)
+		win := setupLifecycleCandidate(dir, cliLifecycleCandidateSpec{
+			Claim: "tighten the hot loop", MinEffect: "0.1",
+			RefName: "candidate/lifecycle-e1", Message: "improve timing",
+			Timing: "80\n", Size: "900\n",
+		})
+		obs1 := observeLifecycleCandidate(dir, win)
+		analyze1 := runCLIJSON[cliAnalyzeResponse](dir, "analyze", win.ExperimentID, "--candidate-ref", win.CandidateRef, "--baseline", fixture.BaselineID)
 		Expect(analyze1.Rows).To(HaveLen(3))
 		Expect(analyzeComparisonDeltaFrac(analyze1, "timing")).To(BeNumerically("<", 0))
 		concl1 := runCLIJSON[cliIDResponse](dir,
-			"conclude", hyp1.ID,
+			"conclude", win.HypothesisID,
 			"--verdict", "supported",
-			"--baseline-experiment", baseline.ID,
+			"--baseline-experiment", fixture.BaselineID,
 			"--observations", observeResultID(obs1, "timing"),
 		)
 		runCLIJSON[cliIDResponse](dir,
@@ -134,67 +130,25 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 			"--rationale", "Stats confirmed. Code matches the mechanism. No gaming or metric manipulation was detected.",
 		)
 
-		hyp2 := runCLIJSON[cliIDResponse](dir,
-			"hypothesis", "add",
-			"--claim", "a smaller tweak might still help",
-			"--predicts-instrument", "timing",
-			"--predicts-target", "kernel",
-			"--predicts-direction", "decrease",
-			"--predicts-min-effect", "0.05",
-			"--kill-if", "tests fail",
-		)
-		exp2 := runCLIJSON[cliIDResponse](dir,
-			"experiment", "design", hyp2.ID,
-			"--baseline", "HEAD",
-			"--instruments", "timing,binary_size,host_test",
-		)
-		impl2 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp2.ID)
-		candidateRef2 := commitScenarioMetricsCandidate(impl2.Worktree, "candidate/lifecycle-e2", "small tweak", "95\n", "900\n")
-
-		obs2 := runCLIJSON[cliObserveAllResponse](dir, "observe", exp2.ID, "--all", "--candidate-ref", candidateRef2)
+		stall := setupLifecycleCandidate(dir, cliLifecycleCandidateSpec{
+			Claim: "a smaller tweak might still help", MinEffect: "0.05",
+			RefName: "candidate/lifecycle-e2", Message: "small tweak",
+			Timing: "95\n", Size: "900\n",
+		})
+		obs2 := observeLifecycleCandidate(dir, stall)
 		runCLIJSON[cliIDResponse](dir,
-			"conclude", hyp2.ID,
+			"conclude", stall.HypothesisID,
 			"--verdict", "inconclusive",
-			"--baseline-experiment", baseline.ID,
+			"--baseline-experiment", fixture.BaselineID,
 			"--observations", observeResultID(obs2, "timing"),
 		)
 
-		dead := runCLIJSON[[]cliExperimentListRow](dir, "experiment", "list", "--goal", goal.ID, "--classification", experimentClassificationDead)
+		dead := runCLIJSON[[]cliExperimentListRow](dir, "experiment", "list", "--goal", fixture.GoalID, "--classification", experimentClassificationDead)
 		Expect(dead).To(HaveLen(1))
-		Expect(dead[0].ID).To(Equal(exp1.ID))
+		Expect(dead[0].ID).To(Equal(win.ExperimentID))
 		Expect(dead[0].HypothesisStatus).To(Equal("supported"))
 
-		frontier := runCLIJSON[cliFrontierResponse](dir, "frontier", "--goal", goal.ID)
-		Expect(frontier.ScopeGoalID).To(Equal(goal.ID))
-		Expect(frontier.GoalID).To(Equal(goal.ID))
-		Expect(frontier.GoalAssessment.Met).To(BeTrue())
-		Expect(frontier.GoalAssessment.MetByConclusion).To(Equal(concl1.ID))
-		Expect(frontier.StalledFor).To(Equal(1))
-		Expect(frontier.Frontier).To(HaveLen(1))
-		Expect(frontier.Frontier[0].Candidate).To(Equal(exp1.ID))
-		Expect(frontier.Frontier[0].Conclusion).To(Equal(concl1.ID))
-		Expect(frontier.Frontier[0].Classification).To(Equal(experimentClassificationDead))
-		Expect(frontier.Frontier[0].HypothesisStatus).To(Equal("supported"))
-
-		dashboard := runCLIJSON[cliDashboardResponse](dir, "dashboard", "--goal", goal.ID)
-		Expect(dashboard.ScopeGoalID).To(Equal(goal.ID))
-		Expect(dashboard.StalledFor).To(Equal(frontier.StalledFor))
-		Expect(dashboard.Counts).To(HaveKeyWithValue("hypotheses", 2))
-		Expect(dashboard.Counts).To(HaveKeyWithValue("experiments", 3))
-		Expect(dashboard.Counts).To(HaveKeyWithValue("observations", 9))
-		Expect(dashboard.Counts).To(HaveKeyWithValue("conclusions", 2))
-		Expect(dashboard.Frontier).To(HaveLen(1))
-		Expect(dashboard.Frontier[0].Candidate).To(Equal(exp1.ID))
-		Expect(dashboard.Frontier[0].Conclusion).To(Equal(concl1.ID))
-		Expect(dashboard.Frontier[0].Classification).To(Equal(experimentClassificationDead))
-
-		status := runCLIJSON[cliStatusResponse](dir, "status", "--goal", goal.ID)
-		Expect(status.ScopeGoalID).To(Equal(goal.ID))
-		Expect(status.MainCheckoutDirty).To(BeFalse())
-		Expect(status.Counts).To(HaveKeyWithValue("hypotheses", 2))
-		Expect(status.Counts).To(HaveKeyWithValue("experiments", 3))
-		Expect(status.Counts).To(HaveKeyWithValue("observations", 9))
-		Expect(status.Counts).To(HaveKeyWithValue("conclusions", 2))
+		expectLifecycleReadSurfacesAgree(dir, fixture.GoalID, win.ExperimentID, concl1.ID, 1)
 	})
 
 	It("keeps observation evidence artifacts visible through the conclusion audit chain", func() {
@@ -205,122 +159,144 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 
 		registerScenarioTimingInstrument(dir, "mechanism=cat mechanism.txt")
 		registerScenarioSupportInstruments(dir)
+		fixture := setupLifecycleFixture(dir)
+		candidate := setupLifecycleCandidate(dir, cliLifecycleCandidateSpec{
+			Claim: "tighten the hot loop", MinEffect: "0.1",
+			RefName: "candidate/evidence-e1", Message: "improve timing",
+			Timing: "80\n", Size: "900\n", Mechanism: "candidate trace\n",
+		})
 
-		goal := runCLIJSON[cliIDResponse](dir,
-			"goal", "set",
-			"--objective-instrument", "timing",
-			"--objective-target", "kernel",
-			"--objective-direction", "decrease",
-			"--success-threshold", "0.1",
-			"--on-success", "stop",
-			"--constraint-max", "binary_size=1000",
-			"--constraint-require", "host_test=pass",
-		)
-		baseline := runCLIJSON[cliIDResponse](dir, "experiment", "baseline")
-
-		hyp := runCLIJSON[cliIDResponse](dir,
-			"hypothesis", "add",
-			"--claim", "tighten the hot loop",
-			"--predicts-instrument", "timing",
-			"--predicts-target", "kernel",
-			"--predicts-direction", "decrease",
-			"--predicts-min-effect", "0.1",
-			"--kill-if", "tests fail",
-		)
-		exp := runCLIJSON[cliIDResponse](dir,
-			"experiment", "design", hyp.ID,
-			"--baseline", "HEAD",
-			"--instruments", "timing,binary_size,host_test",
-		)
-		impl := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp.ID)
-		writeScenarioMetrics(impl.Worktree, "80\n", "900\n")
-		writeScenarioMechanism(impl.Worktree, "candidate trace\n")
-		gitRun(impl.Worktree, "add", "timing.txt", "size.txt", "mechanism.txt")
-		gitRun(impl.Worktree, "commit", "-m", "improve timing")
-		candidateRef := gitCreateCandidateRef(impl.Worktree, "candidate/evidence-e1")
-
-		obs := runCLIJSON[cliObserveAllResponse](dir, "observe", exp.ID, "--all", "--candidate-ref", candidateRef)
+		obs := observeLifecycleCandidate(dir, candidate)
 		timingObsID := observeResultID(obs, "timing")
 		concl := runCLIJSON[cliIDResponse](dir,
-			"conclude", hyp.ID,
+			"conclude", candidate.HypothesisID,
 			"--verdict", "supported",
-			"--baseline-experiment", baseline.ID,
+			"--baseline-experiment", fixture.BaselineID,
 			"--observations", timingObsID,
 		)
 		show := runCLIJSON[conclusionShowJSON](dir, "conclusion", "show", concl.ID)
-		arts, ok := show.ObservationArtifacts[timingObsID]
-		Expect(ok).To(BeTrue(), "observation_artifacts missing timing observation %s: %+v", timingObsID, show.ObservationArtifacts)
-		Expect(arts).To(HaveLen(2))
-		foundEvidence := false
-		for _, art := range arts {
-			if art.Name == "evidence/mechanism" {
-				foundEvidence = true
-				Expect(art.SHA).NotTo(BeEmpty())
-				Expect(art.Path).NotTo(BeEmpty())
-				Expect(art.Bytes).To(BeNumerically(">", 0))
-			}
-		}
-		Expect(foundEvidence).To(BeTrue(), "evidence artifact missing from conclusion show: %+v", arts)
-
-		s, err := store.Open(dir)
-		Expect(err).NotTo(HaveOccurred())
-		firstObs, err := s.ReadObservation(timingObsID)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(firstObs.EvidenceFailures).To(BeEmpty())
+		Expect(show.ObservationArtifacts).To(HaveKeyWithValue(timingObsID, ContainElement(SatisfyAll(
+			HaveField("Name", "evidence/mechanism"),
+			HaveField("SHA", Not(BeEmpty())),
+			HaveField("Path", Not(BeEmpty())),
+			HaveField("Bytes", BeNumerically(">", 0)),
+		))))
 
 		registerScenarioTimingInstrument(dir, "broken=echo nope >&2; exit 7")
 
-		hyp2 := runCLIJSON[cliIDResponse](dir,
-			"hypothesis", "add",
-			"--claim", "a smaller tweak might still help",
-			"--predicts-instrument", "timing",
-			"--predicts-target", "kernel",
-			"--predicts-direction", "decrease",
-			"--predicts-min-effect", "0.05",
-			"--kill-if", "tests fail",
-		)
-		exp2 := runCLIJSON[cliIDResponse](dir,
-			"experiment", "design", hyp2.ID,
-			"--baseline", "HEAD",
-			"--instruments", "timing",
-		)
-		impl2 := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp2.ID)
-		candidateRef2 := commitScenarioMetricsCandidate(impl2.Worktree, "candidate/evidence-e2", "small tweak", "95\n", "900\n")
-		obs2 := runCLIJSON[cliIDResponse](dir, "observe", exp2.ID, "--instrument", "timing", "--candidate-ref", candidateRef2)
+		second := setupLifecycleCandidate(dir, cliLifecycleCandidateSpec{
+			Claim: "a smaller tweak might still help", MinEffect: "0.05",
+			Instruments: "timing",
+			RefName:     "candidate/evidence-e2", Message: "small tweak",
+			Timing: "95\n", Size: "900\n",
+		})
+		obs2 := runCLIJSON[cliIDResponse](dir, "observe", second.ExperimentID, "--instrument", "timing", "--candidate-ref", second.CandidateRef)
 		concl2 := runCLIJSON[cliIDResponse](dir,
-			"conclude", hyp2.ID,
+			"conclude", second.HypothesisID,
 			"--verdict", "inconclusive",
-			"--baseline-experiment", baseline.ID,
+			"--baseline-experiment", fixture.BaselineID,
 			"--observations", obs2.ID,
 		)
 
-		secondObs, err := s.ReadObservation(obs2.ID)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(secondObs.EvidenceFailures).To(HaveLen(1))
-		Expect(secondObs.EvidenceFailures[0].Name).To(Equal("broken"))
-		Expect(secondObs.EvidenceFailures[0].ExitCode).To(Equal(7))
-		concl2Entity, err := s.ReadConclusion(concl2.ID)
-		Expect(err).NotTo(HaveOccurred())
-		concl2Entity.Observations = append(concl2Entity.Observations, "O-9999")
-		Expect(s.WriteConclusion(concl2Entity)).To(Succeed())
 		show2 := runCLIJSON[conclusionShowJSON](dir, "conclusion", "show", concl2.ID)
-		Expect(show2.ObservationEvidenceFailures[obs2.ID]).To(HaveLen(1))
-		Expect(show2.ObservationEvidenceFailures[obs2.ID][0].Name).To(Equal("broken"))
-		Expect(show2.ObservationEvidenceFailures[obs2.ID][0].ExitCode).To(Equal(7))
-		Expect(show2.ObservationReadIssues).To(HaveKeyWithValue("O-9999", "observation not found"))
-		e := findLastEvent(s, "observation.record")
-		Expect(e).NotTo(BeNil())
-		payload := decodePayload(e)
-		failures, ok := payload["evidence_failures"].([]any)
-		Expect(ok).To(BeTrue())
-		Expect(failures).To(HaveLen(1))
-		failure, ok := failures[0].(map[string]any)
-		Expect(ok).To(BeTrue())
-		Expect(failure).To(HaveKeyWithValue("name", "broken"))
-		Expect(failure).To(HaveKeyWithValue("exit_code", float64(7)))
-		Expect(goal.ID).NotTo(BeEmpty())
+		Expect(show2.ObservationEvidenceFailures).To(HaveKeyWithValue(obs2.ID, ConsistOf(SatisfyAll(
+			HaveField("Name", "broken"),
+			HaveField("ExitCode", 7),
+		))))
 	})
 })
+
+func expectLifecycleReadSurfacesAgree(dir, goalID, candidateID, conclusionID string, stalledFor int) {
+	GinkgoHelper()
+	frontier := runCLIJSON[cliFrontierResponse](dir, "frontier", "--goal", goalID)
+	dashboard := runCLIJSON[cliDashboardResponse](dir, "dashboard", "--goal", goalID)
+	status := runCLIJSON[cliStatusResponse](dir, "status", "--goal", goalID)
+
+	Expect(frontier.ScopeGoalID).To(Equal(goalID))
+	Expect(frontier.GoalID).To(Equal(goalID))
+	Expect(dashboard.ScopeGoalID).To(Equal(frontier.ScopeGoalID))
+	Expect(status.ScopeGoalID).To(Equal(frontier.ScopeGoalID))
+	Expect(status.MainCheckoutDirty).To(BeFalse())
+
+	Expect(frontier.GoalAssessment.Met).To(BeTrue())
+	Expect(frontier.GoalAssessment.MetByConclusion).To(Equal(conclusionID))
+	Expect(frontier.StalledFor).To(Equal(stalledFor))
+	Expect(dashboard.StalledFor).To(Equal(frontier.StalledFor))
+
+	expectedEntry := cliFrontierRow{
+		Candidate:        candidateID,
+		Conclusion:       conclusionID,
+		Classification:   experimentClassificationDead,
+		HypothesisStatus: "supported",
+	}
+	Expect(frontier.Frontier).To(ConsistOf(expectedEntry))
+	Expect(dashboard.Frontier).To(ConsistOf(frontier.Frontier))
+
+	for key, value := range status.Counts {
+		Expect(dashboard.Counts).To(HaveKeyWithValue(key, value))
+	}
+}
+
+func setupLifecycleFixture(dir string) cliLifecycleFixture {
+	GinkgoHelper()
+	goal := runCLIJSON[cliIDResponse](dir,
+		"goal", "set",
+		"--objective-instrument", "timing",
+		"--objective-target", "kernel",
+		"--objective-direction", "decrease",
+		"--success-threshold", "0.1",
+		"--on-success", "stop",
+		"--constraint-max", "binary_size=1000",
+		"--constraint-require", "host_test=pass",
+	)
+	baseline := runCLIJSON[cliIDResponse](dir, "experiment", "baseline")
+	return cliLifecycleFixture{
+		GoalID:     goal.ID,
+		BaselineID: baseline.ID,
+	}
+}
+
+func setupLifecycleCandidate(dir string, spec cliLifecycleCandidateSpec) cliLifecycleCandidate {
+	GinkgoHelper()
+	if spec.Instruments == "" {
+		spec.Instruments = "timing,binary_size,host_test"
+	}
+	hyp := runCLIJSON[cliIDResponse](dir,
+		"hypothesis", "add",
+		"--claim", spec.Claim,
+		"--predicts-instrument", "timing",
+		"--predicts-target", "kernel",
+		"--predicts-direction", "decrease",
+		"--predicts-min-effect", spec.MinEffect,
+		"--kill-if", "tests fail",
+	)
+	exp := runCLIJSON[cliIDResponse](dir,
+		"experiment", "design", hyp.ID,
+		"--baseline", "HEAD",
+		"--instruments", spec.Instruments,
+	)
+	impl := runCLIJSON[cliImplementResponse](dir, "experiment", "implement", exp.ID)
+	writeScenarioMetrics(impl.Worktree, spec.Timing, spec.Size)
+	addArgs := []string{"add", "timing.txt", "size.txt"}
+	if spec.Mechanism != "" {
+		writeScenarioMechanism(impl.Worktree, spec.Mechanism)
+		addArgs = append(addArgs, "mechanism.txt")
+	}
+	gitRun(impl.Worktree, addArgs...)
+	gitRun(impl.Worktree, "commit", "-m", spec.Message)
+	candidateRef := gitCreateCandidateRef(impl.Worktree, spec.RefName)
+	return cliLifecycleCandidate{
+		HypothesisID: hyp.ID,
+		ExperimentID: exp.ID,
+		Worktree:     impl.Worktree,
+		CandidateRef: candidateRef,
+	}
+}
+
+func observeLifecycleCandidate(dir string, candidate cliLifecycleCandidate) cliObserveAllResponse {
+	GinkgoHelper()
+	return runCLIJSON[cliObserveAllResponse](dir, "observe", candidate.ExperimentID, "--all", "--candidate-ref", candidate.CandidateRef)
+}
 
 func registerScenarioInstruments(dir string) {
 	GinkgoHelper()

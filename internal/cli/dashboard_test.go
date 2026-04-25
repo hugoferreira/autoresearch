@@ -11,18 +11,18 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func dashboardInFlightIDs(rows []dashboardInFlight) map[string]bool {
-	ids := make(map[string]bool, len(rows))
+func dashboardInFlightIDs(rows []dashboardInFlight) []string {
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
-		ids[row.ID] = true
+		ids = append(ids, row.ID)
 	}
 	return ids
 }
 
-func dashboardStaleIDs(rows []staleExperimentView) map[string]bool {
-	ids := make(map[string]bool, len(rows))
+func dashboardStaleIDs(rows []staleExperimentView) []string {
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
-		ids[row.ID] = true
+		ids = append(ids, row.ID)
 	}
 	return ids
 }
@@ -94,79 +94,52 @@ func newStoreWithBuiltins() *store.Store {
 	return s
 }
 
+func dashboardTestHypothesis(id, status string, now time.Time) *entity.Hypothesis {
+	GinkgoHelper()
+	return &entity.Hypothesis{
+		ID: id, GoalID: "G-0001", Claim: id + " claim",
+		Predicts:  entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
+		KillIf:    []string{"tests fail"},
+		Status:    status,
+		Author:    "human",
+		CreatedAt: now,
+	}
+}
+
+func dashboardTestExperiment(id, hypothesis, status string, now time.Time, referencedBy ...string) *entity.Experiment {
+	GinkgoHelper()
+	return &entity.Experiment{
+		ID: id, Hypothesis: hypothesis, Status: status,
+		Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
+		Author:                 "agent:designer",
+		CreatedAt:              now,
+		ReferencedAsBaselineBy: referencedBy,
+	}
+}
+
 var _ = Describe("dashboard capture", func() {
-	It("excludes experiments that are already referenced as baselines from in-flight work", func() {
-		s := createCLIStore()
-		now := time.Now().UTC()
-		for _, e := range []*entity.Experiment{
-			{
-				ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
-				Baseline:               entity.Baseline{Ref: "HEAD"},
-				Instruments:            []string{"host_timing"},
-				Author:                 "agent:designer",
-				CreatedAt:              now,
-				ReferencedAsBaselineBy: []string{"C-0001"},
-			},
-			{
-				ID: "E-0002", Hypothesis: "H-0001", Status: entity.ExpMeasured,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:designer", CreatedAt: now,
-			},
-			{
-				ID: "E-0003", Hypothesis: "H-0002", Status: entity.ExpImplemented,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:implementer", CreatedAt: now,
-			},
-		} {
-			Expect(s.WriteExperiment(e)).To(Succeed())
-		}
-
-		snap, err := captureDashboard(s)
-		Expect(err).NotTo(HaveOccurred())
-
-		ids := dashboardInFlightIDs(snap.InFlight)
-		Expect(ids).NotTo(HaveKey("E-0001"))
-		Expect(ids).To(HaveKey("E-0002"))
-		Expect(ids).To(HaveKey("E-0003"))
-	})
-
-	It("excludes experiments attached to non-actionable hypotheses from in-flight work", func() {
+	It("limits in-flight work to actionable experiments that are not already baselines", func() {
 		s := createCLIStore()
 		now := time.Now().UTC()
 		for _, h := range []*entity.Hypothesis{
-			{
-				ID: "H-0001", GoalID: "G-0001", Claim: "finished",
-				Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
-				KillIf:   []string{"tests fail"}, Status: entity.StatusSupported, Author: "human", CreatedAt: now,
-			},
-			{
-				ID: "H-0002", GoalID: "G-0001", Claim: "still live",
-				Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
-				KillIf:   []string{"tests fail"}, Status: entity.StatusOpen, Author: "human", CreatedAt: now,
-			},
+			dashboardTestHypothesis("H-0001", entity.StatusSupported, now),
+			dashboardTestHypothesis("H-0002", entity.StatusOpen, now),
+			dashboardTestHypothesis("H-0003", entity.StatusOpen, now),
 		} {
 			Expect(s.WriteHypothesis(h)).To(Succeed())
 		}
 		for _, e := range []*entity.Experiment{
-			{
-				ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:designer", CreatedAt: now,
-			},
-			{
-				ID: "E-0002", Hypothesis: "H-0002", Status: entity.ExpMeasured,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:designer", CreatedAt: now,
-			},
+			dashboardTestExperiment("E-0001", "H-0003", entity.ExpMeasured, now, "C-0001"),
+			dashboardTestExperiment("E-0002", "H-0002", entity.ExpMeasured, now),
+			dashboardTestExperiment("E-0003", "H-0002", entity.ExpImplemented, now),
+			dashboardTestExperiment("E-0004", "H-0001", entity.ExpMeasured, now),
 		} {
 			Expect(s.WriteExperiment(e)).To(Succeed())
 		}
 
 		snap, err := captureDashboard(s)
 		Expect(err).NotTo(HaveOccurred())
-		ids := dashboardInFlightIDs(snap.InFlight)
-		Expect(ids).NotTo(HaveKey("E-0001"))
-		Expect(ids).To(HaveKey("E-0002"))
+		Expect(dashboardInFlightIDs(snap.InFlight)).To(ConsistOf("E-0002", "E-0003"), "in-flight experiment IDs")
 	})
 
 	It("limits stale experiments to work that is still actionable", func() {
@@ -179,40 +152,16 @@ var _ = Describe("dashboard capture", func() {
 		})).To(Succeed())
 
 		for _, h := range []*entity.Hypothesis{
-			{
-				ID: "H-0001", GoalID: "G-0001", Claim: "supported and done",
-				Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
-				KillIf:   []string{"tests fail"}, Status: entity.StatusSupported, Author: "human", CreatedAt: now,
-			},
-			{
-				ID: "H-0002", GoalID: "G-0001", Claim: "awaiting review",
-				Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
-				KillIf:   []string{"tests fail"}, Status: entity.StatusUnreviewed, Author: "human", CreatedAt: now,
-			},
-			{
-				ID: "H-0003", GoalID: "G-0001", Claim: "still live",
-				Predicts: entity.Predicts{Instrument: "host_timing", Target: "fir", Direction: "decrease"},
-				KillIf:   []string{"tests fail"}, Status: entity.StatusOpen, Author: "human", CreatedAt: now,
-			},
+			dashboardTestHypothesis("H-0001", entity.StatusSupported, now),
+			dashboardTestHypothesis("H-0002", entity.StatusUnreviewed, now),
+			dashboardTestHypothesis("H-0003", entity.StatusOpen, now),
 		} {
 			Expect(s.WriteHypothesis(h)).To(Succeed())
 		}
 		for _, e := range []*entity.Experiment{
-			{
-				ID: "E-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:designer", CreatedAt: now,
-			},
-			{
-				ID: "E-0002", Hypothesis: "H-0002", Status: entity.ExpMeasured,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:designer", CreatedAt: now,
-			},
-			{
-				ID: "E-0003", Hypothesis: "H-0003", Status: entity.ExpMeasured,
-				Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"host_timing"},
-				Author: "agent:designer", CreatedAt: now,
-			},
+			dashboardTestExperiment("E-0001", "H-0001", entity.ExpMeasured, now),
+			dashboardTestExperiment("E-0002", "H-0002", entity.ExpMeasured, now),
+			dashboardTestExperiment("E-0003", "H-0003", entity.ExpMeasured, now),
 		} {
 			Expect(s.WriteExperiment(e)).To(Succeed())
 		}
@@ -228,16 +177,8 @@ var _ = Describe("dashboard capture", func() {
 
 		snap, err := captureDashboard(s)
 		Expect(err).NotTo(HaveOccurred())
-
-		inFlightIDs := dashboardInFlightIDs(snap.InFlight)
-		Expect(inFlightIDs).NotTo(HaveKey("E-0001"))
-		Expect(inFlightIDs).NotTo(HaveKey("E-0002"))
-		Expect(inFlightIDs).To(HaveKey("E-0003"))
-
-		staleIDs := dashboardStaleIDs(snap.StaleExperiments)
-		Expect(staleIDs).NotTo(HaveKey("E-0001"))
-		Expect(staleIDs).NotTo(HaveKey("E-0002"))
-		Expect(staleIDs).To(HaveKey("E-0003"))
+		Expect(dashboardInFlightIDs(snap.InFlight)).To(ConsistOf("E-0003"), "in-flight experiment IDs")
+		Expect(dashboardStaleIDs(snap.StaleExperiments)).To(ConsistOf("E-0003"), "stale experiment IDs")
 	})
 
 	It("captures an empty initialized store", func() {
