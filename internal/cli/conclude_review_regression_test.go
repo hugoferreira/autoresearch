@@ -2,24 +2,23 @@ package cli
 
 import (
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
-	t.Helper()
+func setupConcludeReviewedRegressionStore() (string, string) {
+	GinkgoHelper()
 
-	dir := t.TempDir()
+	dir := GinkgoT().TempDir()
 	s, err := store.Create(dir, store.Config{
 		Build: store.CommandSpec{Command: "true"},
 		Test:  store.CommandSpec{Command: "true"},
 	})
-	if err != nil {
-		t.Fatalf("store.Create: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
 	now := time.Date(2026, 4, 24, 13, 0, 0, 0, time.UTC)
 	goal := &entity.Goal{
@@ -31,15 +30,11 @@ func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
 			{Instrument: "host_test", Require: "pass"},
 		},
 	}
-	if err := s.WriteGoal(goal); err != nil {
-		t.Fatalf("WriteGoal: %v", err)
-	}
-	if err := s.UpdateState(func(st *store.State) error {
+	Expect(s.WriteGoal(goal)).To(Succeed())
+	Expect(s.UpdateState(func(st *store.State) error {
 		st.CurrentGoalID = goal.ID
 		return nil
-	}); err != nil {
-		t.Fatalf("UpdateState: %v", err)
-	}
+	})).To(Succeed())
 
 	hyp := &entity.Hypothesis{
 		ID:        "H-0001",
@@ -56,9 +51,7 @@ func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
 		},
 		KillIf: []string{"tests fail"},
 	}
-	if err := s.WriteHypothesis(hyp); err != nil {
-		t.Fatalf("WriteHypothesis: %v", err)
-	}
+	Expect(s.WriteHypothesis(hyp)).To(Succeed())
 
 	base := &entity.Experiment{
 		ID:          "E-0001",
@@ -83,9 +76,7 @@ func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
 		CreatedAt:   now,
 	}
 	for _, e := range []*entity.Experiment{base, cand} {
-		if err := s.WriteExperiment(e); err != nil {
-			t.Fatalf("WriteExperiment(%s): %v", e.ID, err)
-		}
+		Expect(s.WriteExperiment(e)).To(Succeed())
 	}
 
 	baseObs := &entity.Observation{
@@ -117,38 +108,31 @@ func setupConcludeReviewedRegressionStore(t *testing.T) (string, string) {
 		Author:       "agent:observer",
 	}
 	for _, o := range []*entity.Observation{baseObs, candObs} {
-		if err := s.WriteObservation(o); err != nil {
-			t.Fatalf("WriteObservation(%s): %v", o.ID, err)
-		}
+		Expect(s.WriteObservation(o)).To(Succeed())
 	}
 
 	return dir, candObs.ID
 }
 
-func TestConcludeReviewedByPromotesHypothesisConsistently(t *testing.T) {
-	saveGlobals(t)
-	dir, obsID := setupConcludeReviewedRegressionStore(t)
+var _ = Describe("conclude --reviewed-by", func() {
+	BeforeEach(saveGlobals)
 
-	resp := runCLIJSON[concludeJSONResponse](t, dir,
-		"conclude", "H-0001",
-		"--verdict", "supported",
-		"--baseline-experiment", "E-0001",
-		"--observations", obsID,
-		"--reviewed-by", "human:gate",
-	)
-	if resp.Conclusion.ReviewedBy != "human:gate" {
-		t.Fatalf("conclusion reviewed_by = %q, want human:gate", resp.Conclusion.ReviewedBy)
-	}
+	It("promotes the hypothesis consistently when the conclusion is already reviewed", func() {
+		dir, obsID := setupConcludeReviewedRegressionStore()
 
-	s, err := store.Open(dir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	hyp, err := s.ReadHypothesis("H-0001")
-	if err != nil {
-		t.Fatalf("ReadHypothesis: %v", err)
-	}
-	if got, want := hyp.Status, entity.StatusSupported; got != want {
-		t.Fatalf("hypothesis status after reviewed conclusion = %q, want %q", got, want)
-	}
-}
+		resp := runCLIJSON[concludeJSONResponse](dir,
+			"conclude", "H-0001",
+			"--verdict", "supported",
+			"--baseline-experiment", "E-0001",
+			"--observations", obsID,
+			"--reviewed-by", "human:gate",
+		)
+		Expect(resp.Conclusion.ReviewedBy).To(Equal("human:gate"))
+
+		s, err := store.Open(dir)
+		Expect(err).NotTo(HaveOccurred())
+		hyp, err := s.ReadHypothesis("H-0001")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hyp.Status).To(Equal(entity.StatusSupported))
+	})
+})

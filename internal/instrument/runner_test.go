@@ -6,440 +6,330 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"testing"
 
 	"github.com/bytter/autoresearch/internal/instrument"
 	"github.com/bytter/autoresearch/internal/store"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestPassFail(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Name:        "host_test",
-		Instrument: store.Instrument{
-			Cmd:    []string{"sh", "-c", "true"},
-			Parser: "builtin:passfail",
+var _ = Describe("instrument runner parsers", func() {
+	It("maps command exit status into pass/fail observations", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Name:        "host_test",
+			Instrument: store.Instrument{
+				Cmd:    []string{"sh", "-c", "true"},
+				Parser: "builtin:passfail",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Pass).NotTo(BeNil())
+		Expect(*r.Pass).To(BeTrue())
+		Expect(r.Value).To(Equal(1.0))
+		Expect(r.Artifacts).To(HaveLen(1))
+		Expect(r.Artifacts[0].Name).To(Equal("stdout"))
+
+		r2, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Name:        "host_test",
+			Instrument: store.Instrument{
+				Cmd:    []string{"sh", "-c", "exit 3"},
+				Parser: "builtin:passfail",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r2.Pass).NotTo(BeNil())
+		Expect(*r2.Pass).To(BeFalse())
+		Expect(r2.Value).To(Equal(0.0))
+		Expect(r2.ExitCode).To(Equal(3))
+	})
+
+	It("records repeated timing samples and confidence intervals", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Name:        "host_timing",
+			Samples:     5,
+			Instrument: store.Instrument{
+				Cmd:    []string{"sh", "-c", "true"},
+				Parser: "builtin:timing",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.SamplesN).To(Equal(5))
+		Expect(r.PerSample).To(HaveLen(5))
+		Expect(r.Unit).To(Equal("seconds"))
+		Expect(r.CILow).NotTo(BeNil())
+		Expect(r.CIHigh).NotTo(BeNil())
+		Expect(*r.CILow).To(BeNumerically("<=", r.Value))
+		Expect(*r.CIHigh).To(BeNumerically(">=", r.Value))
+	})
+
+	It("parses GNU size output into text size and auxiliary sections", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Name:        "size_flash",
+			Instrument: store.Instrument{
+				Cmd:    []string{"sh", "-c", `printf '   text\tdata\t bss\t dec\t hex\tfilename\n  1024\t 256\t  64\t1344\t540\ta.out\n'`},
+				Parser: "builtin:size",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Value).To(Equal(1024.0))
+		Expect(r.Aux["text"]).To(Equal(int64(1024)))
+		Expect(r.Aux["data"]).To(Equal(int64(256)))
+		Expect(r.Aux["bss"]).To(Equal(int64(64)))
+	})
+
+	It("parses Mach-O size output with normalized section names", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Instrument: store.Instrument{
+				Cmd:    []string{"sh", "-c", `printf '__TEXT\t__DATA\t__OBJC\tothers\tdec\thex\n4096\t0\t0\t1024\t5120\t1400\n'`},
+				Parser: "builtin:size",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Value).To(Equal(4096.0))
+		Expect(r.Aux["text"]).To(Equal(int64(4096)))
+	})
+
+	It("rejects unknown parser names", func() {
+		_, err := instrument.Run(context.Background(), instrument.Config{
+			Instrument: store.Instrument{Cmd: []string{"true"}, Parser: "builtin:nope"},
+		})
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("scalar parser", func() {
+	It("extracts repeated keyword-form scalar samples", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Samples:     3,
+			Instrument: store.Instrument{
+				Cmd:     []string{"sh", "-c", `echo "preamble"; echo "cycles: 123456"`},
+				Parser:  "builtin:scalar",
+				Pattern: `cycles:\s*(\d+)`,
+				Unit:    "cycles",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Unit).To(Equal("cycles"))
+		Expect(r.SamplesN).To(Equal(3))
+		Expect(r.PerSample).To(Equal([]float64{123456, 123456, 123456}))
+		Expect(r.Value).To(Equal(123456.0))
+	})
+
+	It("extracts values from JSON-like output", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			WorktreeDir: dir,
+			Samples:     2,
+			Instrument: store.Instrument{
+				Cmd:     []string{"sh", "-c", `echo '{"cycles": 987, "note": "synthetic"}'`},
+				Parser:  "builtin:scalar",
+				Pattern: `"cycles"\s*:\s*(\d+)`,
+				Unit:    "cycles",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Value).To(Equal(987.0))
+	})
+
+	It("honors case-insensitive regular expressions", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			WorktreeDir: dir,
+			Samples:     2,
+			Instrument: store.Instrument{
+				Cmd:     []string{"sh", "-c", `echo "ICOUNT=42000"`},
+				Parser:  "builtin:scalar",
+				Pattern: `(?i)icount\s*[:=]\s*(\d+)`,
+				Unit:    "cycles",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Value).To(Equal(42000.0))
+	})
+
+	DescribeTable("rejects invalid scalar configurations or output",
+		func(inst store.Instrument) {
+			dir := GinkgoT().TempDir()
+			_, err := instrument.Run(context.Background(), instrument.Config{
+				WorktreeDir: dir,
+				Samples:     1,
+				Instrument:  inst,
+			})
+			Expect(err).To(HaveOccurred())
 		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Pass == nil || !*r.Pass || r.Value != 1.0 {
-		t.Errorf("pass case: %+v", r)
-	}
-	if len(r.Artifacts) != 1 || r.Artifacts[0].Name != "stdout" {
-		t.Errorf("artifacts: %+v", r.Artifacts)
-	}
-
-	r2, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Name:        "host_test",
-		Instrument: store.Instrument{
-			Cmd:    []string{"sh", "-c", "exit 3"},
-			Parser: "builtin:passfail",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r2.Pass == nil || *r2.Pass || r2.Value != 0.0 || r2.ExitCode != 3 {
-		t.Errorf("fail case: %+v", r2)
-	}
-}
-
-func TestTiming(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Name:        "host_timing",
-		Samples:     5,
-		Instrument: store.Instrument{
-			Cmd:    []string{"sh", "-c", "true"},
-			Parser: "builtin:timing",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.SamplesN != 5 || len(r.PerSample) != 5 {
-		t.Errorf("samples: got %d/%d want 5/5", r.SamplesN, len(r.PerSample))
-	}
-	if r.Unit != "seconds" || r.CILow == nil || r.CIHigh == nil {
-		t.Errorf("timing result: %+v", r)
-	}
-	if *r.CILow > r.Value || *r.CIHigh < r.Value {
-		t.Errorf("CI does not bracket mean: low=%v mean=%v high=%v", *r.CILow, r.Value, *r.CIHigh)
-	}
-}
-
-func TestSize_GNUFormat(t *testing.T) {
-	dir := t.TempDir()
-	// Synthesize GNU-style size output via `printf`.
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Name:        "size_flash",
-		Instrument: store.Instrument{
-			Cmd:    []string{"sh", "-c", `printf '   text\tdata\t bss\t dec\t hex\tfilename\n  1024\t 256\t  64\t1344\t540\ta.out\n'`},
-			Parser: "builtin:size",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Value != 1024 {
-		t.Errorf("text size: got %v, want 1024", r.Value)
-	}
-	if r.Aux["text"] != int64(1024) || r.Aux["data"] != int64(256) || r.Aux["bss"] != int64(64) {
-		t.Errorf("aux fields: %+v", r.Aux)
-	}
-}
-
-func TestSize_MachOFormat(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Instrument: store.Instrument{
-			Cmd:    []string{"sh", "-c", `printf '__TEXT\t__DATA\t__OBJC\tothers\tdec\thex\n4096\t0\t0\t1024\t5120\t1400\n'`},
-			Parser: "builtin:size",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Value != 4096 {
-		t.Errorf("text size: got %v, want 4096", r.Value)
-	}
-	if r.Aux["text"] != int64(4096) {
-		t.Errorf("text aux (leading underscore stripped + lowercased): %+v", r.Aux)
-	}
-}
-
-func TestUnknownParser(t *testing.T) {
-	_, err := instrument.Run(context.Background(), instrument.Config{
-		Instrument: store.Instrument{Cmd: []string{"true"}, Parser: "builtin:nope"},
-	})
-	if err == nil {
-		t.Error("unknown parser should error")
-	}
-}
-
-func TestScalar_KeywordFormat(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Samples:     3,
-		Instrument: store.Instrument{
-			Cmd:     []string{"sh", "-c", `echo "preamble"; echo "cycles: 123456"`},
-			Parser:  "builtin:scalar",
-			Pattern: `cycles:\s*(\d+)`,
-			Unit:    "cycles",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Unit != "cycles" || r.SamplesN != 3 || len(r.PerSample) != 3 {
-		t.Errorf("result: %+v", r)
-	}
-	for _, v := range r.PerSample {
-		if v != 123456 {
-			t.Errorf("sample: got %v, want 123456", v)
-		}
-	}
-	if r.Value != 123456 {
-		t.Errorf("mean: %v", r.Value)
-	}
-}
-
-func TestScalar_JsonFormat(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     2,
-		Instrument: store.Instrument{
-			Cmd:     []string{"sh", "-c", `echo '{"cycles": 987, "note": "synthetic"}'`},
-			Parser:  "builtin:scalar",
-			Pattern: `"cycles"\s*:\s*(\d+)`,
-			Unit:    "cycles",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Value != 987 {
-		t.Errorf("json parse: got %v, want 987", r.Value)
-	}
-}
-
-func TestScalar_CaseInsensitive(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     2,
-		Instrument: store.Instrument{
-			Cmd:     []string{"sh", "-c", `echo "ICOUNT=42000"`},
-			Parser:  "builtin:scalar",
-			Pattern: `(?i)icount\s*[:=]\s*(\d+)`,
-			Unit:    "cycles",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Value != 42000 {
-		t.Errorf("icount parse: got %v, want 42000", r.Value)
-	}
-}
-
-func TestScalar_NoMatchRejected(t *testing.T) {
-	dir := t.TempDir()
-	_, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     1,
-		Instrument: store.Instrument{
+		Entry("without a matching output line", store.Instrument{
 			Cmd:     []string{"sh", "-c", "echo hello"},
 			Parser:  "builtin:scalar",
 			Pattern: `cycles:\s*(\d+)`,
 			Unit:    "cycles",
-		},
-	})
-	if err == nil {
-		t.Error("should have rejected output with no match")
-	}
-}
-
-func TestScalar_MissingPatternRejected(t *testing.T) {
-	dir := t.TempDir()
-	_, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     1,
-		Instrument: store.Instrument{
+		}),
+		Entry("without a pattern", store.Instrument{
 			Cmd:    []string{"echo", "hello"},
 			Parser: "builtin:scalar",
 			Unit:   "cycles",
-			// Pattern intentionally empty
-		},
-	})
-	if err == nil {
-		t.Error("should require Pattern")
-	}
-}
-
-func TestScalar_MultipleGroupsRejected(t *testing.T) {
-	dir := t.TempDir()
-	_, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     1,
-		Instrument: store.Instrument{
+		}),
+		Entry("with multiple capture groups", store.Instrument{
 			Cmd:     []string{"sh", "-c", "echo cycles: 100"},
 			Parser:  "builtin:scalar",
 			Pattern: `(cycles):\s*(\d+)`,
 			Unit:    "cycles",
-		},
-	})
-	if err == nil {
-		t.Error("should reject pattern with multiple capture groups")
-	}
-}
-
-func TestScalar_NonIntegerCaptureRejected(t *testing.T) {
-	dir := t.TempDir()
-	_, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     1,
-		Instrument: store.Instrument{
+		}),
+		Entry("with a non-integer capture", store.Instrument{
 			Cmd:     []string{"sh", "-c", "echo cycles: twelve"},
 			Parser:  "builtin:scalar",
 			Pattern: `cycles:\s*(\w+)`,
 			Unit:    "cycles",
-		},
-	})
-	if err == nil {
-		t.Error("should reject non-integer capture")
-	}
-}
+		}),
+	)
 
-func TestScalar_UnitHonored(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		WorktreeDir: dir,
-		Samples:     1,
-		Instrument: store.Instrument{
-			Cmd:     []string{"sh", "-c", "echo instructions retired: 42"},
-			Parser:  "builtin:scalar",
-			Pattern: `retired:\s*(\d+)`,
-			Unit:    "instructions",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Unit != "instructions" || r.Value != 42 {
-		t.Errorf("result: %+v", r)
-	}
-}
-
-func TestEvidence_ArtifactUsesShellContext(t *testing.T) {
-	dir := t.TempDir()
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Instrument: store.Instrument{
-			Cmd:     []string{"sh", "-c", "echo cycles: 42"},
-			Parser:  "builtin:scalar",
-			Pattern: `cycles:\s*(\d+)`,
-			Unit:    "cycles",
-			Evidence: []store.EvidenceSpec{{
-				Name: "mechanism",
-				Cmd:  `printf '%s|%s|%s' "$WORKTREE" "$PROJECT" "$(pwd)"`,
-			}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(r.EvidenceFailures), 0; got != want {
-		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
-	}
-	ev := artifactByName(t, r.Artifacts, "evidence/mechanism")
-	if ev.Filename != "mechanism.txt" {
-		t.Fatalf("evidence filename = %q, want mechanism.txt", ev.Filename)
-	}
-	if ev.Mime != "text/plain" {
-		t.Fatalf("evidence mime = %q, want text/plain", ev.Mime)
-	}
-	parts := strings.Split(string(ev.Content), "|")
-	if got, want := len(parts), 3; got != want {
-		t.Fatalf("evidence content parts = %d, want %d (%q)", got, want, ev.Content)
-	}
-	if parts[0] != dir || parts[1] != dir {
-		t.Fatalf("WORKTREE/PROJECT not propagated: %q", ev.Content)
-	}
-	gotPWD, err := filepath.EvalSymlinks(parts[2])
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%q): %v", parts[2], err)
-	}
-	wantPWD, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
-	}
-	if gotPWD != wantPWD {
-		t.Fatalf("pwd = %q, want %q (from %q)", gotPWD, wantPWD, ev.Content)
-	}
-}
-
-func TestEvidence_FailureNonFatal(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "evidence.txt")
-	if err := os.WriteFile(marker, []byte("trace=ok\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Instrument: store.Instrument{
-			Cmd:     []string{"sh", "-c", "echo cycles: 99"},
-			Parser:  "builtin:scalar",
-			Pattern: `cycles:\s*(\d+)`,
-			Unit:    "cycles",
-			Evidence: []store.EvidenceSpec{
-				{Name: "mechanism", Cmd: "cat evidence.txt"},
-				{Name: "broken", Cmd: "echo nope >&2; exit 7"},
+	It("preserves configured units", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			WorktreeDir: dir,
+			Samples:     1,
+			Instrument: store.Instrument{
+				Cmd:     []string{"sh", "-c", "echo instructions retired: 42"},
+				Parser:  "builtin:scalar",
+				Pattern: `retired:\s*(\d+)`,
+				Unit:    "instructions",
 			},
-		},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Unit).To(Equal("instructions"))
+		Expect(r.Value).To(Equal(42.0))
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Value != 99 {
-		t.Fatalf("primary value = %v, want 99", r.Value)
-	}
-	if _, ok := findArtifact(r.Artifacts, "scalar"); !ok {
-		t.Fatal("primary scalar artifact missing")
-	}
-	if _, ok := findArtifact(r.Artifacts, "evidence/mechanism"); !ok {
-		t.Fatal("successful evidence artifact missing")
-	}
-	if _, ok := findArtifact(r.Artifacts, "evidence/broken"); ok {
-		t.Fatal("failed evidence should not produce an artifact")
-	}
-	if got, want := len(r.EvidenceFailures), 1; got != want {
-		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
-	}
-	if got := r.EvidenceFailures[0]; got.Name != "broken" || got.ExitCode != 7 || got.Error != "" {
-		t.Fatalf("unexpected evidence failure: %+v", got)
-	}
-}
+})
 
-func TestEvidence_SpawnFailureRecordsErrorWithoutExitCode(t *testing.T) {
-	dir := t.TempDir()
-	shell, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatalf("look up sh: %v", err)
-	}
-	t.Setenv("PATH", "")
-
-	r, err := instrument.Run(context.Background(), instrument.Config{
-		ProjectDir:  dir,
-		WorktreeDir: dir,
-		Instrument: store.Instrument{
-			Cmd:     []string{shell, "-c", "echo cycles: 99"},
-			Parser:  "builtin:scalar",
-			Pattern: `cycles:\s*(\d+)`,
-			Unit:    "cycles",
-			Evidence: []store.EvidenceSpec{
-				{Name: "mechanism", Cmd: "echo trace"},
+var _ = Describe("evidence capture", func() {
+	It("runs evidence commands in the project/worktree shell context", func() {
+		dir := GinkgoT().TempDir()
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Instrument: store.Instrument{
+				Cmd:     []string{"sh", "-c", "echo cycles: 42"},
+				Parser:  "builtin:scalar",
+				Pattern: `cycles:\s*(\d+)`,
+				Unit:    "cycles",
+				Evidence: []store.EvidenceSpec{{
+					Name: "mechanism",
+					Cmd:  `printf '%s|%s|%s' "$WORKTREE" "$PROJECT" "$(pwd)"`,
+				}},
 			},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Value != 99 {
-		t.Fatalf("primary value = %v, want 99", r.Value)
-	}
-	if got, want := len(r.EvidenceFailures), 1; got != want {
-		t.Fatalf("EvidenceFailures len = %d, want %d", got, want)
-	}
-	got := r.EvidenceFailures[0]
-	if got.Name != "mechanism" {
-		t.Fatalf("EvidenceFailures[0].Name = %q, want %q", got.Name, "mechanism")
-	}
-	if got.ExitCode != 0 {
-		t.Fatalf("EvidenceFailures[0].ExitCode = %d, want 0 for spawn failure", got.ExitCode)
-	}
-	if got.Error == "" {
-		t.Fatal("EvidenceFailures[0].Error is empty, want spawn failure detail")
-	}
-	if !strings.Contains(got.Error, `spawn "sh -c echo trace"`) {
-		t.Fatalf("EvidenceFailures[0].Error = %q, want spawn context", got.Error)
-	}
-	if _, ok := findArtifact(r.Artifacts, "evidence/mechanism"); ok {
-		t.Fatal("spawn-failed evidence should not produce an artifact")
-	}
-}
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.EvidenceFailures).To(BeEmpty())
 
-func artifactByName(t *testing.T, arts []instrument.ArtifactContent, name string) instrument.ArtifactContent {
-	t.Helper()
-	if art, ok := findArtifact(arts, name); ok {
-		return art
+		ev := artifactByName(r.Artifacts, "evidence/mechanism")
+		Expect(ev.Filename).To(Equal("mechanism.txt"))
+		Expect(ev.Mime).To(Equal("text/plain"))
+		parts := strings.Split(string(ev.Content), "|")
+		Expect(parts).To(HaveLen(3))
+		Expect(parts[0]).To(Equal(dir))
+		Expect(parts[1]).To(Equal(dir))
+
+		gotPWD, err := filepath.EvalSymlinks(parts[2])
+		Expect(err).NotTo(HaveOccurred())
+		wantPWD, err := filepath.EvalSymlinks(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gotPWD).To(Equal(wantPWD))
+	})
+
+	It("records evidence command failures without failing the primary measurement", func() {
+		dir := GinkgoT().TempDir()
+		marker := filepath.Join(dir, "evidence.txt")
+		Expect(os.WriteFile(marker, []byte("trace=ok\n"), 0o644)).To(Succeed())
+
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Instrument: store.Instrument{
+				Cmd:     []string{"sh", "-c", "echo cycles: 99"},
+				Parser:  "builtin:scalar",
+				Pattern: `cycles:\s*(\d+)`,
+				Unit:    "cycles",
+				Evidence: []store.EvidenceSpec{
+					{Name: "mechanism", Cmd: "cat evidence.txt"},
+					{Name: "broken", Cmd: "echo nope >&2; exit 7"},
+				},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Value).To(Equal(99.0))
+		Expect(findArtifact(r.Artifacts, "scalar")).To(BeTrue())
+		Expect(findArtifact(r.Artifacts, "evidence/mechanism")).To(BeTrue())
+		Expect(findArtifact(r.Artifacts, "evidence/broken")).To(BeFalse())
+		Expect(r.EvidenceFailures).To(HaveLen(1))
+		Expect(r.EvidenceFailures[0].Name).To(Equal("broken"))
+		Expect(r.EvidenceFailures[0].ExitCode).To(Equal(7))
+		Expect(r.EvidenceFailures[0].Error).To(BeEmpty())
+	})
+
+	It("records spawn failures without an exit code or artifact", func() {
+		dir := GinkgoT().TempDir()
+		shell, err := exec.LookPath("sh")
+		Expect(err).NotTo(HaveOccurred())
+		oldPath := os.Getenv("PATH")
+		Expect(os.Setenv("PATH", "")).To(Succeed())
+		DeferCleanup(os.Setenv, "PATH", oldPath)
+
+		r, err := instrument.Run(context.Background(), instrument.Config{
+			ProjectDir:  dir,
+			WorktreeDir: dir,
+			Instrument: store.Instrument{
+				Cmd:     []string{shell, "-c", "echo cycles: 99"},
+				Parser:  "builtin:scalar",
+				Pattern: `cycles:\s*(\d+)`,
+				Unit:    "cycles",
+				Evidence: []store.EvidenceSpec{
+					{Name: "mechanism", Cmd: "echo trace"},
+				},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Value).To(Equal(99.0))
+		Expect(r.EvidenceFailures).To(HaveLen(1))
+		got := r.EvidenceFailures[0]
+		Expect(got.Name).To(Equal("mechanism"))
+		Expect(got.ExitCode).To(Equal(0))
+		Expect(got.Error).To(ContainSubstring(`spawn "sh -c echo trace"`))
+		Expect(findArtifact(r.Artifacts, "evidence/mechanism")).To(BeFalse())
+	})
+})
+
+func artifactByName(arts []instrument.ArtifactContent, name string) instrument.ArtifactContent {
+	GinkgoHelper()
+	for _, art := range arts {
+		if art.Name == name {
+			return art
+		}
 	}
-	t.Fatalf("artifact %q not found in %+v", name, arts)
+	Fail("artifact not found: " + name)
 	return instrument.ArtifactContent{}
 }
 
-func findArtifact(arts []instrument.ArtifactContent, name string) (instrument.ArtifactContent, bool) {
+func findArtifact(arts []instrument.ArtifactContent, name string) bool {
 	for _, art := range arts {
 		if art.Name == name {
-			return art, true
+			return true
 		}
 	}
-	return instrument.ArtifactContent{}, false
+	return false
 }

@@ -146,6 +146,13 @@ make test         # go vet + go test ./...
 
 Requires Go 1.26+.
 
+The test suite is written as Ginkgo v2 specs but still runs through normal Go
+tooling. New tests should use direct `Describe` / `Context` / `It` /
+`DescribeTable` blocks with Gomega assertions and keep one `RunSpecs` suite
+bootstrap per package. Shared test helpers should be Ginkgo-native
+(`GinkgoHelper`, `GinkgoT`, and `DeferCleanup`); benchmarks may continue to
+use `testing.B`.
+
 ## Quickstart
 
 Human setup is a short, one-time CLI step. After that, the main Claude Code
@@ -254,7 +261,7 @@ probe, and `--append` when you intentionally want another fresh run.
 | **goal** | `goal set`, `goal new`, `goal show`, `goal list`, `goal conclude`, `goal abandon` |
 | **steering** | `steering show`, `steering append` |
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
-| **experiment** | `baseline`, `design`, `implement`, `reset`, `worktree`, `list`, `show` |
+| **experiment** | `baseline`, `design`, `implement`, `reset`, `worktree`, `list`, `show [--worktree\|--branch\|--baseline-sha\|--env]` |
 | **observe** | `observe check <exp> --instrument <name>`, `observe <exp> --instrument <name> [--append]`, `observe <exp> --all [--append]` |
 | **analyze** | `analyze <exp> [--baseline <exp>]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
@@ -272,6 +279,14 @@ probe, and `--append` when you intentionally want another fresh run.
 
 Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,
 `4` budget exhausted. The orchestrator loop uses 3/4 to decide when to stop.
+
+For shell-heavy work, prefer terse experiment projections over scraping
+human text:
+
+```sh
+git -C "$(autoresearch experiment show E-0011 --worktree)" diff \
+  "$(autoresearch experiment show E-0011 --baseline-sha)" -- src/
+```
 
 ## Goal lifecycle
 

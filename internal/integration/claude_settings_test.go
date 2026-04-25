@@ -4,208 +4,134 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"testing"
 
 	"github.com/bytter/autoresearch/internal/integration"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func readSettings(t *testing.T, path string) map[string]any {
-	t.Helper()
+func readSettings(path string) map[string]any {
+	GinkgoHelper()
 	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("parse %s: %v\n%s", path, err, string(b))
-	}
+	Expect(json.Unmarshal(b, &m)).To(Succeed(), "parse %s:\n%s", path, string(b))
 	return m
 }
 
-func allowList(t *testing.T, doc map[string]any) []string {
-	t.Helper()
+func allowList(doc map[string]any) []string {
+	GinkgoHelper()
 	perms, ok := doc["permissions"].(map[string]any)
-	if !ok {
-		t.Fatalf("no permissions key: %v", doc)
-	}
+	Expect(ok).To(BeTrue(), "permissions key")
 	raw, ok := perms["allow"].([]any)
-	if !ok {
-		t.Fatalf("no allow list: %v", perms)
-	}
+	Expect(ok).To(BeTrue(), "allow list")
 	out := make([]string, len(raw))
 	for i, v := range raw {
 		s, ok := v.(string)
-		if !ok {
-			t.Fatalf("allow[%d] not a string: %v", i, v)
-		}
+		Expect(ok).To(BeTrue(), "allow[%d]", i)
 		out[i] = s
 	}
 	return out
 }
 
-func TestEnsureClaudeSettings_Created(t *testing.T) {
-	dir := t.TempDir()
-	r, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Created || r.Updated || r.AlreadyOK {
-		t.Errorf("expected Created, got %+v", r)
-	}
-	if got := allowList(t, readSettings(t, r.Path)); len(got) != 1 || got[0] != integration.AutoresearchAllowEntry {
-		t.Errorf("allow contents: %v", got)
-	}
-}
+var _ = Describe("Claude settings permissions", func() {
+	It("creates settings.json with the autoresearch allow entry", func() {
+		dir := GinkgoT().TempDir()
+		r, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Created).To(BeTrue())
+		Expect(r.Updated).To(BeFalse())
+		Expect(r.AlreadyOK).To(BeFalse())
+		Expect(allowList(readSettings(r.Path))).To(Equal([]string{integration.AutoresearchAllowEntry}))
+	})
 
-func TestEnsureClaudeSettings_AddsToExistingAllow(t *testing.T) {
-	dir := t.TempDir()
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	const pre = `{
+	It("adds missing allow entries while preserving unrelated settings", func() {
+		dir := GinkgoT().TempDir()
+		settingsPath := filepath.Join(dir, ".claude", "settings.json")
+		Expect(os.MkdirAll(filepath.Dir(settingsPath), 0o755)).To(Succeed())
+		const pre = `{
   "permissions": {
     "allow": ["Bash(git status:*)", "Bash(go test:*)"],
     "deny": ["Bash(rm -rf:*)"]
   },
   "otherKey": "preserved"
 }`
-	if err := os.WriteFile(settingsPath, []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Updated {
-		t.Errorf("expected Updated, got %+v", r)
-	}
-	doc := readSettings(t, settingsPath)
-	got := allowList(t, doc)
-	// All three should be present.
-	want := map[string]bool{
-		"Bash(git status:*)":                true,
-		"Bash(go test:*)":                   true,
-		integration.AutoresearchAllowEntry:  true,
-	}
-	if len(got) != len(want) {
-		t.Errorf("allow len: got %v want %v", got, want)
-	}
-	for _, s := range got {
-		if !want[s] {
-			t.Errorf("unexpected allow entry: %s", s)
-		}
-	}
-	// Unrelated keys must survive.
-	if doc["otherKey"] != "preserved" {
-		t.Errorf("otherKey not preserved: %v", doc["otherKey"])
-	}
-	perms := doc["permissions"].(map[string]any)
-	deny, _ := perms["deny"].([]any)
-	if len(deny) != 1 || deny[0] != "Bash(rm -rf:*)" {
-		t.Errorf("deny not preserved: %v", deny)
-	}
-}
+		Expect(os.WriteFile(settingsPath, []byte(pre), 0o644)).To(Succeed())
 
-func TestEnsureClaudeSettings_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-	entries := []string{integration.AutoresearchAllowEntry}
-	if _, err := integration.EnsureClaudeSettings(dir, entries); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureClaudeSettings(dir, entries)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.AlreadyOK {
-		t.Errorf("second call expected AlreadyOK, got %+v", r)
-	}
-	if len(r.Added) != 0 {
-		t.Errorf("second call should add nothing, got %v", r.Added)
-	}
-}
+		r, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Updated).To(BeTrue())
+		doc := readSettings(settingsPath)
+		Expect(allowList(doc)).To(ConsistOf(
+			"Bash(git status:*)",
+			"Bash(go test:*)",
+			integration.AutoresearchAllowEntry,
+		))
+		Expect(doc["otherKey"]).To(Equal("preserved"))
+		perms := doc["permissions"].(map[string]any)
+		Expect(perms["deny"]).To(Equal([]any{"Bash(rm -rf:*)"}))
+	})
 
-func TestEnsureClaudeSettings_NoPermissionsKey(t *testing.T) {
-	dir := t.TempDir()
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(settingsPath, []byte(`{"env": {"FOO": "bar"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Updated {
-		t.Errorf("expected Updated, got %+v", r)
-	}
-	doc := readSettings(t, settingsPath)
-	got := allowList(t, doc)
-	if len(got) != 1 || got[0] != integration.AutoresearchAllowEntry {
-		t.Errorf("allow contents: %v", got)
-	}
-	env, _ := doc["env"].(map[string]any)
-	if env["FOO"] != "bar" {
-		t.Errorf("env.FOO not preserved: %v", env)
-	}
-}
+	It("is idempotent once all entries are present", func() {
+		dir := GinkgoT().TempDir()
+		entries := []string{integration.AutoresearchAllowEntry}
+		_, err := integration.EnsureClaudeSettings(dir, entries)
+		Expect(err).NotTo(HaveOccurred())
+		r, err := integration.EnsureClaudeSettings(dir, entries)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.AlreadyOK).To(BeTrue())
+		Expect(r.Added).To(BeEmpty())
+	})
 
-func TestEnsureClaudeSettings_InvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(settingsPath, []byte(`{ not json`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry}); err == nil {
-		t.Error("expected parse error on invalid json")
-	}
-}
+	It("creates permissions under settings files without a permissions key", func() {
+		dir := GinkgoT().TempDir()
+		settingsPath := filepath.Join(dir, ".claude", "settings.json")
+		Expect(os.MkdirAll(filepath.Dir(settingsPath), 0o755)).To(Succeed())
+		Expect(os.WriteFile(settingsPath, []byte(`{"env": {"FOO": "bar"}}`), 0o644)).To(Succeed())
 
-func TestWorktreeAllowEntries_UsesDoubleSlashForAbsolute(t *testing.T) {
-	got := integration.WorktreeAllowEntries("/Users/bob/Library/Caches/autoresearch/proj-abc/worktrees")
-	want := []string{
-		"Read(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
-		"Edit(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
-		"Write(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("len: got %v want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("entry %d: got %q want %q", i, got[i], want[i])
-		}
-	}
-}
+		r, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Updated).To(BeTrue())
+		doc := readSettings(settingsPath)
+		Expect(allowList(doc)).To(Equal([]string{integration.AutoresearchAllowEntry}))
+		env, ok := doc["env"].(map[string]any)
+		Expect(ok).To(BeTrue())
+		Expect(env["FOO"]).To(Equal("bar"))
+	})
 
-func TestPreviewClaudeSettings(t *testing.T) {
-	dir := t.TempDir()
-	entries := []string{integration.AutoresearchAllowEntry}
+	It("rejects invalid settings JSON", func() {
+		dir := GinkgoT().TempDir()
+		settingsPath := filepath.Join(dir, ".claude", "settings.json")
+		Expect(os.MkdirAll(filepath.Dir(settingsPath), 0o755)).To(Succeed())
+		Expect(os.WriteFile(settingsPath, []byte(`{ not json`), 0o644)).To(Succeed())
 
-	r, err := integration.PreviewClaudeSettings(dir, entries)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.Created {
-		t.Errorf("absent: %+v", r)
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".claude", "settings.json")); err == nil {
-		t.Error("preview should not create file")
-	}
+		_, err := integration.EnsureClaudeSettings(dir, []string{integration.AutoresearchAllowEntry})
+		Expect(err).To(HaveOccurred())
+	})
 
-	if _, err := integration.EnsureClaudeSettings(dir, entries); err != nil {
-		t.Fatal(err)
-	}
-	r, err = integration.PreviewClaudeSettings(dir, entries)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.AlreadyOK {
-		t.Errorf("already present: %+v", r)
-	}
-}
+	It("formats absolute worktree allow entries with double-slash paths", func() {
+		got := integration.WorktreeAllowEntries("/Users/bob/Library/Caches/autoresearch/proj-abc/worktrees")
+		Expect(got).To(Equal([]string{
+			"Read(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
+			"Edit(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
+			"Write(//Users/bob/Library/Caches/autoresearch/proj-abc/worktrees/**)",
+		}))
+	})
+
+	It("previews creation and already-ok states without writing missing settings", func() {
+		dir := GinkgoT().TempDir()
+		entries := []string{integration.AutoresearchAllowEntry}
+
+		r, err := integration.PreviewClaudeSettings(dir, entries)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Created).To(BeTrue())
+		_, err = os.Stat(filepath.Join(dir, ".claude", "settings.json"))
+		Expect(os.IsNotExist(err)).To(BeTrue())
+
+		_, err = integration.EnsureClaudeSettings(dir, entries)
+		Expect(err).NotTo(HaveOccurred())
+		r, err = integration.PreviewClaudeSettings(dir, entries)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.AlreadyOK).To(BeTrue())
+	})
+})

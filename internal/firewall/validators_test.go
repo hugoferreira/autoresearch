@@ -3,13 +3,14 @@ package firewall_test
 import (
 	"fmt"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/firewall"
 	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 func cfgWith(names ...string) *store.Config {
@@ -47,551 +48,450 @@ func (f fakeInspiredByReader) ReadConclusion(id string) (*entity.Conclusion, err
 	return nil, fmt.Errorf("conclusion %s not found", id)
 }
 
-func TestRequireActiveGoal(t *testing.T) {
-	if err := firewall.RequireActiveGoal(nil); err == nil {
-		t.Error("nil state should be rejected")
-	}
-	if err := firewall.RequireActiveGoal(&store.State{}); err == nil {
-		t.Error("empty current_goal_id should be rejected")
-	}
-	if err := firewall.RequireActiveGoal(&store.State{CurrentGoalID: "G-0001"}); err != nil {
-		t.Errorf("active goal should pass, got %v", err)
-	}
-}
-
-func TestRequireNoActiveGoal(t *testing.T) {
-	if err := firewall.RequireNoActiveGoal(nil); err != nil {
-		t.Errorf("nil state counts as no active goal, got %v", err)
-	}
-	if err := firewall.RequireNoActiveGoal(&store.State{}); err != nil {
-		t.Errorf("empty current_goal_id counts as no active goal, got %v", err)
-	}
-	err := firewall.RequireNoActiveGoal(&store.State{CurrentGoalID: "G-0007"})
-	if err == nil || !strings.Contains(err.Error(), "G-0007") {
-		t.Errorf("existing active goal should be rejected with id, got %v", err)
-	}
-}
-
-func TestValidateGoal_FeatureStyle(t *testing.T) {
-	g := &entity.Goal{}
-	err := firewall.ValidateGoal(g, cfgWith())
-	if err == nil || !strings.Contains(err.Error(), "not build features") {
-		t.Errorf("feature-style goal should name the scope boundary, got %v", err)
-	}
-}
-
-func TestValidateGoal_UnregisteredInstrument(t *testing.T) {
-	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
-	err := firewall.ValidateGoal(g, cfgWith())
-	if err == nil || !strings.Contains(err.Error(), "not registered") {
-		t.Errorf("unregistered instrument should be rejected, got %v", err)
-	}
-}
-
-func TestValidateGoal_NoConstraints(t *testing.T) {
-	g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
-	err := firewall.ValidateGoal(g, cfgWith("qemu_cycles"))
-	if err == nil || !strings.Contains(err.Error(), "at least one constraint") {
-		t.Errorf("missing constraints should be rejected, got %v", err)
-	}
-}
-
-func TestValidateGoal_Happy(t *testing.T) {
-	max := 65536.0
-	g := &entity.Goal{
-		Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"},
-		Completion: &entity.Completion{
-			Threshold:   0.2,
-			OnThreshold: entity.GoalOnThresholdAskHuman,
-		},
-		Constraints: []entity.Constraint{
-			{Instrument: "size_flash", Max: &max},
-		},
-	}
-	if err := firewall.ValidateGoal(g, cfgWith("qemu_cycles", "size_flash")); err != nil {
-		t.Errorf("valid goal rejected: %v", err)
-	}
-}
-
-func TestValidateGoal_InvalidCompletion(t *testing.T) {
-	max := 65536.0
-	base := &entity.Goal{
-		Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"},
-		Constraints: []entity.Constraint{
-			{Instrument: "size_flash", Max: &max},
-		},
-	}
-
-	t.Run("threshold must be positive", func(t *testing.T) {
-		g := *base
-		g.Completion = &entity.Completion{Threshold: 0}
-		err := firewall.ValidateGoal(&g, cfgWith("qemu_cycles", "size_flash"))
-		if err == nil || !strings.Contains(err.Error(), "threshold must be > 0") {
-			t.Fatalf("expected bad threshold to fail, got %v", err)
-		}
+var _ = Describe("goal state gates", func() {
+	It("requires an active goal for mutating research verbs", func() {
+		Expect(firewall.RequireActiveGoal(nil)).To(HaveOccurred())
+		Expect(firewall.RequireActiveGoal(&store.State{})).To(HaveOccurred())
+		Expect(firewall.RequireActiveGoal(&store.State{CurrentGoalID: "G-0001"})).To(Succeed())
 	})
 
-	t.Run("on_threshold must be known", func(t *testing.T) {
-		g := *base
-		g.Completion = &entity.Completion{Threshold: 0.2, OnThreshold: "invent_it"}
-		err := firewall.ValidateGoal(&g, cfgWith("qemu_cycles", "size_flash"))
-		if err == nil || !strings.Contains(err.Error(), "completion.on_threshold") {
-			t.Fatalf("expected bad on_threshold to fail, got %v", err)
-		}
+	It("rejects a new goal when another active goal is present", func() {
+		Expect(firewall.RequireNoActiveGoal(nil)).To(Succeed())
+		Expect(firewall.RequireNoActiveGoal(&store.State{})).To(Succeed())
+		Expect(firewall.RequireNoActiveGoal(&store.State{CurrentGoalID: "G-0007"})).To(MatchError(ContainSubstring("G-0007")))
 	})
-}
+})
 
-func TestValidateHypothesis_MissingFields(t *testing.T) {
-	h := &entity.Hypothesis{}
-	if err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles")); err == nil {
-		t.Error("empty hypothesis should be rejected")
-	}
-}
-
-func TestValidateHypothesis_NoKillIf(t *testing.T) {
-	h := &entity.Hypothesis{
-		Claim: "x",
-		Predicts: entity.Predicts{
-			Instrument: "qemu_cycles", Target: "y", Direction: "decrease", MinEffect: 0.1,
-		},
-	}
-	if err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles")); err == nil || !strings.Contains(err.Error(), "kill_if") {
-		t.Errorf("hypothesis without kill_if should be rejected, got %v", err)
-	}
-}
-
-func TestValidateExperiment_Happy(t *testing.T) {
-	e := &entity.Experiment{
-		GoalID:      "G-0001",
-		Hypothesis:  "H-0001",
-		Instruments: []string{"qemu_cycles"},
-		Baseline:    entity.Baseline{Ref: "HEAD"},
-	}
-	if err := firewall.ValidateExperiment(e, cfgWith("qemu_cycles")); err != nil {
-		t.Errorf("valid experiment rejected: %v", err)
-	}
-}
-
-func TestValidateExperiment_UnregisteredInstrument(t *testing.T) {
-	e := &entity.Experiment{
-		GoalID:      "G-0001",
-		Hypothesis:  "H-0001",
-		Instruments: []string{"ghost_instrument"},
-		Baseline:    entity.Baseline{Ref: "HEAD"},
-	}
-	if err := firewall.ValidateExperiment(e, cfgWith("qemu_cycles")); err == nil {
-		t.Error("unregistered instrument should be rejected")
-	}
-}
-
-func TestCheckInstrumentDependencies(t *testing.T) {
-	cfg := &store.Config{Instruments: map[string]store.Instrument{
-		"host_test":   {Unit: "bool"},
-		"qemu_cycles": {Unit: "cycles", Requires: []string{"host_test=pass"}},
-	}}
-
-	t.Run("no observations returns error", func(t *testing.T) {
-		err := firewall.CheckInstrumentDependencies("qemu_cycles", cfg, nil)
-		if err == nil {
-			t.Error("expected error when no observations satisfy the prerequisite")
-		}
+var _ = Describe("goal validation", func() {
+	It("rejects feature-style goals without optimization objective fields", func() {
+		err := firewall.ValidateGoal(&entity.Goal{}, cfgWith())
+		Expect(err).To(MatchError(ContainSubstring("not build features")))
 	})
 
-	t.Run("passing host_test observation returns nil", func(t *testing.T) {
-		pass := true
-		obs := []*entity.Observation{
-			{Instrument: "host_test", Pass: &pass},
-		}
-		if err := firewall.CheckInstrumentDependencies("qemu_cycles", cfg, obs); err != nil {
-			t.Errorf("expected nil with passing prerequisite, got %v", err)
-		}
+	It("requires registered objective and constraint instruments", func() {
+		g := &entity.Goal{Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"}}
+		Expect(firewall.ValidateGoal(g, cfgWith())).To(MatchError(ContainSubstring("not registered")))
+		Expect(firewall.ValidateGoal(g, cfgWith("qemu_cycles"))).To(MatchError(ContainSubstring("at least one constraint")))
 	})
 
-	t.Run("non-passing observation still returns error", func(t *testing.T) {
-		fail := false
-		obs := []*entity.Observation{
-			{Instrument: "host_test", Pass: &fail},
+	It("accepts a well-formed goal with completion policy", func() {
+		max := 65536.0
+		g := &entity.Goal{
+			Objective: entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"},
+			Completion: &entity.Completion{
+				Threshold:   0.2,
+				OnThreshold: entity.GoalOnThresholdAskHuman,
+			},
+			Constraints: []entity.Constraint{{Instrument: "size_flash", Max: &max}},
 		}
-		err := firewall.CheckInstrumentDependencies("qemu_cycles", cfg, obs)
-		if err == nil {
-			t.Error("expected error when prerequisite observation is not passing")
-		}
+		Expect(firewall.ValidateGoal(g, cfgWith("qemu_cycles", "size_flash"))).To(Succeed())
 	})
-}
 
-func TestValidateHypothesis_Happy(t *testing.T) {
-	h := &entity.Hypothesis{
-		Claim: "unroll dsp_fir 4x cuts cycles >10%",
-		Predicts: entity.Predicts{
-			Instrument: "qemu_cycles", Target: "dsp_fir_bench", Direction: "decrease", MinEffect: 0.10,
+	DescribeTable("rejects invalid completion policies",
+		func(completion entity.Completion, want string) {
+			max := 65536.0
+			g := &entity.Goal{
+				Objective:   entity.Objective{Instrument: "qemu_cycles", Direction: "decrease"},
+				Constraints: []entity.Constraint{{Instrument: "size_flash", Max: &max}},
+				Completion:  &completion,
+			}
+			Expect(firewall.ValidateGoal(g, cfgWith("qemu_cycles", "size_flash"))).To(MatchError(ContainSubstring(want)))
 		},
-		KillIf: []string{"flash delta > 1024 bytes"},
-	}
-	if err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles")); err != nil {
-		t.Errorf("valid hypothesis rejected: %v", err)
-	}
-}
+		Entry("non-positive threshold", entity.Completion{Threshold: 0}, "threshold must be > 0"),
+		Entry("unknown threshold action", entity.Completion{Threshold: 0.2, OnThreshold: "invent_it"}, "completion.on_threshold"),
+	)
 
-func TestValidateHypothesis_DirectionalAccepted(t *testing.T) {
-	// min_effect=0 is the directional opt-in; no magnitude commitment.
-	h := &entity.Hypothesis{
-		Claim: "unrolling the hot loop will reduce cycles",
-		Predicts: entity.Predicts{
-			Instrument: "qemu_cycles", Target: "dsp_fir_bench", Direction: "decrease", MinEffect: 0,
-		},
-		KillIf: []string{"ci upper bound >= 0"},
-	}
-	if err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles")); err != nil {
-		t.Errorf("directional hypothesis (min_effect=0) should validate, got %v", err)
-	}
-}
+	Describe("rescuers", func() {
+		cfg := &store.Config{Instruments: map[string]store.Instrument{
+			"ns_per_eval":     {},
+			"sim_total_bytes": {},
+			"host_test":       {},
+		}}
+		baseGoal := func() *entity.Goal {
+			return &entity.Goal{
+				Objective:   entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
+				Constraints: []entity.Constraint{{Instrument: "host_test", Require: "pass"}},
+			}
+		}
 
-func TestValidateHypothesis_NegativeMinEffectRejected(t *testing.T) {
-	h := &entity.Hypothesis{
-		Claim: "x",
-		Predicts: entity.Predicts{
-			Instrument: "qemu_cycles", Target: "y", Direction: "decrease", MinEffect: -0.01,
-		},
-		KillIf: []string{"..."},
-	}
-	err := firewall.ValidateHypothesis(h, cfgWith("qemu_cycles"))
-	if err == nil || !strings.Contains(err.Error(), ">= 0") {
-		t.Errorf("negative min_effect should be rejected, got %v", err)
-	}
-}
+		It("accepts goals without rescuers", func() {
+			Expect(firewall.ValidateGoal(baseGoal(), cfg)).To(Succeed())
+		})
 
-func TestCheckStrictVerdict_Directional(t *testing.T) {
-	// min_effect=0: only the CI-clean-side gate applies. A tiny but
-	// cleanly-signed effect that would fail the magnitude gate with a
-	// positive min_effect should pass cleanly here.
-	h := &entity.Hypothesis{Predicts: entity.Predicts{
-		Direction: "decrease", MinEffect: 0,
-	}}
-	tiny := &stats.Comparison{
-		NBaseline: 10, NCandidate: 10,
-		DeltaFrac: -0.003, CILowFrac: -0.005, CIHighFrac: -0.001,
-	}
-	d := firewall.CheckStrictVerdict(entity.VerdictSupported, h, tiny)
-	if !d.Passed || d.Downgraded {
-		t.Fatalf("directional hypothesis with clean CI should pass, got %+v", d)
-	}
+		DescribeTable("rejects malformed rescuer clauses",
+			func(mut func(*entity.Goal), want string) {
+				g := baseGoal()
+				mut(g)
+				Expect(firewall.ValidateGoal(g, cfg)).To(MatchError(ContainSubstring(want)))
+			},
+			Entry("without neutral band",
+				func(g *entity.Goal) {
+					g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02}}
+				},
+				"neutral_band_frac",
+			),
+			Entry("pointing at the objective instrument",
+				func(g *entity.Goal) {
+					g.NeutralBandFrac = 0.02
+					g.Rescuers = []entity.Rescuer{{Instrument: "ns_per_eval", Direction: "decrease", MinEffect: 0.02}}
+				},
+				"equals the goal objective",
+			),
+			Entry("with an unregistered instrument",
+				func(g *entity.Goal) {
+					g.NeutralBandFrac = 0.02
+					g.Rescuers = []entity.Rescuer{{Instrument: "unregistered", Direction: "decrease", MinEffect: 0.02}}
+				},
+				"not registered",
+			),
+			Entry("with negative min effect",
+				func(g *entity.Goal) {
+					g.NeutralBandFrac = 0.02
+					g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: -0.01}}
+				},
+				">= 0",
+			),
+		)
 
-	// CI still must be clean: a directional hypothesis with CI straddling
-	// zero still downgrades. The scientific discipline survives.
-	neutral := &stats.Comparison{
-		NBaseline: 10, NCandidate: 10,
-		DeltaFrac: -0.003, CILowFrac: -0.010, CIHighFrac: 0.005,
-	}
-	d = firewall.CheckStrictVerdict(entity.VerdictSupported, h, neutral)
-	if d.Passed || !d.Downgraded {
-		t.Fatalf("directional with CI straddling zero should still downgrade, got %+v", d)
-	}
-}
+		DescribeTable("accepts well-formed rescuer clauses",
+			func(minEffect float64) {
+				g := baseGoal()
+				g.NeutralBandFrac = 0.02
+				g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: minEffect}}
+				Expect(firewall.ValidateGoal(g, cfg)).To(Succeed())
+			},
+			Entry("with positive min effect", 0.02),
+			Entry("as directional only", 0.0),
+		)
+	})
+})
 
-func TestCheckHypothesisInstrumentWithinGoal(t *testing.T) {
-	max := 65536.0
-	goal := &entity.Goal{
-		ID: "G-0001",
-		Objective: entity.Objective{
-			Instrument: "timing",
-			Direction:  "decrease",
-		},
-		Constraints: []entity.Constraint{
-			{Instrument: "binary_size", Max: &max},
-			{Instrument: "test", Require: "pass"},
-			{Instrument: "compile", Require: "pass"},
-		},
-	}
-
-	newHypothesis := func(inst string) *entity.Hypothesis {
-		return &entity.Hypothesis{
+var _ = Describe("hypothesis and experiment validation", func() {
+	It("rejects incomplete hypotheses", func() {
+		Expect(firewall.ValidateHypothesis(&entity.Hypothesis{}, cfgWith("qemu_cycles"))).To(HaveOccurred())
+		h := &entity.Hypothesis{
 			Claim: "x",
 			Predicts: entity.Predicts{
-				Instrument: inst,
-				Target:     "firmware",
-				Direction:  "decrease",
-				MinEffect:  0.1,
+				Instrument: "qemu_cycles", Target: "y", Direction: "decrease", MinEffect: 0.1,
 			},
-			KillIf: []string{"fails"},
 		}
-	}
-
-	t.Run("objective instrument allowed", func(t *testing.T) {
-		if err := firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("timing")); err != nil {
-			t.Fatalf("objective instrument should pass, got %v", err)
-		}
+		Expect(firewall.ValidateHypothesis(h, cfgWith("qemu_cycles"))).To(MatchError(ContainSubstring("kill_if")))
 	})
 
-	t.Run("constraint instrument allowed", func(t *testing.T) {
-		if err := firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("binary_size")); err != nil {
-			t.Fatalf("constraint instrument should pass, got %v", err)
-		}
+	It("accepts magnitude and directional hypotheses", func() {
+		Expect(firewall.ValidateHypothesis(&entity.Hypothesis{
+			Claim: "unroll dsp_fir 4x cuts cycles >10%",
+			Predicts: entity.Predicts{
+				Instrument: "qemu_cycles", Target: "dsp_fir_bench", Direction: "decrease", MinEffect: 0.10,
+			},
+			KillIf: []string{"flash delta > 1024 bytes"},
+		}, cfgWith("qemu_cycles"))).To(Succeed())
+
+		Expect(firewall.ValidateHypothesis(&entity.Hypothesis{
+			Claim: "unrolling the hot loop will reduce cycles",
+			Predicts: entity.Predicts{
+				Instrument: "qemu_cycles", Target: "dsp_fir_bench", Direction: "decrease", MinEffect: 0,
+			},
+			KillIf: []string{"ci upper bound >= 0"},
+		}, cfgWith("qemu_cycles"))).To(Succeed())
 	})
 
-	t.Run("non-goal instrument rejected", func(t *testing.T) {
+	It("rejects negative hypothesis min_effect", func() {
+		err := firewall.ValidateHypothesis(&entity.Hypothesis{
+			Claim: "x",
+			Predicts: entity.Predicts{
+				Instrument: "qemu_cycles", Target: "y", Direction: "decrease", MinEffect: -0.01,
+			},
+			KillIf: []string{"..."},
+		}, cfgWith("qemu_cycles"))
+		Expect(err).To(MatchError(ContainSubstring(">= 0")))
+	})
+
+	It("accepts and rejects experiments based on registered instruments", func() {
+		Expect(firewall.ValidateExperiment(&entity.Experiment{
+			GoalID:      "G-0001",
+			Hypothesis:  "H-0001",
+			Instruments: []string{"qemu_cycles"},
+			Baseline:    entity.Baseline{Ref: "HEAD"},
+		}, cfgWith("qemu_cycles"))).To(Succeed())
+
+		Expect(firewall.ValidateExperiment(&entity.Experiment{
+			GoalID:      "G-0001",
+			Hypothesis:  "H-0001",
+			Instruments: []string{"ghost_instrument"},
+			Baseline:    entity.Baseline{Ref: "HEAD"},
+		}, cfgWith("qemu_cycles"))).To(HaveOccurred())
+	})
+
+	It("limits hypothesis predicted instruments to goal objective or constraints", func() {
+		max := 65536.0
+		goal := &entity.Goal{
+			ID:        "G-0001",
+			Objective: entity.Objective{Instrument: "timing", Direction: "decrease"},
+			Constraints: []entity.Constraint{
+				{Instrument: "binary_size", Max: &max},
+				{Instrument: "test", Require: "pass"},
+				{Instrument: "compile", Require: "pass"},
+			},
+		}
+		newHypothesis := func(inst string) *entity.Hypothesis {
+			return &entity.Hypothesis{
+				Claim: "x",
+				Predicts: entity.Predicts{
+					Instrument: inst,
+					Target:     "firmware",
+					Direction:  "decrease",
+					MinEffect:  0.1,
+				},
+				KillIf: []string{"fails"},
+			}
+		}
+
+		Expect(firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("timing"))).To(Succeed())
+		Expect(firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("binary_size"))).To(Succeed())
 		err := firewall.CheckHypothesisInstrumentWithinGoal(goal, newHypothesis("qemu_cycles"))
-		if err == nil {
-			t.Fatal("expected non-goal instrument to be rejected")
-		}
+		Expect(err).To(HaveOccurred())
 		for _, want := range []string{
 			"qemu_cycles",
 			"timing, binary_size, test, compile",
 			"supporting instruments may still be observed on experiments",
 		} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("error %q missing %q", err, want)
-			}
+			Expect(err.Error()).To(ContainSubstring(want))
 		}
 	})
-}
+})
 
-func TestValidateLesson(t *testing.T) {
-	t.Run("happy hypothesis-scope", func(t *testing.T) {
-		l := &entity.Lesson{
-			Claim:      "unroll past 8× is cache-bound",
+var _ = Describe("instrument dependency gates", func() {
+	It("requires prerequisite observations to pass", func() {
+		cfg := &store.Config{Instruments: map[string]store.Instrument{
+			"host_test":   {Unit: "bool"},
+			"qemu_cycles": {Unit: "cycles", Requires: []string{"host_test=pass"}},
+		}}
+		pass := true
+		fail := false
+
+		Expect(firewall.CheckInstrumentDependencies("qemu_cycles", cfg, nil)).To(HaveOccurred())
+		Expect(firewall.CheckInstrumentDependencies("qemu_cycles", cfg, []*entity.Observation{
+			{Instrument: "host_test", Pass: &pass},
+		})).To(Succeed())
+		Expect(firewall.CheckInstrumentDependencies("qemu_cycles", cfg, []*entity.Observation{
+			{Instrument: "host_test", Pass: &fail},
+		})).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("lesson validation and provenance", func() {
+	DescribeTable("validates lesson shape",
+		func(l *entity.Lesson, wantErr string) {
+			err := firewall.ValidateLesson(l)
+			if wantErr == "" {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			Expect(err).To(MatchError(ContainSubstring(wantErr)))
+		},
+		Entry("happy hypothesis scope", &entity.Lesson{
+			Claim:      "unroll past 8x is cache-bound",
 			Scope:      entity.LessonScopeHypothesis,
 			Subjects:   []string{"C-0003"},
 			Status:     entity.LessonStatusProvisional,
 			Provenance: &entity.LessonProvenance{SourceChain: entity.LessonSourceUnreviewedDecisive},
-		}
-		if err := firewall.ValidateLesson(l); err != nil {
-			t.Errorf("valid lesson rejected: %v", err)
-		}
-	})
-	t.Run("happy system-scope", func(t *testing.T) {
-		l := &entity.Lesson{
+		}, ""),
+		Entry("happy system scope", &entity.Lesson{
 			Claim: "fixture cache is sticky",
 			Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive,
-		}
-		if err := firewall.ValidateLesson(l); err != nil {
-			t.Errorf("valid system lesson rejected: %v", err)
-		}
-	})
-	t.Run("system scope rejects subjects", func(t *testing.T) {
-		l := &entity.Lesson{
+		}, ""),
+		Entry("system scope with subjects", &entity.Lesson{
 			Claim: "x", Scope: entity.LessonScopeSystem, Subjects: []string{"H-0001"},
-		}
-		if err := firewall.ValidateLesson(l); err == nil ||
-			!strings.Contains(err.Error(), "cannot cite --from subjects") {
-			t.Errorf("system scope with subjects should fail, got %v", err)
-		}
-	})
-	t.Run("empty claim", func(t *testing.T) {
-		l := &entity.Lesson{Scope: entity.LessonScopeSystem}
-		if err := firewall.ValidateLesson(l); err == nil {
-			t.Error("empty claim should fail")
-		}
-	})
-	t.Run("invalid scope", func(t *testing.T) {
-		l := &entity.Lesson{Claim: "x", Scope: "galactic"}
-		if err := firewall.ValidateLesson(l); err == nil ||
-			!strings.Contains(err.Error(), "scope must be") {
-			t.Errorf("bad scope should fail with scope hint, got %v", err)
-		}
-	})
-	t.Run("hypothesis scope requires subjects", func(t *testing.T) {
-		l := &entity.Lesson{Claim: "x", Scope: entity.LessonScopeHypothesis}
-		if err := firewall.ValidateLesson(l); err == nil ||
-			!strings.Contains(err.Error(), "at least one subject") {
-			t.Errorf("hypothesis scope without subjects should fail, got %v", err)
-		}
-	})
-	t.Run("invalid subject prefix", func(t *testing.T) {
-		l := &entity.Lesson{
+		}, "cannot cite --from subjects"),
+		Entry("empty claim", &entity.Lesson{Scope: entity.LessonScopeSystem}, "claim"),
+		Entry("invalid scope", &entity.Lesson{Claim: "x", Scope: "galactic"}, "scope must be"),
+		Entry("hypothesis scope without subjects", &entity.Lesson{Claim: "x", Scope: entity.LessonScopeHypothesis}, "at least one subject"),
+		Entry("invalid subject prefix", &entity.Lesson{
 			Claim: "x", Scope: entity.LessonScopeHypothesis, Subjects: []string{"X-0001"},
-		}
-		if err := firewall.ValidateLesson(l); err == nil ||
-			!strings.Contains(err.Error(), "H-/E-/C-") {
-			t.Errorf("bad subject prefix should fail, got %v", err)
-		}
-	})
-	t.Run("supersedes must be L-", func(t *testing.T) {
-		l := &entity.Lesson{
+		}, "H-/E-/C-"),
+		Entry("invalid supersedes id", &entity.Lesson{
 			Claim: "x", Scope: entity.LessonScopeSystem, SupersedesID: "H-0001",
-		}
-		if err := firewall.ValidateLesson(l); err == nil ||
-			!strings.Contains(err.Error(), "L- id") {
-			t.Errorf("non-L supersedes target should fail, got %v", err)
-		}
-	})
-	t.Run("invalid provenance state", func(t *testing.T) {
-		l := &entity.Lesson{
+		}, "L- id"),
+		Entry("invalid provenance source chain", &entity.Lesson{
 			Claim:      "x",
 			Scope:      entity.LessonScopeHypothesis,
 			Subjects:   []string{"H-0001"},
 			Provenance: &entity.LessonProvenance{SourceChain: "sideways"},
-		}
-		if err := firewall.ValidateLesson(l); err == nil || !strings.Contains(err.Error(), "source_chain") {
-			t.Errorf("bad provenance should fail, got %v", err)
-		}
-	})
-}
+		}, "source_chain"),
+	)
 
-func TestAssessLessonSourceChain(t *testing.T) {
-	t.Run("system lessons resolve to system source", func(t *testing.T) {
-		lesson := &entity.Lesson{ID: "L-0000", Scope: entity.LessonScopeSystem}
-		got, err := firewall.AssessLessonSourceChain(fakeInspiredByReader{}, lesson)
-		if err != nil {
-			t.Fatalf("AssessLessonSourceChain failed: %v", err)
-		}
-		if got != entity.LessonSourceSystem {
-			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceSystem)
-		}
-	})
+	DescribeTable("assesses source chains from lesson subjects",
+		func(reader fakeInspiredByReader, lesson *entity.Lesson, want string) {
+			got, err := firewall.AssessLessonSourceChain(reader, lesson)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(want))
+		},
+		Entry("system lessons resolve to system source",
+			fakeInspiredByReader{},
+			&entity.Lesson{ID: "L-0000", Scope: entity.LessonScopeSystem},
+			entity.LessonSourceSystem,
+		),
+		Entry("malformed system lessons with subjects still resolve from subjects",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
+				},
+				conclusions: map[string]*entity.Conclusion{
+					"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
+				},
+			},
+			&entity.Lesson{ID: "L-0003", Scope: entity.LessonScopeSystem, Subjects: []string{"C-0003"}},
+			entity.LessonSourceUnreviewedDecisive,
+		),
+		Entry("reviewed hypothesis resolves to reviewed decisive",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0001": {ID: "H-0001", Status: entity.StatusSupported},
+				},
+			},
+			&entity.Lesson{ID: "L-0001", Scope: entity.LessonScopeHypothesis, Subjects: []string{"H-0001"}},
+			entity.LessonSourceReviewedDecisive,
+		),
+		Entry("unreviewed decisive conclusion resolves to unreviewed decisive",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
+				},
+				conclusions: map[string]*entity.Conclusion{
+					"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
+				},
+			},
+			&entity.Lesson{ID: "L-0003", Scope: entity.LessonScopeHypothesis, Subjects: []string{"C-0003"}},
+			entity.LessonSourceUnreviewedDecisive,
+		),
+		Entry("downgraded chain resolves to inconclusive",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0004": {ID: "H-0004", Status: entity.StatusInconclusive},
+				},
+				conclusions: map[string]*entity.Conclusion{
+					"C-0004": {ID: "C-0004", Hypothesis: "H-0004", Verdict: entity.VerdictInconclusive},
+				},
+			},
+			&entity.Lesson{ID: "L-0004", Scope: entity.LessonScopeHypothesis, Subjects: []string{"C-0004"}},
+			entity.LessonSourceInconclusive,
+		),
+	)
 
-	t.Run("malformed system lessons with subjects still resolve from subjects", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
+	DescribeTable("requires inspired-by lessons to be active and reviewed",
+		func(reader fakeInspiredByReader, lessons []*entity.Lesson, wantErr string) {
+			err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
+			if wantErr == "" {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			Expect(err).To(MatchError(ContainSubstring(wantErr)))
+		},
+		Entry("active reviewed hypothesis chain",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0001": {ID: "H-0001", Status: entity.StatusSupported},
+				},
 			},
-			conclusions: map[string]*entity.Conclusion{
-				"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
+			[]*entity.Lesson{{ID: "L-0001", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"H-0001"}}},
+			"",
+		),
+		Entry("non-active lesson status",
+			fakeInspiredByReader{},
+			[]*entity.Lesson{{ID: "L-0002", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusProvisional}},
+			"active",
+		),
+		Entry("unreviewed decisive chains",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
+				},
+				conclusions: map[string]*entity.Conclusion{
+					"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
+				},
 			},
-		}
-		lesson := &entity.Lesson{ID: "L-0003", Scope: entity.LessonScopeSystem, Subjects: []string{"C-0003"}}
-		got, err := firewall.AssessLessonSourceChain(reader, lesson)
-		if err != nil {
-			t.Fatalf("AssessLessonSourceChain failed: %v", err)
-		}
-		if got != entity.LessonSourceUnreviewedDecisive {
-			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceUnreviewedDecisive)
-		}
-	})
+			[]*entity.Lesson{{ID: "L-0003", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"C-0003"}}},
+			"unreviewed decisive chain",
+		),
+		Entry("malformed system lesson on unreviewed decisive chain",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0005": {ID: "H-0005", Status: entity.StatusUnreviewed},
+				},
+				conclusions: map[string]*entity.Conclusion{
+					"C-0005": {ID: "C-0005", Hypothesis: "H-0005", Verdict: entity.VerdictSupported},
+				},
+			},
+			[]*entity.Lesson{{ID: "L-0005", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Subjects: []string{"C-0005"}}},
+			"unreviewed decisive chain",
+		),
+		Entry("downgraded or inconclusive chains",
+			fakeInspiredByReader{
+				hypotheses: map[string]*entity.Hypothesis{
+					"H-0004": {ID: "H-0004", Status: entity.StatusInconclusive},
+				},
+				conclusions: map[string]*entity.Conclusion{
+					"C-0004": {ID: "C-0004", Hypothesis: "H-0004", Verdict: entity.VerdictInconclusive},
+				},
+			},
+			[]*entity.Lesson{{ID: "L-0004", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"C-0004"}}},
+			"non-decisive chain",
+		),
+	)
+})
 
-	t.Run("reviewed hypothesis resolves to reviewed decisive", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0001": {ID: "H-0001", Status: entity.StatusSupported},
-			},
-		}
-		lesson := &entity.Lesson{ID: "L-0001", Scope: entity.LessonScopeHypothesis, Subjects: []string{"H-0001"}}
-		got, err := firewall.AssessLessonSourceChain(reader, lesson)
-		if err != nil {
-			t.Fatalf("AssessLessonSourceChain failed: %v", err)
-		}
-		if got != entity.LessonSourceReviewedDecisive {
-			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceReviewedDecisive)
-		}
-	})
-
-	t.Run("unreviewed decisive conclusion resolves to unreviewed decisive", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
-			},
-			conclusions: map[string]*entity.Conclusion{
-				"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
-			},
-		}
-		lesson := &entity.Lesson{ID: "L-0003", Scope: entity.LessonScopeHypothesis, Subjects: []string{"C-0003"}}
-		got, err := firewall.AssessLessonSourceChain(reader, lesson)
-		if err != nil {
-			t.Fatalf("AssessLessonSourceChain failed: %v", err)
-		}
-		if got != entity.LessonSourceUnreviewedDecisive {
-			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceUnreviewedDecisive)
-		}
-	})
-
-	t.Run("downgraded chain resolves to inconclusive", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0004": {ID: "H-0004", Status: entity.StatusInconclusive},
-			},
-			conclusions: map[string]*entity.Conclusion{
-				"C-0004": {ID: "C-0004", Hypothesis: "H-0004", Verdict: entity.VerdictInconclusive},
-			},
-		}
-		lesson := &entity.Lesson{ID: "L-0004", Scope: entity.LessonScopeHypothesis, Subjects: []string{"C-0004"}}
-		got, err := firewall.AssessLessonSourceChain(reader, lesson)
-		if err != nil {
-			t.Fatalf("AssessLessonSourceChain failed: %v", err)
-		}
-		if got != entity.LessonSourceInconclusive {
-			t.Fatalf("source chain = %q, want %q", got, entity.LessonSourceInconclusive)
-		}
-	})
-}
-
-func TestCheckBudgetForNewExperiment(t *testing.T) {
+var _ = Describe("budget gates", func() {
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 
-	t.Run("zero budgets pass", func(t *testing.T) {
-		st := &store.State{Counters: map[string]int{"E": 42}}
-		cfg := &store.Config{}
-		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
-			t.Fatalf("zero budgets should be ok, got %+v", breach)
-		}
+	DescribeTable("allows experiments under configured budgets",
+		func(st *store.State, cfg *store.Config) {
+			Expect(firewall.CheckBudgetForNewExperiment(st, cfg, now).Ok()).To(BeTrue())
+		},
+		Entry("zero budgets", &store.State{Counters: map[string]int{"E": 42}}, &store.Config{}),
+		Entry("under max_experiments", &store.State{Counters: map[string]int{"E": 4}}, &store.Config{Budgets: store.Budgets{MaxExperiments: 5}}),
+		Entry("nil start time under wall clock budget", &store.State{Counters: map[string]int{"E": 0}}, &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}),
+		Entry("under max_wall_time_h", func() *store.State {
+			start := now.Add(-6 * time.Hour)
+			return &store.State{Counters: map[string]int{"E": 0}, ResearchStartedAt: &start}
+		}(), &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}),
+	)
+
+	It("breaches max_experiments at the limit", func() {
+		breach := firewall.CheckBudgetForNewExperiment(
+			&store.State{Counters: map[string]int{"E": 5}},
+			&store.Config{Budgets: store.Budgets{MaxExperiments: 5}},
+			now,
+		)
+		Expect(breach.Ok()).To(BeFalse())
+		Expect(breach.Rule).To(Equal("max_experiments"))
+		Expect(breach.Message).To(ContainSubstring("max_experiments=5"))
 	})
 
-	t.Run("max_experiments under limit passes", func(t *testing.T) {
-		st := &store.State{Counters: map[string]int{"E": 4}}
-		cfg := &store.Config{Budgets: store.Budgets{MaxExperiments: 5}}
-		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
-			t.Fatalf("under-limit should be ok, got %+v", breach)
-		}
-	})
-
-	t.Run("max_experiments at limit breaches", func(t *testing.T) {
-		st := &store.State{Counters: map[string]int{"E": 5}}
-		cfg := &store.Config{Budgets: store.Budgets{MaxExperiments: 5}}
-		breach := firewall.CheckBudgetForNewExperiment(st, cfg, now)
-		if breach.Ok() {
-			t.Fatal("at-limit should breach")
-		}
-		if breach.Rule != "max_experiments" {
-			t.Errorf("rule = %q, want max_experiments", breach.Rule)
-		}
-		if !strings.Contains(breach.Message, "max_experiments=5") {
-			t.Errorf("message missing limit detail: %q", breach.Message)
-		}
-	})
-
-	t.Run("max_wall_time_h with nil ResearchStartedAt passes", func(t *testing.T) {
-		st := &store.State{Counters: map[string]int{"E": 0}}
-		cfg := &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}
-		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
-			t.Fatalf("nil start time should be ok, got %+v", breach)
-		}
-	})
-
-	t.Run("max_wall_time_h under limit passes", func(t *testing.T) {
-		start := now.Add(-6 * time.Hour)
-		st := &store.State{Counters: map[string]int{"E": 0}, ResearchStartedAt: &start}
-		cfg := &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}
-		if breach := firewall.CheckBudgetForNewExperiment(st, cfg, now); !breach.Ok() {
-			t.Fatalf("6h of 24h should be ok, got %+v", breach)
-		}
-	})
-
-	t.Run("max_wall_time_h past limit breaches", func(t *testing.T) {
+	It("breaches max_wall_time_h after the limit", func() {
 		start := now.Add(-25 * time.Hour)
-		st := &store.State{Counters: map[string]int{"E": 0}, ResearchStartedAt: &start}
-		cfg := &store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}}
-		breach := firewall.CheckBudgetForNewExperiment(st, cfg, now)
-		if breach.Ok() {
-			t.Fatal("past limit should breach")
-		}
-		if breach.Rule != "max_wall_time_h" {
-			t.Errorf("rule = %q, want max_wall_time_h", breach.Rule)
-		}
-		if !strings.Contains(breach.Message, "max_wall_time_h=24") {
-			t.Errorf("message missing limit detail: %q", breach.Message)
-		}
+		breach := firewall.CheckBudgetForNewExperiment(
+			&store.State{Counters: map[string]int{"E": 0}, ResearchStartedAt: &start},
+			&store.Config{Budgets: store.Budgets{MaxWallTimeH: 24}},
+			now,
+		)
+		Expect(breach.Ok()).To(BeFalse())
+		Expect(breach.Rule).To(Equal("max_wall_time_h"))
+		Expect(breach.Message).To(ContainSubstring("max_wall_time_h=24"))
 	})
 
-	t.Run("max_experiments triggers before max_wall_time_h", func(t *testing.T) {
-		start := now.Add(-30 * time.Hour) // also over MaxWallTimeH=24
-		st := &store.State{Counters: map[string]int{"E": 5}, ResearchStartedAt: &start}
-		cfg := &store.Config{Budgets: store.Budgets{MaxExperiments: 5, MaxWallTimeH: 24}}
-		breach := firewall.CheckBudgetForNewExperiment(st, cfg, now)
-		if breach.Rule != "max_experiments" {
-			t.Errorf("experiments should check first, got %q", breach.Rule)
-		}
+	It("checks max_experiments before wall time", func() {
+		start := now.Add(-30 * time.Hour)
+		breach := firewall.CheckBudgetForNewExperiment(
+			&store.State{Counters: map[string]int{"E": 5}, ResearchStartedAt: &start},
+			&store.Config{Budgets: store.Budgets{MaxExperiments: 5, MaxWallTimeH: 24}},
+			now,
+		)
+		Expect(breach.Rule).To(Equal("max_experiments"))
 	})
-}
+})
 
-func TestCheckStrictVerdict(t *testing.T) {
+var _ = Describe("strict verdict firewall", func() {
 	hyp := func(direction string, minEffect float64) *entity.Hypothesis {
 		return &entity.Hypothesis{Predicts: entity.Predicts{Direction: direction, MinEffect: minEffect}}
 	}
@@ -605,385 +505,162 @@ func TestCheckStrictVerdict(t *testing.T) {
 		}
 	}
 
-	t.Run("supported with insufficient samples downgrades", func(t *testing.T) {
-		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), cmp(1, -0.2, -0.3, -0.1))
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade, got %+v", d)
-		}
-		if d.FinalVerdict != entity.VerdictInconclusive {
-			t.Errorf("verdict = %q, want inconclusive", d.FinalVerdict)
-		}
+	It("lets directional hypotheses pass on clean CI without magnitude gate", func() {
+		h := hyp("decrease", 0)
+		d := firewall.CheckStrictVerdict(entity.VerdictSupported, h, cmp(10, -0.003, -0.005, -0.001))
+		Expect(d.Passed).To(BeTrue())
+		Expect(d.Downgraded).To(BeFalse())
+
+		d = firewall.CheckStrictVerdict(entity.VerdictSupported, h, cmp(10, -0.003, -0.010, 0.005))
+		Expect(d.Passed).To(BeFalse())
+		Expect(d.Downgraded).To(BeTrue())
 	})
 
-	t.Run("supported with nil comparison downgrades", func(t *testing.T) {
-		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), nil)
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade, got %+v", d)
-		}
-	})
+	DescribeTable("downgrades unsupported supported verdicts",
+		func(h *entity.Hypothesis, comparison *stats.Comparison, wantReason string) {
+			d := firewall.CheckStrictVerdict(entity.VerdictSupported, h, comparison)
+			Expect(d.Passed).To(BeFalse())
+			Expect(d.Downgraded).To(BeTrue())
+			Expect(d.FinalVerdict).To(Equal(entity.VerdictInconclusive))
+			if wantReason != "" {
+				Expect(strings.Join(d.Reasons, " ")).To(ContainSubstring(wantReason))
+			}
+		},
+		Entry("insufficient samples", hyp("decrease", 0.05), cmp(1, -0.2, -0.3, -0.1), ""),
+		Entry("nil comparison", hyp("decrease", 0.05), nil, ""),
+		Entry("increase CI crossing zero", hyp("increase", 0.05), cmp(10, 0.15, -0.02, 0.30), "crosses zero"),
+		Entry("decrease CI crossing zero", hyp("decrease", 0.05), cmp(10, -0.15, -0.30, 0.02), ""),
+		Entry("effect below min_effect", hyp("decrease", 0.20), cmp(10, -0.05, -0.08, -0.02), "min_effect"),
+	)
 
-	t.Run("supported increase with CI crossing zero downgrades", func(t *testing.T) {
-		// direction=increase, predicts positive delta; CILowFrac <= 0 should flag
-		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("increase", 0.05), cmp(10, 0.15, -0.02, 0.30))
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade when CI crosses zero, got %+v", d)
-		}
-		joined := strings.Join(d.Reasons, " ")
-		if !strings.Contains(joined, "crosses zero") {
-			t.Errorf("reasons missing CI-crosses-zero message: %v", d.Reasons)
-		}
-	})
-
-	t.Run("supported decrease with CI crossing zero downgrades", func(t *testing.T) {
-		// direction=decrease, expects negative delta; CIHighFrac >= 0 should flag
-		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), cmp(10, -0.15, -0.30, 0.02))
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade when CI crosses zero, got %+v", d)
-		}
-	})
-
-	t.Run("supported with effect below min_effect downgrades", func(t *testing.T) {
-		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.20), cmp(10, -0.05, -0.08, -0.02))
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade for too-small effect, got %+v", d)
-		}
-		joined := strings.Join(d.Reasons, " ")
-		if !strings.Contains(joined, "min_effect") {
-			t.Errorf("reasons missing min_effect message: %v", d.Reasons)
-		}
-	})
-
-	t.Run("supported passing cleanly", func(t *testing.T) {
+	It("allows supported verdicts with clean strict evidence", func() {
 		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
-		if !d.Passed || d.Downgraded {
-			t.Fatalf("expected clean pass, got %+v", d)
-		}
-		if d.FinalVerdict != entity.VerdictSupported {
-			t.Errorf("verdict = %q, want supported", d.FinalVerdict)
-		}
+		Expect(d.Passed).To(BeTrue())
+		Expect(d.Downgraded).To(BeFalse())
+		Expect(d.FinalVerdict).To(Equal(entity.VerdictSupported))
 	})
 
-	t.Run("refuted with structural evidence notes reason", func(t *testing.T) {
-		// predicts decrease but CI lies entirely on the increase side
+	It("accepts refuted and inconclusive verdicts while recording structural evidence when present", func() {
 		d := firewall.CheckStrictVerdict(entity.VerdictRefuted, hyp("decrease", 0.05), cmp(10, 0.20, 0.10, 0.30))
-		if !d.Passed {
-			t.Fatalf("refuted should still pass, got %+v", d)
-		}
-		if len(d.Reasons) == 0 {
-			t.Errorf("expected structural-refutation reason, got none")
-		}
+		Expect(d.Passed).To(BeTrue())
+		Expect(d.Reasons).NotTo(BeEmpty())
+
+		d = firewall.CheckStrictVerdict(entity.VerdictRefuted, hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
+		Expect(d.Passed).To(BeTrue())
+
+		d = firewall.CheckStrictVerdict(entity.VerdictInconclusive, hyp("decrease", 0.05), nil)
+		Expect(d.Passed).To(BeTrue())
+		Expect(d.Downgraded).To(BeFalse())
 	})
 
-	t.Run("refuted passing cleanly has no reasons", func(t *testing.T) {
-		d := firewall.CheckStrictVerdict(entity.VerdictRefuted, hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
-		if !d.Passed {
-			t.Fatalf("refuted should pass, got %+v", d)
-		}
-	})
-
-	t.Run("inconclusive always passes", func(t *testing.T) {
-		d := firewall.CheckStrictVerdict(entity.VerdictInconclusive, hyp("decrease", 0.05), nil)
-		if !d.Passed || d.Downgraded {
-			t.Fatalf("inconclusive should pass cleanly, got %+v", d)
-		}
-	})
-
-	t.Run("unknown verdict fails", func(t *testing.T) {
+	It("rejects unknown verdicts", func() {
 		d := firewall.CheckStrictVerdict("uncertain", hyp("decrease", 0.05), cmp(10, -0.20, -0.30, -0.10))
-		if d.Passed {
-			t.Fatal("unknown verdict should not pass")
-		}
-		joined := strings.Join(d.Reasons, " ")
-		if !strings.Contains(joined, "unknown verdict") {
-			t.Errorf("expected unknown-verdict reason, got: %v", d.Reasons)
-		}
+		Expect(d.Passed).To(BeFalse())
+		Expect(strings.Join(d.Reasons, " ")).To(ContainSubstring("unknown verdict"))
 	})
-}
 
-func TestCheckStrictVerdictRescue(t *testing.T) {
-	// Primary hypothesis: decrease ns_per_eval by at least 5%.
-	hyp := &entity.Hypothesis{Predicts: entity.Predicts{
-		Instrument: "ns_per_eval",
-		Direction:  "decrease",
-		MinEffect:  0.05,
-	}}
-	// Goal declares size as a rescuer with a 2% min_effect and a 2%
-	// neutral band on the primary.
-	goal := &entity.Goal{
-		Objective:       entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
-		NeutralBandFrac: 0.02,
-		Rescuers: []entity.Rescuer{{
-			Instrument: "sim_total_bytes",
+	Describe("rescuer clauses", func() {
+		primaryHyp := &entity.Hypothesis{Predicts: entity.Predicts{
+			Instrument: "ns_per_eval",
 			Direction:  "decrease",
-			MinEffect:  0.02,
-		}},
-	}
-	mkCmp := func(deltaFrac, ciLow, ciHigh float64) *stats.Comparison {
-		return &stats.Comparison{
-			NBaseline: 10, NCandidate: 10,
-			DeltaFrac: deltaFrac, CILowFrac: ciLow, CIHighFrac: ciHigh,
+			MinEffect:  0.05,
+		}}
+		goal := &entity.Goal{
+			Objective:       entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
+			NeutralBandFrac: 0.02,
+			Rescuers: []entity.Rescuer{{
+				Instrument: "sim_total_bytes",
+				Direction:  "decrease",
+				MinEffect:  0.02,
+			}},
 		}
-	}
+		mkCmp := func(deltaFrac, ciLow, ciHigh float64) *stats.Comparison {
+			return &stats.Comparison{
+				NBaseline: 10, NCandidate: 10,
+				DeltaFrac: deltaFrac, CILowFrac: ciLow, CIHighFrac: ciHigh,
+			}
+		}
 
-	t.Run("primary clean win does not consult rescuers", func(t *testing.T) {
-		ctx := firewall.StrictContext{
-			Goal: goal,
-			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
-				t.Fatalf("rescuer should not be consulted when primary passes")
-				return nil, ""
-			},
-		}
-		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp,
-			mkCmp(-0.20, -0.30, -0.10), ctx)
-		if !d.Passed || d.Downgraded || d.RescuedBy != "" {
-			t.Fatalf("expected clean primary win, got %+v", d)
-		}
+		It("does not consult rescuers when the primary comparison passes", func() {
+			ctx := firewall.StrictContext{
+				Goal: goal,
+				RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+					Fail("rescuer should not be consulted when primary passes")
+					return nil, ""
+				},
+			}
+			d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, primaryHyp, mkCmp(-0.20, -0.30, -0.10), ctx)
+			Expect(d.Passed).To(BeTrue())
+			Expect(d.Downgraded).To(BeFalse())
+			Expect(d.RescuedBy).To(BeEmpty())
+		})
+
+		It("rescues neutral primary results when a rescuer passes strict checks", func() {
+			resc := mkCmp(-0.10, -0.15, -0.05)
+			ctx := firewall.StrictContext{
+				Goal: goal,
+				RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+					Expect(instrument).To(Equal("sim_total_bytes"))
+					return resc, ""
+				},
+			}
+			d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, primaryHyp, mkCmp(0.005, -0.01, 0.02), ctx)
+			Expect(d.Passed).To(BeTrue())
+			Expect(d.Downgraded).To(BeFalse())
+			Expect(d.RescuedBy).To(Equal("sim_total_bytes"))
+			Expect(d.FinalVerdict).To(Equal(entity.VerdictSupported))
+			Expect(d.ClauseChecks).To(HaveLen(1))
+			Expect(d.ClauseChecks[0].Passed).To(BeTrue())
+		})
+
+		It("downgrades neutral primaries when no rescuer passes", func() {
+			ctx := firewall.StrictContext{
+				Goal: goal,
+				RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+					return mkCmp(-0.10, -0.20, 0.01), ""
+				},
+			}
+			d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, primaryHyp, mkCmp(0.005, -0.01, 0.02), ctx)
+			Expect(d.Passed).To(BeFalse())
+			Expect(d.Downgraded).To(BeTrue())
+			Expect(d.RescuedBy).To(BeEmpty())
+		})
+
+		It("does not rescue structural primary regressions", func() {
+			ctx := firewall.StrictContext{
+				Goal: goal,
+				RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+					return mkCmp(-0.10, -0.15, -0.05), ""
+				},
+			}
+			d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, primaryHyp, mkCmp(0.05, 0.03, 0.08), ctx)
+			Expect(d.Passed).To(BeFalse())
+			Expect(d.Downgraded).To(BeTrue())
+			Expect(d.RescuedBy).To(BeEmpty())
+		})
+
+		It("records no-data clause checks for missing rescuer observations", func() {
+			ctx := firewall.StrictContext{
+				Goal: goal,
+				RescuerComparison: func(instrument string) (*stats.Comparison, string) {
+					return nil, "no observations on \"sim_total_bytes\" for candidate E-0001"
+				},
+			}
+			d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, primaryHyp, mkCmp(0.005, -0.01, 0.02), ctx)
+			Expect(d.Passed).To(BeFalse())
+			Expect(d.Downgraded).To(BeTrue())
+			Expect(d.RescuedBy).To(BeEmpty())
+		})
+
+		It("does not rescue through the plain strict verdict path", func() {
+			d := firewall.CheckStrictVerdict(entity.VerdictSupported, primaryHyp, mkCmp(0.005, -0.01, 0.02))
+			Expect(d.Passed).To(BeFalse())
+			Expect(d.Downgraded).To(BeTrue())
+		})
 	})
+})
 
-	t.Run("primary neutral and rescuer wins rescues verdict", func(t *testing.T) {
-		// Primary delta is within the 2% band and CI crosses zero.
-		prim := mkCmp(0.005, -0.01, 0.02)
-		// Rescuer cleanly beats its own strict check.
-		resc := mkCmp(-0.10, -0.15, -0.05)
-		ctx := firewall.StrictContext{
-			Goal: goal,
-			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
-				if instrument != "sim_total_bytes" {
-					t.Fatalf("unexpected rescuer instrument %q", instrument)
-				}
-				return resc, ""
-			},
-		}
-		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
-		if !d.Passed || d.Downgraded {
-			t.Fatalf("expected rescue, got %+v", d)
-		}
-		if d.RescuedBy != "sim_total_bytes" {
-			t.Errorf("rescued_by = %q, want sim_total_bytes", d.RescuedBy)
-		}
-		if d.FinalVerdict != entity.VerdictSupported {
-			t.Errorf("final verdict = %q, want supported", d.FinalVerdict)
-		}
-		if len(d.ClauseChecks) != 1 || !d.ClauseChecks[0].Passed {
-			t.Errorf("expected one passing clause check, got %+v", d.ClauseChecks)
-		}
-	})
-
-	t.Run("primary neutral but no rescuer passes yields inconclusive", func(t *testing.T) {
-		prim := mkCmp(0.005, -0.01, 0.02)
-		// Rescuer trend is in the right direction but CI crosses zero.
-		resc := mkCmp(-0.10, -0.20, 0.01)
-		ctx := firewall.StrictContext{
-			Goal: goal,
-			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
-				return resc, ""
-			},
-		}
-		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade (no rescuer passed), got %+v", d)
-		}
-		if d.RescuedBy != "" {
-			t.Errorf("rescued_by should be empty when no rescuer passes, got %q", d.RescuedBy)
-		}
-	})
-
-	t.Run("primary structurally regresses — rescue does not fire", func(t *testing.T) {
-		// Primary delta 5% above the neutral band; direction=decrease so this
-		// is a real regression. Rescue must not save it.
-		prim := mkCmp(0.05, 0.03, 0.08)
-		// Rescuer would pass cleanly if consulted.
-		resc := mkCmp(-0.10, -0.15, -0.05)
-		ctx := firewall.StrictContext{
-			Goal: goal,
-			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
-				return resc, ""
-			},
-		}
-		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade despite passing rescuer (primary regressed), got %+v", d)
-		}
-		if d.RescuedBy != "" {
-			t.Errorf("rescued_by should be empty when primary regresses, got %q", d.RescuedBy)
-		}
-	})
-
-	t.Run("rescuer missing observations — clause check records no_data reason", func(t *testing.T) {
-		prim := mkCmp(0.005, -0.01, 0.02)
-		ctx := firewall.StrictContext{
-			Goal: goal,
-			RescuerComparison: func(instrument string) (*stats.Comparison, string) {
-				return nil, "no observations on \"sim_total_bytes\" for candidate E-0001"
-			},
-		}
-		d := firewall.CheckStrictVerdictWithContext(entity.VerdictSupported, hyp, prim, ctx)
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("expected downgrade when rescuer has no data, got %+v", d)
-		}
-		if d.RescuedBy != "" {
-			t.Errorf("rescued_by should be empty, got %q", d.RescuedBy)
-		}
-	})
-
-	t.Run("plain CheckStrictVerdict without context never rescues", func(t *testing.T) {
-		prim := mkCmp(0.005, -0.01, 0.02)
-		d := firewall.CheckStrictVerdict(entity.VerdictSupported, hyp, prim)
-		if d.Passed || !d.Downgraded {
-			t.Fatalf("plain form should downgrade, got %+v", d)
-		}
-	})
-}
-
-func TestValidateGoalRescuers(t *testing.T) {
-	cfg := &store.Config{Instruments: map[string]store.Instrument{
-		"ns_per_eval":     {},
-		"sim_total_bytes": {},
-		"host_test":       {},
-	}}
-	baseGoal := func() *entity.Goal {
-		return &entity.Goal{
-			Objective:   entity.Objective{Instrument: "ns_per_eval", Direction: "decrease"},
-			Constraints: []entity.Constraint{{Instrument: "host_test", Require: "pass"}},
-		}
-	}
-
-	t.Run("no rescuers is fine", func(t *testing.T) {
-		if err := firewall.ValidateGoal(baseGoal(), cfg); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("rescuers without neutral_band_frac rejected", func(t *testing.T) {
-		g := baseGoal()
-		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02}}
-		err := firewall.ValidateGoal(g, cfg)
-		if err == nil || !strings.Contains(err.Error(), "neutral_band_frac") {
-			t.Fatalf("expected neutral_band_frac error, got %v", err)
-		}
-	})
-
-	t.Run("rescuer pointing at objective rejected", func(t *testing.T) {
-		g := baseGoal()
-		g.NeutralBandFrac = 0.02
-		g.Rescuers = []entity.Rescuer{{Instrument: "ns_per_eval", Direction: "decrease", MinEffect: 0.02}}
-		err := firewall.ValidateGoal(g, cfg)
-		if err == nil || !strings.Contains(err.Error(), "equals the goal objective") {
-			t.Fatalf("expected self-rescue error, got %v", err)
-		}
-	})
-
-	t.Run("unregistered rescuer instrument rejected", func(t *testing.T) {
-		g := baseGoal()
-		g.NeutralBandFrac = 0.02
-		g.Rescuers = []entity.Rescuer{{Instrument: "unregistered", Direction: "decrease", MinEffect: 0.02}}
-		err := firewall.ValidateGoal(g, cfg)
-		if err == nil || !strings.Contains(err.Error(), "not registered") {
-			t.Fatalf("expected not-registered error, got %v", err)
-		}
-	})
-
-	t.Run("well-formed rescuer passes", func(t *testing.T) {
-		g := baseGoal()
-		g.NeutralBandFrac = 0.02
-		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0.02}}
-		if err := firewall.ValidateGoal(g, cfg); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("directional rescuer (min_effect=0) is accepted", func(t *testing.T) {
-		g := baseGoal()
-		g.NeutralBandFrac = 0.02
-		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: 0}}
-		if err := firewall.ValidateGoal(g, cfg); err != nil {
-			t.Fatalf("directional rescuer should validate, got %v", err)
-		}
-	})
-
-	t.Run("negative rescuer min_effect rejected", func(t *testing.T) {
-		g := baseGoal()
-		g.NeutralBandFrac = 0.02
-		g.Rescuers = []entity.Rescuer{{Instrument: "sim_total_bytes", Direction: "decrease", MinEffect: -0.01}}
-		err := firewall.ValidateGoal(g, cfg)
-		if err == nil || !strings.Contains(err.Error(), ">= 0") {
-			t.Fatalf("negative rescuer min_effect should be rejected, got %v", err)
-		}
-	})
-}
-
-func TestCheckInspiredByLessonsReviewed(t *testing.T) {
-	t.Run("allows active reviewed hypothesis chain", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0001": {ID: "H-0001", Status: entity.StatusSupported},
-			},
-		}
-		lessons := []*entity.Lesson{{ID: "L-0001", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"H-0001"}}}
-		if err := firewall.CheckInspiredByLessonsReviewed(reader, lessons); err != nil {
-			t.Fatalf("reviewed hypothesis lesson should pass, got %v", err)
-		}
-	})
-
-	t.Run("rejects non-active lesson status", func(t *testing.T) {
-		reader := fakeInspiredByReader{}
-		lessons := []*entity.Lesson{{ID: "L-0002", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusProvisional}}
-		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
-		if err == nil || !strings.Contains(err.Error(), "L-0002") || !strings.Contains(err.Error(), "active") {
-			t.Fatalf("expected provisional lesson to be rejected, got %v", err)
-		}
-	})
-
-	t.Run("rejects unreviewed decisive chains", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0003": {ID: "H-0003", Status: entity.StatusUnreviewed},
-			},
-			conclusions: map[string]*entity.Conclusion{
-				"C-0003": {ID: "C-0003", Hypothesis: "H-0003", Verdict: entity.VerdictSupported},
-			},
-		}
-		lessons := []*entity.Lesson{{ID: "L-0003", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"C-0003"}}}
-		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
-		if err == nil || !strings.Contains(err.Error(), "unreviewed decisive chain") {
-			t.Fatalf("expected unreviewed decisive lesson to be rejected, got %v", err)
-		}
-	})
-
-	t.Run("rejects malformed system lessons on unreviewed decisive chains", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0005": {ID: "H-0005", Status: entity.StatusUnreviewed},
-			},
-			conclusions: map[string]*entity.Conclusion{
-				"C-0005": {ID: "C-0005", Hypothesis: "H-0005", Verdict: entity.VerdictSupported},
-			},
-		}
-		lessons := []*entity.Lesson{{ID: "L-0005", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusActive, Subjects: []string{"C-0005"}}}
-		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
-		if err == nil || !strings.Contains(err.Error(), "unreviewed decisive chain") {
-			t.Fatalf("expected malformed system lesson to be rejected, got %v", err)
-		}
-	})
-
-	t.Run("rejects downgraded or inconclusive chains", func(t *testing.T) {
-		reader := fakeInspiredByReader{
-			hypotheses: map[string]*entity.Hypothesis{
-				"H-0004": {ID: "H-0004", Status: entity.StatusInconclusive},
-			},
-			conclusions: map[string]*entity.Conclusion{
-				"C-0004": {ID: "C-0004", Hypothesis: "H-0004", Verdict: entity.VerdictInconclusive},
-			},
-		}
-		lessons := []*entity.Lesson{{ID: "L-0004", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"C-0004"}}}
-		err := firewall.CheckInspiredByLessonsReviewed(reader, lessons)
-		if err == nil || !strings.Contains(err.Error(), "non-decisive chain") {
-			t.Fatalf("expected inconclusive lesson to be rejected, got %v", err)
-		}
-	})
-}
-
-func TestCheckInstrumentSafeToDelete(t *testing.T) {
+var _ = Describe("instrument deletion safety", func() {
 	goal := func(id string, status string, obj string, constraints ...string) *entity.Goal {
 		g := &entity.Goal{ID: id, Status: status, Objective: entity.Objective{Instrument: obj, Direction: "decrease"}}
 		for _, c := range constraints {
@@ -998,88 +675,53 @@ func TestCheckInstrumentSafeToDelete(t *testing.T) {
 		return &entity.Observation{ID: id, Instrument: inst}
 	}
 
-	t.Run("unreferenced instrument is safe", func(t *testing.T) {
-		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing")}
-		hyps := []*entity.Hypothesis{hyp("H-0001", "timing")}
-		os := []*entity.Observation{obs("O-0001", "timing")}
-		u := firewall.CheckInstrumentSafeToDelete("binary_size", goals, hyps, os)
-		if !u.Ok() {
-			t.Errorf("unreferenced should be Ok, got %+v", u)
-		}
+	It("allows unreferenced instruments", func() {
+		u := firewall.CheckInstrumentSafeToDelete("binary_size",
+			[]*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing")},
+			[]*entity.Hypothesis{hyp("H-0001", "timing")},
+			[]*entity.Observation{obs("O-0001", "timing")},
+		)
+		Expect(u.Ok()).To(BeTrue())
 	})
 
-	t.Run("goal objective reference blocks even with --force", func(t *testing.T) {
-		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing")}
-		u := firewall.CheckInstrumentSafeToDelete("timing", goals, nil, nil)
-		if u.Ok() {
-			t.Fatal("goal-objective reference should block")
-		}
-		if !u.BlocksEvenWithForce() {
-			t.Errorf("goal-objective reference should block --force, got %+v", u)
-		}
-		if len(u.GoalObjectives) != 1 || u.GoalObjectives[0] != "G-0001" {
-			t.Errorf("expected [G-0001] objective ref, got %v", u.GoalObjectives)
-		}
+	It("blocks active goal objective references even with force", func() {
+		u := firewall.CheckInstrumentSafeToDelete("timing", []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing")}, nil, nil)
+		Expect(u.Ok()).To(BeFalse())
+		Expect(u.BlocksEvenWithForce()).To(BeTrue())
+		Expect(u.GoalObjectives).To(Equal([]string{"G-0001"}))
 	})
 
-	t.Run("goal constraint reference blocks by default", func(t *testing.T) {
-		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing", "binary_size")}
-		u := firewall.CheckInstrumentSafeToDelete("binary_size", goals, nil, nil)
-		if u.Ok() {
-			t.Fatal("goal-constraint reference should block by default")
-		}
-		if u.BlocksEvenWithForce() {
-			t.Errorf("goal-constraint reference should be force-overridable, got %+v", u)
-		}
+	It("treats constraints, hypotheses, and observations as force-overridable references", func() {
+		u := firewall.CheckInstrumentSafeToDelete("binary_size", []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing", "binary_size")}, nil, nil)
+		Expect(u.Ok()).To(BeFalse())
+		Expect(u.BlocksEvenWithForce()).To(BeFalse())
+
+		u = firewall.CheckInstrumentSafeToDelete("binary_size", nil, []*entity.Hypothesis{hyp("H-0001", "binary_size"), hyp("H-0002", "timing")}, nil)
+		Expect(u.Ok()).To(BeFalse())
+		Expect(u.BlocksEvenWithForce()).To(BeFalse())
+		Expect(u.Hypotheses).To(Equal([]string{"H-0001"}))
+
+		u = firewall.CheckInstrumentSafeToDelete("binary_size", nil, nil, []*entity.Observation{obs("O-0001", "binary_size")})
+		Expect(u.Ok()).To(BeFalse())
+		Expect(u.BlocksEvenWithForce()).To(BeFalse())
+		Expect(u.Observations).To(HaveLen(1))
 	})
 
-	t.Run("inactive goal references do not block", func(t *testing.T) {
-		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusConcluded, "timing", "binary_size")}
-		u := firewall.CheckInstrumentSafeToDelete("timing", goals, nil, nil)
-		if !u.Ok() {
-			t.Errorf("concluded-goal references should not block, got %+v", u)
-		}
+	It("ignores inactive goal references", func() {
+		u := firewall.CheckInstrumentSafeToDelete("timing", []*entity.Goal{goal("G-0001", entity.GoalStatusConcluded, "timing", "binary_size")}, nil, nil)
+		Expect(u.Ok()).To(BeTrue())
 	})
 
-	t.Run("hypothesis prediction blocks by default", func(t *testing.T) {
-		hyps := []*entity.Hypothesis{hyp("H-0001", "binary_size"), hyp("H-0002", "timing")}
-		u := firewall.CheckInstrumentSafeToDelete("binary_size", nil, hyps, nil)
-		if u.Ok() || u.BlocksEvenWithForce() {
-			t.Fatalf("hypothesis ref should be blocking-but-forceable, got %+v", u)
-		}
-		if len(u.Hypotheses) != 1 || u.Hypotheses[0] != "H-0001" {
-			t.Errorf("expected [H-0001], got %v", u.Hypotheses)
-		}
+	It("summarizes references and leaves safe usages blank", func() {
+		u := firewall.CheckInstrumentSafeToDelete("binary_size",
+			[]*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing", "binary_size")},
+			[]*entity.Hypothesis{hyp("H-0001", "binary_size")},
+			[]*entity.Observation{obs("O-0001", "binary_size")},
+		)
+		summary := u.Summary()
+		Expect(summary).To(ContainSubstring("G-0001"))
+		Expect(summary).To(ContainSubstring("H-0001"))
+		Expect(summary).To(ContainSubstring("O-0001"))
+		Expect(firewall.CheckInstrumentSafeToDelete("x", nil, nil, nil).Summary()).To(BeEmpty())
 	})
-
-	t.Run("observation blocks by default", func(t *testing.T) {
-		os := []*entity.Observation{obs("O-0001", "binary_size")}
-		u := firewall.CheckInstrumentSafeToDelete("binary_size", nil, nil, os)
-		if u.Ok() || u.BlocksEvenWithForce() {
-			t.Fatalf("observation ref should be blocking-but-forceable, got %+v", u)
-		}
-		if len(u.Observations) != 1 {
-			t.Errorf("expected 1 observation ref, got %v", u.Observations)
-		}
-	})
-
-	t.Run("summary lists every reference class", func(t *testing.T) {
-		goals := []*entity.Goal{goal("G-0001", entity.GoalStatusActive, "timing", "binary_size")}
-		hyps := []*entity.Hypothesis{hyp("H-0001", "binary_size")}
-		os := []*entity.Observation{obs("O-0001", "binary_size")}
-		u := firewall.CheckInstrumentSafeToDelete("binary_size", goals, hyps, os)
-		s := u.Summary()
-		for _, want := range []string{"G-0001", "H-0001", "O-0001"} {
-			if !strings.Contains(s, want) {
-				t.Errorf("summary missing %q: %s", want, s)
-			}
-		}
-	})
-
-	t.Run("empty summary when safe", func(t *testing.T) {
-		u := firewall.CheckInstrumentSafeToDelete("x", nil, nil, nil)
-		if u.Summary() != "" {
-			t.Errorf("safe usage should have empty summary, got %q", u.Summary())
-		}
-	})
-}
+})

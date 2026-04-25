@@ -39,6 +39,12 @@ make tidy
 Go 1.26.2. Always run `make test` before declaring a change done. There is no
 separate lint step beyond `go vet`.
 
+Tests are Ginkgo v2 specs run through normal `go test` tooling. New tests use
+direct `Describe` / `Context` / `It` / `DescribeTable` blocks with Gomega
+assertions; package suite files are the only direct `RunSpecs` wiring. Shared
+test helpers should be Ginkgo-native (`GinkgoHelper`, `GinkgoT`, and
+`DeferCleanup`) unless they are benchmarks, which still use `testing.B`.
+
 ## Layout
 
 ```

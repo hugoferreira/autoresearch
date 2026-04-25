@@ -5,130 +5,95 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 
 	"github.com/bytter/autoresearch/internal/integration"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"gopkg.in/yaml.v3"
 )
 
-func TestEmbeddedAgents_AllPresent(t *testing.T) {
+var _ = Describe("Claude embedded agents", func() {
+	It("embeds the orchestrator and gate reviewer", func() {
+		agents := mustEmbeddedAgents()
+		Expect(agentContentByName(agents)).To(HaveKey("research-orchestrator"))
+		Expect(agentContentByName(agents)).To(HaveKey("research-gate-reviewer"))
+		Expect(agents).To(HaveLen(2))
+	})
+
+	It("has valid frontmatter and role-appropriate tool permissions", func() {
+		for _, a := range mustEmbeddedAgents() {
+			Expect(a.Content).NotTo(BeEmpty(), a.Name)
+			Expect(string(a.Content)).To(HavePrefix("---\n"), a.Name)
+
+			rest := a.Content[4:]
+			end := bytes.Index(rest, []byte("\n---\n"))
+			Expect(end).To(BeNumerically(">=", 0), a.Name)
+			var fm struct {
+				Name        string `yaml:"name"`
+				Description string `yaml:"description"`
+				Tools       string `yaml:"tools"`
+			}
+			Expect(yaml.Unmarshal(rest[:end], &fm)).To(Succeed(), a.Name)
+			Expect(fm.Name).To(Equal(a.Name))
+			desc := strings.ToLower(fm.Description)
+			Expect(desc).To(Or(HavePrefix("use when"), HavePrefix("use after"), HavePrefix("use to")), a.Name)
+			Expect(fm.Tools).NotTo(BeEmpty())
+
+			hasEdit := strings.Contains(fm.Tools, "Edit") || strings.Contains(fm.Tools, "Write")
+			switch a.Name {
+			case "research-orchestrator":
+				Expect(hasEdit).To(BeTrue())
+			case "research-gate-reviewer":
+				Expect(hasEdit).To(BeFalse())
+			}
+			body := rest[end+5:]
+			Expect(string(body)).To(ContainSubstring(".claude/autoresearch.md"))
+		}
+	})
+})
+
+var _ = Describe("Claude agent installation", func() {
+	It("writes all managed agent files", func() {
+		dir := GinkgoT().TempDir()
+		r, err := integration.InstallAgents(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.Count).To(Equal(2))
+		for _, fn := range r.Written {
+			Expect(filepath.Join(dir, ".claude", "agents", fn)).To(BeAnExistingFile())
+		}
+	})
+
+	It("is idempotent and preserves sibling user files", func() {
+		dir := GinkgoT().TempDir()
+		_, err := integration.InstallAgents(dir)
+		Expect(err).NotTo(HaveOccurred())
+
+		customPath := filepath.Join(dir, ".claude", "agents", "my-custom-agent.md")
+		Expect(os.WriteFile(customPath, []byte("custom"), 0o644)).To(Succeed())
+		_, err = integration.InstallAgents(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(readFile(customPath)).To(Equal("custom"))
+	})
+})
+
+func mustEmbeddedAgents() []integration.AgentFile {
+	GinkgoHelper()
 	agents, err := integration.EmbeddedAgents()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{
-		"research-orchestrator":  true,
-		"research-gate-reviewer": true,
-	}
-	got := map[string]bool{}
+	Expect(err).NotTo(HaveOccurred())
+	return agents
+}
+
+func mustEmbeddedCodexAgents() []integration.AgentFile {
+	GinkgoHelper()
+	agents, err := integration.EmbeddedCodexAgents()
+	Expect(err).NotTo(HaveOccurred())
+	return agents
+}
+
+func agentContentByName(agents []integration.AgentFile) map[string]string {
+	out := map[string]string{}
 	for _, a := range agents {
-		got[a.Name] = true
+		out[a.Name] = string(a.Content)
 	}
-	for name := range want {
-		if !got[name] {
-			t.Errorf("missing embedded agent: %s", name)
-		}
-	}
-	if len(agents) != len(want) {
-		t.Errorf("agent count: got %d want %d", len(agents), len(want))
-	}
-}
-
-func TestEmbeddedAgents_FrontmatterValid(t *testing.T) {
-	agents, err := integration.EmbeddedAgents()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, a := range agents {
-		if len(a.Content) == 0 {
-			t.Errorf("%s: empty", a.Name)
-			continue
-		}
-		if !bytes.HasPrefix(a.Content, []byte("---\n")) {
-			t.Errorf("%s: missing YAML frontmatter", a.Name)
-			continue
-		}
-		// Extract frontmatter.
-		rest := a.Content[4:]
-		end := bytes.Index(rest, []byte("\n---\n"))
-		if end < 0 {
-			t.Errorf("%s: unterminated frontmatter", a.Name)
-			continue
-		}
-		var fm struct {
-			Name        string `yaml:"name"`
-			Description string `yaml:"description"`
-			Tools       string `yaml:"tools"`
-		}
-		if err := yaml.Unmarshal(rest[:end], &fm); err != nil {
-			t.Errorf("%s: frontmatter YAML parse: %v", a.Name, err)
-			continue
-		}
-		if fm.Name != a.Name {
-			t.Errorf("%s: frontmatter name mismatch: %q", a.Name, fm.Name)
-		}
-		if !strings.HasPrefix(strings.ToLower(fm.Description), "use when") &&
-			!strings.HasPrefix(strings.ToLower(fm.Description), "use after") &&
-			!strings.HasPrefix(strings.ToLower(fm.Description), "use to") {
-			t.Errorf("%s: description should start with 'Use when/after/to ...': %q", a.Name, fm.Description)
-		}
-		if fm.Tools == "" {
-			t.Errorf("%s: empty tools list", a.Name)
-		}
-		// The orchestrator needs Agent + Edit/Write (for spawning helpers).
-		// The gate reviewer is read-only (no Edit/Write).
-		hasEdit := strings.Contains(fm.Tools, "Edit") || strings.Contains(fm.Tools, "Write")
-		if a.Name == "research-orchestrator" && !hasEdit {
-			t.Errorf("%s: orchestrator must have Edit/Write", a.Name)
-		}
-		if a.Name == "research-gate-reviewer" && hasEdit {
-			t.Errorf("%s: gate reviewer must not have Edit/Write; got %q", a.Name, fm.Tools)
-		}
-		// Body must reference the firewall or the reference doc.
-		body := rest[end+5:]
-		if !bytes.Contains(body, []byte(".claude/autoresearch.md")) {
-			t.Errorf("%s: body should reference .claude/autoresearch.md", a.Name)
-		}
-	}
-}
-
-func TestInstallAgents(t *testing.T) {
-	dir := t.TempDir()
-	r, err := integration.InstallAgents(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Count != 2 {
-		t.Errorf("count: got %d want 2", r.Count)
-	}
-	for _, fn := range r.Written {
-		path := filepath.Join(dir, ".claude", "agents", fn)
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("missing %s: %v", path, err)
-		}
-	}
-}
-
-func TestInstallAgents_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-	_, err := integration.InstallAgents(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Drop a user-owned file that isn't one of ours; make sure it survives.
-	customPath := filepath.Join(dir, ".claude", "agents", "my-custom-agent.md")
-	if err := os.WriteFile(customPath, []byte("custom"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err = integration.InstallAgents(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(customPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) != "custom" {
-		t.Errorf("custom agent file was clobbered: %q", string(b))
-	}
+	return out
 }

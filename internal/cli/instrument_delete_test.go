@@ -1,196 +1,93 @@
 package cli
 
 import (
-	"strings"
-	"testing"
-
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 // registerExtraInstrument adds an unreferenced instrument named `name` to
 // the store so tests can exercise delete without having to design a new
 // goal around it.
-func registerExtraInstrument(t *testing.T, s *store.Store, name string) {
-	t.Helper()
-	if err := s.RegisterInstrument(name, store.Instrument{
+func registerExtraInstrument(s *store.Store, name string) {
+	GinkgoHelper()
+	Expect(s.RegisterInstrument(name, store.Instrument{
 		Cmd: []string{"true"}, Parser: "builtin:passfail", Unit: "bool",
-	}); err != nil {
-		t.Fatalf("register %s: %v", name, err)
-	}
+	})).To(Succeed())
 }
 
-func TestInstrumentDelete_HappyPath(t *testing.T) {
-	saveGlobals(t)
-	dir, s := setupGoalStore(t)
-	registerExtraInstrument(t, s, "extra")
+var _ = Describe("instrument delete", func() {
+	BeforeEach(saveGlobals)
 
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"instrument", "delete", "extra",
-		"--reason", "typo",
+	It("deletes an unreferenced instrument and records the audit payload", func() {
+		dir, s := setupGoalStore()
+		registerExtraInstrument(s, "extra")
+
+		runCLI(dir, "instrument", "delete", "extra", "--reason", "typo")
+
+		insts, err := s.ListInstruments()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(insts).NotTo(HaveKey("extra"))
+
+		event := findLastEvent(s, "instrument.delete")
+		Expect(event).NotTo(BeNil())
+		payload := decodePayload(event)
+		Expect(payload).To(HaveKeyWithValue("name", "extra"))
+		Expect(payload).To(HaveKeyWithValue("reason", "typo"))
+		Expect(payload).To(HaveKeyWithValue("forced", false))
 	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
 
-	insts, err := s.ListInstruments()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := insts["extra"]; ok {
-		t.Error("instrument still present after delete")
-	}
-
-	ev := findLastEvent(t, s, "instrument.delete")
-	if ev == nil {
-		t.Fatal("instrument.delete event not found")
-	}
-	payload := decodePayload(t, ev)
-	if payload["name"] != "extra" {
-		t.Errorf("name = %v, want extra", payload["name"])
-	}
-	if payload["reason"] != "typo" {
-		t.Errorf("reason = %v, want typo", payload["reason"])
-	}
-	if payload["forced"] != false {
-		t.Errorf("forced = %v, want false", payload["forced"])
-	}
-}
-
-func TestInstrumentDelete_RefusesUnknown(t *testing.T) {
-	saveGlobals(t)
-	dir, _ := setupGoalStore(t)
-
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"instrument", "delete", "nonexistent",
-	})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error for unknown instrument")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("err = %v, want 'not found'", err)
-	}
-}
-
-func TestInstrumentDelete_RefusesGoalObjective(t *testing.T) {
-	saveGlobals(t)
-	dir, _ := setupGoalStore(t)
-
-	// setupGoalStore's objective instrument is "timing"
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"instrument", "delete", "timing",
-	})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when deleting goal-objective instrument")
-	}
-	if !strings.Contains(err.Error(), "active goal objective") {
-		t.Errorf("err = %v, want 'active goal objective'", err)
-	}
-}
-
-func TestInstrumentDelete_ForceDoesNotOverrideObjective(t *testing.T) {
-	saveGlobals(t)
-	dir, _ := setupGoalStore(t)
-
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"instrument", "delete", "timing",
-		"--force",
-	})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error: --force should not override objective ref")
-	}
-	if !strings.Contains(err.Error(), "active goal objective") {
-		t.Errorf("err = %v, want 'active goal objective'", err)
-	}
-}
-
-func TestInstrumentDelete_RefusesReferencedByHypothesis(t *testing.T) {
-	saveGlobals(t)
-	dir, s := setupGoalStore(t)
-
-	// Create a hypothesis that predicts on "binary_size" (a constraint
-	// instrument from setupGoalStore).
-	h := &entity.Hypothesis{
-		ID:     "H-0001",
-		GoalID: "G-0001",
-		Claim:  "shrink",
-		Predicts: entity.Predicts{
-			Instrument: "binary_size",
-			Target:     "firmware",
-			Direction:  "decrease",
-			MinEffect:  0.05,
+	DescribeTable("refuses unsafe deletes",
+		func(name string, extraArgs []string, wantErr string) {
+			dir, _ := setupGoalStore()
+			root := Root()
+			root.SetArgs(append([]string{"-C", dir, "instrument", "delete", name}, extraArgs...))
+			Expect(root.Execute()).To(MatchError(ContainSubstring(wantErr)))
 		},
-		KillIf: []string{"tests fail"},
-		Status: entity.StatusOpen,
-		Author: "human",
-	}
-	if err := s.WriteHypothesis(h); err != nil {
-		t.Fatal(err)
-	}
+		Entry("unknown instrument", "nonexistent", nil, "not found"),
+		Entry("goal objective", "timing", nil, "active goal objective"),
+		Entry("forced goal objective", "timing", []string{"--force"}, "active goal objective"),
+	)
 
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"instrument", "delete", "binary_size",
+	It("requires --force before orphaning a referenced instrument", func() {
+		dir, s := setupGoalStore()
+		h := &entity.Hypothesis{
+			ID:     "H-0001",
+			GoalID: "G-0001",
+			Claim:  "shrink",
+			Predicts: entity.Predicts{
+				Instrument: "binary_size",
+				Target:     "firmware",
+				Direction:  "decrease",
+				MinEffect:  0.05,
+			},
+			KillIf: []string{"tests fail"},
+			Status: entity.StatusOpen,
+			Author: "human",
+		}
+		Expect(s.WriteHypothesis(h)).To(Succeed())
+
+		root := Root()
+		root.SetArgs([]string{"-C", dir, "instrument", "delete", "binary_size"})
+		Expect(root.Execute()).To(MatchError(ContainSubstring("--force")))
 	})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when deleting instrument referenced by a hypothesis + constraint")
-	}
-	if !strings.Contains(err.Error(), "--force") {
-		t.Errorf("err should suggest --force, got %v", err)
-	}
-}
 
-func TestInstrumentDelete_ForceOrphans(t *testing.T) {
-	saveGlobals(t)
-	dir, s := setupGoalStore(t)
+	It("can force-delete goal-constraint-only instruments and reports orphans", func() {
+		dir, s := setupGoalStore()
 
-	// "host_test" is only a goal constraint — no hypothesis yet.
-	root := Root()
-	root.SetArgs([]string{
-		"-C", dir,
-		"instrument", "delete", "host_test",
-		"--force",
-		"--reason", "deprecated",
+		runCLI(dir, "instrument", "delete", "host_test", "--force", "--reason", "deprecated")
+
+		insts, err := s.ListInstruments()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(insts).NotTo(HaveKey("host_test"))
+
+		event := findLastEvent(s, "instrument.delete")
+		Expect(event).NotTo(BeNil())
+		payload := decodePayload(event)
+		Expect(payload).To(HaveKeyWithValue("forced", true))
+		orphaned, ok := payload["orphaned"].(map[string]any)
+		Expect(ok).To(BeTrue())
+		Expect(orphaned["goal_constraints"]).NotTo(BeEmpty())
 	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("force-delete: %v", err)
-	}
-
-	insts, err := s.ListInstruments()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := insts["host_test"]; ok {
-		t.Error("host_test still present after --force delete")
-	}
-
-	ev := findLastEvent(t, s, "instrument.delete")
-	if ev == nil {
-		t.Fatal("instrument.delete event not found")
-	}
-	payload := decodePayload(t, ev)
-	if payload["forced"] != true {
-		t.Errorf("forced = %v, want true", payload["forced"])
-	}
-	orphaned, ok := payload["orphaned"].(map[string]any)
-	if !ok {
-		t.Fatalf("orphaned payload missing or wrong type: %v", payload["orphaned"])
-	}
-	constraints, _ := orphaned["goal_constraints"].([]any)
-	if len(constraints) == 0 {
-		t.Errorf("expected goal_constraints to list G-0001, got %v", orphaned)
-	}
-}
+})

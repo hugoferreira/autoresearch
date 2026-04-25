@@ -1,62 +1,47 @@
 package store_test
 
 import (
-	"testing"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestHypothesisCRUD(t *testing.T) {
-	s, _ := mustCreate(t)
+var _ = Describe("hypothesis persistence", func() {
+	It("allocates, writes, reads, and lists hypotheses", func() {
+		s, _ := mustCreate()
+		id, err := s.AllocID(store.KindHypothesis)
+		Expect(err).NotTo(HaveOccurred())
+		h := &entity.Hypothesis{
+			ID:    id,
+			Claim: "unroll cuts cycles",
+			Predicts: entity.Predicts{
+				Instrument: "qemu_cycles", Target: "dsp", Direction: "decrease", MinEffect: 0.1,
+			},
+			KillIf:    []string{"flash grew"},
+			Status:    entity.StatusOpen,
+			Author:    "human:alice",
+			CreatedAt: time.Now().UTC(),
+		}
 
-	id, err := s.AllocID(store.KindHypothesis)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := &entity.Hypothesis{
-		ID:    id,
-		Claim: "unroll cuts cycles",
-		Predicts: entity.Predicts{
-			Instrument: "qemu_cycles", Target: "dsp", Direction: "decrease", MinEffect: 0.1,
-		},
-		KillIf:    []string{"flash grew"},
-		Status:    entity.StatusOpen,
-		Author:    "human:alice",
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := s.WriteHypothesis(h); err != nil {
-		t.Fatal(err)
-	}
+		Expect(s.WriteHypothesis(h)).To(Succeed())
+		back, err := s.ReadHypothesis(id)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(back.Claim).To(Equal(h.Claim))
 
-	back, err := s.ReadHypothesis(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if back.Claim != h.Claim {
-		t.Errorf("claim mismatch: %q vs %q", back.Claim, h.Claim)
-	}
+		list, err := s.ListHypotheses()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].ID).To(Equal(id))
+	})
 
-	list, err := s.ListHypotheses()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].ID != id {
-		t.Errorf("list: %+v", list)
-	}
-}
-
-func TestRegisterInstrument(t *testing.T) {
-	s, _ := mustCreate(t)
-	if err := s.RegisterInstrument("size_flash", store.Instrument{Unit: "bytes"}); err != nil {
-		t.Fatal(err)
-	}
-	insts, err := s.ListInstruments()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := insts["size_flash"]; !ok {
-		t.Errorf("instrument not persisted")
-	}
-}
+	It("registers instruments in config", func() {
+		s, _ := mustCreate()
+		Expect(s.RegisterInstrument("size_flash", store.Instrument{Unit: "bytes"})).To(Succeed())
+		insts, err := s.ListInstruments()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(insts).To(HaveKey("size_flash"))
+	})
+})
