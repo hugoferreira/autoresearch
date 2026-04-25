@@ -13,6 +13,43 @@ import (
 var _ = Describe("lesson list", func() {
 	BeforeEach(saveGlobals)
 
+	It("defaults to active lessons and allows --status all for audit views", func() {
+		dir, s := setupGoalStore()
+		now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:     "H-0001",
+			GoalID: "G-0001",
+			Claim:  "prior direction no longer holds",
+			Status: entity.StatusInconclusive,
+		})).To(Succeed())
+		Expect(s.WriteLesson(&entity.Lesson{
+			ID:        "L-0001",
+			Claim:     "active lesson",
+			Scope:     entity.LessonScopeSystem,
+			Status:    entity.LessonStatusActive,
+			Author:    "agent:analyst",
+			CreatedAt: now,
+		})).To(Succeed())
+		Expect(s.WriteLesson(&entity.Lesson{
+			ID:        "L-0002",
+			Claim:     "invalidated lesson",
+			Scope:     entity.LessonScopeHypothesis,
+			Subjects:  []string{"H-0001"},
+			Status:    entity.LessonStatusInvalidated,
+			Author:    "agent:analyst",
+			CreatedAt: now,
+		})).To(Succeed())
+
+		defaultRows := runCLIJSON[[]readmodel.LessonSummaryView](dir, "lesson", "list", "--summary")
+		Expect(defaultRows).To(HaveLen(1))
+		Expect(defaultRows[0].ID).To(Equal("L-0001"))
+
+		allRows := runCLIJSON[[]readmodel.LessonSummaryView](dir, "lesson", "list", "--status", "all", "--summary")
+		Expect(allRows).To(HaveLen(2))
+		Expect([]string{allRows[0].ID, allRows[1].ID}).To(Equal([]string{"L-0001", "L-0002"}))
+		Expect(allRows[1].Status).To(Equal(entity.LessonStatusInvalidated))
+	})
+
 	It("supports summary pagination with --since", func() {
 		dir, s := setupGoalStore()
 		now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)

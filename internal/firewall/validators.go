@@ -692,6 +692,11 @@ type inspiredByReviewReader interface {
 	ReadConclusion(id string) (*entity.Conclusion, error)
 }
 
+// InspiredByLessonOptions controls exceptional --inspired-by validation paths.
+type InspiredByLessonOptions struct {
+	AllowInvalidated bool
+}
+
 func AssessLessonSourceChain(r inspiredByReviewReader, lesson *entity.Lesson) (string, error) {
 	if lesson == nil {
 		return "", errors.New("cannot assess source chain for a nil lesson")
@@ -787,11 +792,15 @@ func sourceChainForHypothesisStatus(status string) string {
 	}
 }
 
-// CheckInspiredByLessonsReviewed blocks lessons whose supporting chain still
-// depends on an unreviewed decisive conclusion. This closes the loophole where
-// an orchestrator cites a lesson from an unreviewed chain via --inspired-by
-// instead of using --parent directly.
+// CheckInspiredByLessonsReviewed blocks lessons that are not currently safe
+// steering inputs. This closes the loophole where an orchestrator cites an
+// unreviewed or invalidated lesson via --inspired-by instead of using the
+// active lesson surface.
 func CheckInspiredByLessonsReviewed(r inspiredByReviewReader, lessons []*entity.Lesson) error {
+	return CheckInspiredByLessonsReviewedWithOptions(r, lessons, InspiredByLessonOptions{})
+}
+
+func CheckInspiredByLessonsReviewedWithOptions(r inspiredByReviewReader, lessons []*entity.Lesson, opts InspiredByLessonOptions) error {
 	if len(lessons) == 0 {
 		return nil
 	}
@@ -802,8 +811,15 @@ func CheckInspiredByLessonsReviewed(r inspiredByReviewReader, lessons []*entity.
 		if lesson == nil {
 			continue
 		}
-		if lesson.EffectiveStatus() != entity.LessonStatusActive {
-			return fmt.Errorf("lesson %s is %s — only active lessons may be used in --inspired-by", lesson.ID, lesson.EffectiveStatus())
+		status := lesson.EffectiveStatus()
+		if status == entity.LessonStatusInvalidated {
+			if opts.AllowInvalidated {
+				continue
+			}
+			return invalidatedInspiredByError(lesson.ID)
+		}
+		if status != entity.LessonStatusActive {
+			return fmt.Errorf("lesson %s is %s — only active lessons may be used in --inspired-by", lesson.ID, status)
 		}
 		source, err := AssessLessonSourceChain(r, lesson)
 		if err != nil {
@@ -814,11 +830,20 @@ func CheckInspiredByLessonsReviewed(r inspiredByReviewReader, lessons []*entity.
 			continue
 		case entity.LessonSourceUnreviewedDecisive:
 			return fmt.Errorf("lesson %s resolves to an unreviewed decisive chain — dispatch the gate reviewer before using that lesson in --inspired-by", lesson.ID)
+		case entity.LessonSourceInconclusive:
+			if opts.AllowInvalidated {
+				continue
+			}
+			return invalidatedInspiredByError(lesson.ID)
 		default:
 			return fmt.Errorf("lesson %s resolves to a non-decisive chain (%s) — only reviewed decisive lessons may be used in --inspired-by", lesson.ID, source)
 		}
 	}
 	return nil
+}
+
+func invalidatedInspiredByError(id string) error {
+	return fmt.Errorf("lesson %s is invalidated; use lesson list --status active for usable recommendations, or pass --allow-invalidated for retrospective use", id)
 }
 
 // CheckParentReviewed ensures that a hypothesis's parent (if any) has been

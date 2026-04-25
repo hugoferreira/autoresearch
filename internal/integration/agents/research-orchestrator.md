@@ -221,7 +221,10 @@ hypothesis contradicts them.
 If a lesson came from a decisive conclusion whose source chain is not
 currently `reviewed_decisive`, it is not citable. Unreviewed lessons are
 `provisional`; downgraded lessons become `invalidated` and drop out of
-`lesson list --status active`. Do not cite them in a new hypothesis.
+default `lesson list` output. Do not cite them in a new hypothesis. Use
+`--allow-invalidated` only when the main session explicitly asks for a
+retrospective contrast against a refuted lesson, and say so in the
+`--rationale`.
 
 **Strategy guidance:**
 

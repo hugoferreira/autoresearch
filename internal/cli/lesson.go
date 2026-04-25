@@ -282,7 +282,7 @@ func lessonListCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&scope, "scope", "", "filter by scope (hypothesis | system)")
-	c.Flags().StringVar(&status, "status", "", "filter by status (active | provisional | invalidated | superseded)")
+	c.Flags().StringVar(&status, "status", entity.LessonStatusActive, "filter by status (active | provisional | invalidated | superseded | all; default active)")
 	c.Flags().StringVar(&subject, "subject", "", "filter by subject id (returns lessons citing this id)")
 	c.Flags().StringVar(&tag, "tag", "", "filter by tag")
 	c.Flags().BoolVar(&summary, "summary", false, "project to id, scope, status, tags, and a truncated one-line claim")

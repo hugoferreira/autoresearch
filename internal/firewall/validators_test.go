@@ -436,9 +436,30 @@ var _ = Describe("lesson validation and provenance", func() {
 				},
 			},
 			[]*entity.Lesson{{ID: "L-0004", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"C-0004"}}},
-			"non-decisive chain",
+			"invalidated",
 		),
 	)
+
+	It("allows invalidated inspired-by lessons only with an explicit override", func() {
+		reader := fakeInspiredByReader{
+			hypotheses: map[string]*entity.Hypothesis{
+				"H-0004": {ID: "H-0004", Status: entity.StatusInconclusive},
+			},
+			conclusions: map[string]*entity.Conclusion{
+				"C-0004": {ID: "C-0004", Hypothesis: "H-0004", Verdict: entity.VerdictInconclusive},
+			},
+		}
+
+		err := firewall.CheckInspiredByLessonsReviewedWithOptions(reader, []*entity.Lesson{
+			{ID: "L-0004", Scope: entity.LessonScopeHypothesis, Status: entity.LessonStatusActive, Subjects: []string{"C-0004"}},
+		}, firewall.InspiredByLessonOptions{AllowInvalidated: true})
+		Expect(err).NotTo(HaveOccurred())
+
+		err = firewall.CheckInspiredByLessonsReviewedWithOptions(reader, []*entity.Lesson{
+			{ID: "L-0005", Scope: entity.LessonScopeSystem, Status: entity.LessonStatusProvisional},
+		}, firewall.InspiredByLessonOptions{AllowInvalidated: true})
+		Expect(err).To(MatchError(ContainSubstring("only active lessons")))
+	})
 })
 
 var _ = Describe("budget gates", func() {

@@ -35,17 +35,18 @@ func hypothesisCommands() []*cobra.Command {
 
 func hypothesisAddCmd() *cobra.Command {
 	var (
-		claim          string
-		parent         string
-		predInstrument string
-		predTarget     string
-		predDirection  string
-		predMinEffect  float64
-		killIf         []string
-		inspiredBy     []string
-		author         string
-		tags           []string
-		rationale      string
+		claim            string
+		parent           string
+		predInstrument   string
+		predTarget       string
+		predDirection    string
+		predMinEffect    float64
+		killIf           []string
+		inspiredBy       []string
+		author           string
+		tags             []string
+		rationale        string
+		allowInvalidated bool
 	)
 	c := &cobra.Command{
 		Use:   "add",
@@ -95,7 +96,9 @@ func hypothesisAddCmd() *cobra.Command {
 				}
 				inspiredByLessons = append(inspiredByLessons, lesson)
 			}
-			if err := firewall.CheckInspiredByLessonsReviewed(s, inspiredByLessons); err != nil {
+			if err := firewall.CheckInspiredByLessonsReviewedWithOptions(s, inspiredByLessons, firewall.InspiredByLessonOptions{
+				AllowInvalidated: allowInvalidated,
+			}); err != nil {
 				return err
 			}
 
@@ -160,6 +163,7 @@ func hypothesisAddCmd() *cobra.Command {
 	c.Flags().Float64Var(&predMinEffect, "predicts-min-effect", 0, "minimum |delta_frac| required to call it supported; pass 0 for a directional hypothesis (direction only, no magnitude commitment — prefer this when no prior evidence grounds a specific number)")
 	c.Flags().StringArrayVar(&killIf, "kill-if", nil, "kill criterion; may be repeated (at least one required)")
 	c.Flags().StringSliceVar(&inspiredBy, "inspired-by", nil, "lesson IDs this hypothesis draws on (L-NNNN; reviewed lessons only; comma-separated or repeated)")
+	c.Flags().BoolVar(&allowInvalidated, "allow-invalidated", false, "allow --inspired-by to cite invalidated lessons for retrospective contrast")
 	addAuthorFlag(c, &author, "")
 	c.Flags().StringSliceVar(&tags, "tag", nil, "tag; may be repeated")
 	c.Flags().StringVar(&rationale, "rationale", "", "one-line rationale: why this hypothesis, what evidence or lesson led you here (persisted in the hypothesis body under `# Rationale`; first 200 chars also land on the hypothesis.add event)")

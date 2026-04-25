@@ -55,7 +55,7 @@ YAML authoring or file editing. When a human says:
 | "Ship that optimization" | ` + "`autoresearch hypothesis apply H-0001`" + ` (cherry-picks the winning experiment) |
 | "Where's the worktree for H-0003?" | ` + "`autoresearch hypothesis worktree H-0003`" + ` |
 | "What just happened?" | ` + "`autoresearch log --tail 30`" + ` |
-| "What have we learned so far?" | ` + "`autoresearch lesson list --status active --summary`" + `, summarize |
+| "What have we learned so far?" | ` + "`autoresearch lesson list --summary`" + `, summarize |
 
 **Never** ask the human to author YAML or edit files under ` + "`.research/`" + ` or
 ` + "`goal.md`" + ` directly. They can if they want to, but you should not require it.
@@ -408,8 +408,10 @@ fix the input instead.
 - ` + "`hypothesis add`" + `: requires claim, predicts.{instrument,target,direction,
   min_effect}, and at least one ` + "`--kill-if`" + ` clause. ` + "`predicts.instrument`" + `
   must stay within the active goal's objective/constraint instruments. Missing
-  any is exit 1. ` + "`--inspired-by`" + ` lessons whose subject chain still depends on an
-  ` + "`unreviewed`" + ` decisive conclusion are rejected — review first.
+  any is exit 1. ` + "`--inspired-by`" + ` lessons that are provisional,
+  invalidated, superseded, or whose subject chain still depends on an
+  ` + "`unreviewed`" + ` decisive conclusion are rejected — review first. Only use
+  ` + "`--allow-invalidated`" + ` for an explicit retrospective contrast.
 - ` + "`goal set`" + `: rejects goals whose ` + "`objective.instrument`" + ` is not in the
   registered instruments, including goals with no instrument at all (feature
   delivery goals).
@@ -484,7 +486,7 @@ Verbs:
 
     autoresearch lesson add --claim "..." --body "..." [--from C-NNNN,H-NNNN] [--scope ...] [--tag ...]
         [--predict-instrument X --predict-direction {increase|decrease} --predict-min-effect N [--predict-max-effect M]]
-    autoresearch lesson list [--goal G-NNNN|all] [--scope ...] [--status ...] [--subject ...] [--tag ...] [--since L-NNNN]
+    autoresearch lesson list [--goal G-NNNN|all] [--scope ...] [--status active|provisional|invalidated|superseded|all] [--subject ...] [--tag ...] [--since L-NNNN]
                               [--summary | --fields id,scope,status,tags,...]
     autoresearch lesson show <L-id>
     autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
@@ -492,6 +494,9 @@ Verbs:
 
 Scope is inferred from ` + "`--from`" + ` when not explicit: subjects given →
 ` + "`hypothesis`" + `; none → ` + "`system`" + `.
+
+` + "`lesson list`" + ` defaults to ` + "`--status active`" + ` so generators see usable
+recommendations first. Use ` + "`--status all`" + ` for audit/history views.
 
 **Choosing lesson scope.**
 
@@ -533,8 +538,8 @@ example.
 
 - The **orchestrator** MUST read active lesson summaries at the start of
   every cycle. ` + "`cycle-context --json`" + ` provides them in ` + "`active_lessons`" + `;
-  use ` + "`lesson list --status active --summary --json`" + ` only when deeper
-  lesson detail is needed. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
+  use ` + "`lesson list --summary --json`" + ` only when deeper active lesson
+  detail is needed. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
   either cite a lesson ID or explicitly note "no relevant lesson". When
   citing lessons, pass their IDs via ` + "`--inspired-by L-XXXX,L-YYYY`" + ` to
   create a structured link. ` + "`lesson accuracy`" + ` uses this link to compare
@@ -546,9 +551,10 @@ example.
 - Lessons whose subjects do not resolve to a currently ` + "`reviewed_decisive`" + `
   chain are not citable. Unreviewed decisive chains are
   **provisional**; if gate review later downgrades the chain, the lesson
-  becomes **invalidated** and drops out of ` + "`lesson list --status active`" + `.
+  becomes **invalidated** and drops out of default ` + "`lesson list`" + ` output.
   They MUST NOT be cited via ` + "`--inspired-by`" + ` or treated as a
   reviewed-parent surrogate until the chain is reviewed-decisive again.
+  ` + "`--allow-invalidated`" + ` is only for explicit retrospective contrast.
 - The **gate reviewer** MAY call ` + "`lesson add`" + ` on downgrade, but only for
   cross-cutting patterns. One-off reasons stay in
   ` + "`conclusion.strict_check.reasons`" + `.
@@ -557,8 +563,7 @@ Supersession forms chains: ` + "`lesson add`" + ` the replacement first, then
 ` + "`lesson supersede L-old --by L-new --reason \"...\"`" + `. The store updates
 both sides — ` + "`L-old.status=superseded, L-old.superseded_by=L-new`" + ` and
 ` + "`L-new.supersedes=L-old`" + `. The orchestrator reads
-` + "`lesson list --status active`" + ` by default and will not see superseded
-records.
+default ` + "`lesson list`" + ` output and will not see superseded records.
 
 ## Capturing allocated IDs
 
