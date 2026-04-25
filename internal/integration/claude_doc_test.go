@@ -37,6 +37,14 @@ var _ = Describe("shared generated agent docs", func() {
 			}
 		}
 	})
+
+	It("documents automatic lineage baseline resolution", func() {
+		for name, doc := range sharedDocs() {
+			Expect(doc).To(ContainSubstring("[--baseline <baseline-exp-id>|auto]"), name)
+			Expect(doc).To(ContainSubstring("[--baseline-experiment E-XXXX|auto]"), name)
+			Expect(doc).To(ContainSubstring("nearest accepted supported lineage predecessor"), name)
+		}
+	})
 })
 
 func sharedDocs() map[string]string {

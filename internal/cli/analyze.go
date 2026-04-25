@@ -7,9 +7,12 @@ import (
 
 	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/output"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/spf13/cobra"
 )
+
+const analyzeBaselineAuto = "auto"
 
 func analyzeCommands() []*cobra.Command {
 	return []*cobra.Command{analyzeCmd()}
@@ -30,7 +33,9 @@ reports sample count, mean, BCa 95% CI, stddev, min/max.
 
 If --baseline is provided, also compares each instrument's samples against
 the baseline experiment's samples for the same instrument using percentile
-bootstrap (for the delta CI) and Mann–Whitney U (for p-value).
+bootstrap (for the delta CI) and Mann–Whitney U (for p-value). Use
+--baseline auto on hypothesis-backed experiments to resolve the nearest
+accepted supported lineage predecessor.
 
 analyze is read-only: no store writes, no state transitions. Use conclude
 to persist a verdict.
@@ -81,7 +86,39 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 
 			// Optional baseline.
 			var baseObs []*entity.Observation
-			if baselineExp != "" {
+			var baselineRes *readmodel.BaselineResolution
+			baselineExp = strings.TrimSpace(baselineExp)
+			switch baselineExp {
+			case "":
+			case analyzeBaselineAuto:
+				if exp.IsBaseline {
+					return fmt.Errorf("--baseline auto is only valid for non-baseline experiments")
+				}
+				if strings.TrimSpace(exp.Hypothesis) == "" {
+					return fmt.Errorf("--baseline auto requires experiment %s to be linked to a hypothesis", expID)
+				}
+				hyp, err := s.ReadHypothesis(exp.Hypothesis)
+				if err != nil {
+					return err
+				}
+				obsIdx, err := readmodel.LoadObservationIndexStrict(s)
+				if err != nil {
+					return err
+				}
+				baselineRes, err = readmodel.ResolveLineageSupportedBaselineWithIndex(s, obsIdx, hyp, hyp.Predicts.Instrument)
+				if err != nil {
+					return err
+				}
+				if baselineRes == nil || baselineRes.ExperimentID == "" {
+					note := "no usable lineage baseline"
+					if baselineRes != nil && baselineRes.Note != "" {
+						note = baselineRes.Note
+					}
+					return fmt.Errorf("--baseline auto could not resolve a supported ancestor for experiment %s: %s", expID, note)
+				}
+				baselineExp = baselineRes.ExperimentID
+				baseObs = obsIdx.ObservationsForScope(baselineRes.Scope())
+			default:
 				baseObs, err = s.ListObservationsForExperiment(baselineExp)
 				if err != nil {
 					return err
@@ -138,17 +175,24 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 			}
 
 			if w.IsJSON() {
-				return w.JSON(map[string]any{
+				payload := map[string]any{
 					"experiment": expID,
 					"baseline":   baselineExp,
 					"limits":     limits,
 					"rows":       rows,
-				})
+				}
+				if baselineRes != nil {
+					payload["baseline_resolution"] = baselineRes
+				}
+				return w.JSON(payload)
 			}
 			printLimits(w, limits)
 			w.Textf("[experiment: %s", expID)
 			if baselineExp != "" {
 				w.Textf(", baseline: %s", baselineExp)
+				if baselineRes != nil && baselineRes.Source != "" {
+					w.Textf(" (source=%s)", baselineRes.Source)
+				}
 			}
 			w.Textln("]")
 			if len(rows) == 0 {
@@ -176,7 +220,7 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&baselineExp, "baseline", "", "baseline experiment id to compare against")
+	c.Flags().StringVar(&baselineExp, "baseline", "", "baseline experiment id to compare against, or 'auto' for the supported lineage predecessor")
 	c.Flags().StringVar(&instName, "instrument", "", "only analyze this instrument")
 	c.Flags().IntVar(&iters, "iters", 0, "bootstrap iterations (0 uses default 2000)")
 	c.Flags().StringVar(&candidateRef, "candidate-ref", "", "for non-baseline experiments, restrict analysis to observations recorded on this candidate ref")

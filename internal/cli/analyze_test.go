@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/readmodel"
 	"github.com/bytter/autoresearch/internal/store"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -106,6 +107,72 @@ var _ = Describe("analyze command", func() {
 		Expect(err).To(MatchError(ContainSubstring("candidate ref " + ref + " maps to multiple recorded candidate scopes")))
 	})
 
+	It("resolves --baseline auto to the supported lineage predecessor", func() {
+		dir, s := createCLIStoreDir()
+		now := time.Now().UTC()
+		Expect(s.WriteGoal(&entity.Goal{
+			ID:        "G-0001",
+			Status:    entity.GoalStatusActive,
+			CreatedAt: &now,
+			Objective: entity.Objective{Instrument: "timing", Direction: "decrease"},
+		})).To(Succeed())
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:        "H-0001",
+			GoalID:    "G-0001",
+			Claim:     "first win",
+			Status:    entity.StatusSupported,
+			Author:    "test",
+			CreatedAt: now,
+			Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.05},
+		})).To(Succeed())
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:        "H-0002",
+			GoalID:    "G-0001",
+			Parent:    "H-0001",
+			Claim:     "second win",
+			Status:    entity.StatusOpen,
+			Author:    "test",
+			CreatedAt: now,
+			Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.05},
+		})).To(Succeed())
+		for _, exp := range []*entity.Experiment{
+			{ID: "E-0001", GoalID: "G-0001", Hypothesis: "H-0001", Status: entity.ExpAnalyzed, Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now},
+			{ID: "E-0002", GoalID: "G-0001", Hypothesis: "H-0002", Status: entity.ExpMeasured, Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now},
+		} {
+			Expect(s.WriteExperiment(exp)).To(Succeed())
+		}
+		Expect(s.WriteObservation(&entity.Observation{
+			ID: "O-0001", Experiment: "E-0001", Instrument: "timing",
+			MeasuredAt: now, Value: 100, Unit: "ns", PerSample: []float64{100, 101, 99}, Samples: 3, Author: "test",
+		})).To(Succeed())
+		ref := "refs/heads/candidate/E-0002"
+		Expect(s.WriteObservation(&entity.Observation{
+			ID: "O-0002", Experiment: "E-0002", Instrument: "timing",
+			MeasuredAt: now, Value: 90, Unit: "ns", PerSample: []float64{90, 91, 89}, Samples: 3,
+			CandidateRef: ref, CandidateSHA: "2222222222222222222222222222222222222222", Author: "test",
+		})).To(Succeed())
+		Expect(s.WriteConclusion(&entity.Conclusion{
+			ID: "C-0001", Hypothesis: "H-0001", Verdict: entity.VerdictSupported,
+			Observations: []string{"O-0001"}, CandidateExp: "E-0001",
+			Effect:   entity.Effect{Instrument: "timing", DeltaFrac: -0.1},
+			StatTest: "mann_whitney_u", Author: "test", ReviewedBy: "human:gate", CreatedAt: now,
+		})).To(Succeed())
+
+		resp := runCLIJSON[cliAnalyzeResponse](dir,
+			"analyze", "E-0002",
+			"--candidate-ref", ref,
+			"--baseline", "auto",
+		)
+
+		Expect(resp.Baseline).To(Equal("E-0001"))
+		Expect(resp.BaselineResolution).NotTo(BeNil())
+		Expect(resp.BaselineResolution.ExperimentID).To(Equal("E-0001"))
+		Expect(resp.BaselineResolution.Source).To(Equal(readmodel.BaselineSourceAncestorSupported))
+		Expect(resp.BaselineResolution.AncestorHypothesis).To(Equal("H-0001"))
+		Expect(resp.BaselineResolution.AncestorConclusion).To(Equal("C-0001"))
+		Expect(resp.Rows).To(HaveLen(1))
+		Expect(resp.Rows[0].Comparison).NotTo(BeNil())
+	})
 })
 
 func setupAnalyzeAmbiguousBaseline() (string, string) {

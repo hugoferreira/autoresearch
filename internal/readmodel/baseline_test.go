@@ -350,3 +350,48 @@ var _ = Describe("inferred baseline resolution", func() {
 		Expect(err).To(MatchError(ContainSubstring("parse observation")))
 	})
 })
+
+var _ = Describe("lineage supported baseline resolution", func() {
+	It("uses the nearest reviewed supported ancestor without falling back to the goal baseline", func() {
+		f := newBaselineFixture()
+		f.writeGoal("G-0001")
+
+		root := f.writeHypothesis("H-0001", "G-0001", "")
+		mid := f.writeHypothesis("H-0002", "G-0001", root.ID)
+		current := f.writeHypothesis("H-0003", "G-0001", mid.ID)
+
+		goalBaseline := f.writeExperiment("E-0001", "", "G-0001", "", true)
+		f.writeObservation("O-0001", goalBaseline.ID, "timing")
+
+		rootExp := f.writeExperiment("E-0002", root.ID, "", "", false)
+		midExp := f.writeExperiment("E-0003", mid.ID, "", "", false)
+		f.writeObservation("O-0002", rootExp.ID, "timing")
+		f.writeObservation("O-0003", midExp.ID, "timing")
+		f.writeConclusion("C-0001", root.ID, rootExp.ID, true)
+		f.writeConclusion("C-0002", mid.ID, midExp.ID, true)
+
+		got, err := ResolveLineageSupportedBaseline(f.s, current, "timing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).NotTo(BeNil())
+		Expect(got.ExperimentID).To(Equal(midExp.ID))
+		Expect(got.Source).To(Equal(BaselineSourceAncestorSupported))
+		Expect(got.AncestorHypothesis).To(Equal(mid.ID))
+		Expect(got.AncestorConclusion).To(Equal("C-0002"))
+	})
+
+	It("returns an explanatory note when no accepted ancestor is usable", func() {
+		f := newBaselineFixture()
+		f.writeGoal("G-0001")
+		parent := f.writeHypothesis("H-0001", "G-0001", "")
+		current := f.writeHypothesis("H-0002", "G-0001", parent.ID)
+
+		goalBaseline := f.writeExperiment("E-0001", "", "G-0001", "", true)
+		f.writeObservation("O-0001", goalBaseline.ID, "timing")
+
+		got, err := ResolveLineageSupportedBaseline(f.s, current, "timing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).NotTo(BeNil())
+		Expect(got.ExperimentID).To(BeEmpty())
+		Expect(got.Note).To(ContainSubstring("no accepted supported ancestor"))
+	})
+})

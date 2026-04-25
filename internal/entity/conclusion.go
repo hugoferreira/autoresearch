@@ -27,11 +27,11 @@ type Conclusion struct {
 	BaselineRef      string   `yaml:"baseline_ref,omitempty"          json:"baseline_ref,omitempty"`
 	BaselineSHA      string   `yaml:"baseline_sha,omitempty"          json:"baseline_sha,omitempty"`
 	Effect           Effect   `yaml:"effect"                          json:"effect"`
-	// IncrementalExp is the frontier-best experiment at the time this
-	// conclusion was written. Together with IncrementalEffect it answers
-	// "how much did this improve over the current best?" as opposed to
-	// the absolute baseline which answers "how much did this improve
-	// over the original unoptimized code?"
+	// IncrementalExp is the accepted supported lineage predecessor at the
+	// time this conclusion was written. Together with IncrementalEffect it
+	// answers "how much did this improve over the direction it builds on?"
+	// as opposed to the absolute baseline which answers "how much did this
+	// improve over the original unoptimized code?"
 	IncrementalExp    string        `yaml:"incremental_experiment,omitempty" json:"incremental_experiment,omitempty"`
 	IncrementalEffect *Effect       `yaml:"incremental_effect,omitempty"     json:"incremental_effect,omitempty"`
 	SecondaryChecks   []ClauseCheck `yaml:"secondary_checks,omitempty"       json:"secondary_checks,omitempty"`
