@@ -92,6 +92,21 @@ var _ = Describe("lesson read views", func() {
 		Expect([]string{got[0].ID, got[1].ID, got[2].ID}).To(Equal([]string{"L-9999", "L-10000", "L-10001"}))
 	})
 
+	It("treats status all as no status filter and rejects unknown statuses", func() {
+		views := []*LessonReadView{
+			{Lesson: &entity.Lesson{ID: "L-0001", Status: entity.LessonStatusActive}},
+			{Lesson: &entity.Lesson{ID: "L-0002", Status: entity.LessonStatusInvalidated}},
+		}
+
+		got, err := FilterLessonReadViews(views, LessonListOptions{Status: LessonStatusAll})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveLen(2))
+		Expect([]string{got[0].ID, got[1].ID}).To(Equal([]string{"L-0001", "L-0002"}))
+
+		_, err = FilterLessonReadViews(views, LessonListOptions{Status: "retired"})
+		Expect(err).To(MatchError(ContainSubstring("lesson status filter must be")))
+	})
+
 	It("truncates long summary claims while preserving tags", func() {
 		view := &LessonReadView{Lesson: &entity.Lesson{
 			ID:     "L-0007",

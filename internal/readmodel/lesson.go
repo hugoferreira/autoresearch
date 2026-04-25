@@ -14,6 +14,9 @@ import (
 
 const LessonSummaryClaimLimit = 160
 
+// LessonStatusAll is the lesson-list status filter that disables status filtering.
+const LessonStatusAll = "all"
+
 // LessonReadView is the read-side projection used by lesson list/show and
 // other read-only lesson surfaces.
 type LessonReadView struct {
@@ -145,6 +148,10 @@ func ListLessonsForRead(s *store.Store, lessons []*entity.Lesson, opts LessonLis
 }
 
 func FilterLessonReadViews(views []*LessonReadView, opts LessonListOptions) ([]*LessonReadView, error) {
+	status, err := normalizeLessonStatusFilter(opts.Status)
+	if err != nil {
+		return nil, err
+	}
 	sinceOrdinal := 0
 	if strings.TrimSpace(opts.SinceID) != "" {
 		n, err := parseLessonOrdinal(opts.SinceID)
@@ -171,7 +178,7 @@ func FilterLessonReadViews(views []*LessonReadView, opts LessonListOptions) ([]*
 		if opts.Scope != "" && view.Scope != opts.Scope {
 			continue
 		}
-		if opts.Status != "" && view.Status != opts.Status {
+		if status != "" && view.Status != status {
 			continue
 		}
 		if opts.Subject != "" && !slices.Contains(view.Subjects, opts.Subject) {
@@ -183,6 +190,27 @@ func FilterLessonReadViews(views []*LessonReadView, opts LessonListOptions) ([]*
 		out = append(out, view)
 	}
 	return out, nil
+}
+
+func normalizeLessonStatusFilter(status string) (string, error) {
+	status = strings.TrimSpace(status)
+	switch status {
+	case "", LessonStatusAll:
+		return "", nil
+	case entity.LessonStatusActive,
+		entity.LessonStatusProvisional,
+		entity.LessonStatusInvalidated,
+		entity.LessonStatusSuperseded:
+		return status, nil
+	default:
+		return "", fmt.Errorf("lesson status filter must be %q, %q, %q, %q, or %q, got %q",
+			entity.LessonStatusActive,
+			entity.LessonStatusProvisional,
+			entity.LessonStatusInvalidated,
+			entity.LessonStatusSuperseded,
+			LessonStatusAll,
+			status)
+	}
 }
 
 func BuildLessonSummaryViews(views []*LessonReadView) []LessonSummaryView {
