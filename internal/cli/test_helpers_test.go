@@ -25,12 +25,19 @@ func saveGlobals() {
 
 func createCLIStore() *store.Store {
 	GinkgoHelper()
-	s, err := store.Create(GinkgoT().TempDir(), store.Config{
+	_, s := createCLIStoreDir()
+	return s
+}
+
+func createCLIStoreDir() (string, *store.Store) {
+	GinkgoHelper()
+	dir := GinkgoT().TempDir()
+	s, err := store.Create(dir, store.Config{
 		Build: store.CommandSpec{Command: "true"},
 		Test:  store.CommandSpec{Command: "true"},
 	})
 	Expect(err).NotTo(HaveOccurred())
-	return s
+	return dir, s
 }
 
 func setupGoalStore() (string, *store.Store) {

@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"time"
-
-	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/store"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -13,39 +10,8 @@ var _ = Describe("hypothesis add", func() {
 	BeforeEach(saveGlobals)
 
 	It("rejects predicted instruments outside the active goal boundary", func() {
-		dir := GinkgoT().TempDir()
-		s, err := store.Create(dir, store.Config{
-			Build: store.CommandSpec{Command: "true"},
-			Test:  store.CommandSpec{Command: "true"},
-			Instruments: map[string]store.Instrument{
-				"timing":      {Unit: "s"},
-				"binary_size": {Unit: "bytes"},
-				"compile":     {Unit: "bool"},
-				"qemu_cycles": {Unit: "cycles"},
-			},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		now := time.Now().UTC()
-		max := 131072.0
-		goal := &entity.Goal{
-			ID:        "G-0001",
-			Status:    entity.GoalStatusActive,
-			CreatedAt: &now,
-			Objective: entity.Objective{
-				Instrument: "timing",
-				Direction:  "decrease",
-			},
-			Constraints: []entity.Constraint{
-				{Instrument: "binary_size", Max: &max},
-				{Instrument: "compile", Require: "pass"},
-			},
-		}
-		Expect(s.WriteGoal(goal)).To(Succeed())
-		Expect(s.UpdateState(func(st *store.State) error {
-			st.CurrentGoalID = goal.ID
-			return nil
-		})).To(Succeed())
+		dir, s := setupGoalStore()
+		Expect(s.RegisterInstrument("qemu_cycles", store.Instrument{Unit: "cycles"})).To(Succeed())
 
 		root := Root()
 		root.SetArgs([]string{

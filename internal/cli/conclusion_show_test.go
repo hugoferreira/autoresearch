@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
-	"github.com/bytter/autoresearch/internal/store"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -14,12 +13,7 @@ var _ = Describe("conclusion show JSON", func() {
 	BeforeEach(saveGlobals)
 
 	It("joins artifacts, evidence failures, and read issues for cited observations", func() {
-		dir := GinkgoT().TempDir()
-		s, err := store.Create(dir, store.Config{
-			Build: store.CommandSpec{Command: "true"},
-			Test:  store.CommandSpec{Command: "true"},
-		})
-		Expect(err).NotTo(HaveOccurred())
+		dir, s := createCLIStoreDir()
 
 		Expect(s.WriteObservation(&entity.Observation{
 			ID:         "O-0001",
@@ -129,12 +123,7 @@ var _ = Describe("conclusion show JSON", func() {
 	})
 
 	It("omits observation join fields when the conclusion cites no observations", func() {
-		dir := GinkgoT().TempDir()
-		s, err := store.Create(dir, store.Config{
-			Build: store.CommandSpec{Command: "true"},
-			Test:  store.CommandSpec{Command: "true"},
-		})
-		Expect(err).NotTo(HaveOccurred())
+		dir, s := createCLIStoreDir()
 		Expect(s.WriteConclusion(&entity.Conclusion{
 			ID:         "C-0002",
 			Hypothesis: "H-0002",
