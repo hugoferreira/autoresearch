@@ -139,7 +139,7 @@ var _ = Describe("Claude settings permissions", func() {
 		r, err := integration.EnsureClaudeSettings(dir, entries)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.AlreadyOK).To(BeTrue())
-		Expect(r.Added).To(BeEmpty())
+		Expect(r.AddedPermissions).To(BeEmpty())
 	})
 
 	It("is idempotent once all managed allow and deny entries are present", func() {
@@ -151,7 +151,7 @@ var _ = Describe("Claude settings permissions", func() {
 		r, err := integration.EnsureClaudeSettingsPermissions(dir, allowEntries, denyEntries)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.AlreadyOK).To(BeTrue())
-		Expect(r.Added).To(BeEmpty())
+		Expect(r.AddedPermissions).To(BeEmpty())
 		Expect(r.AddedAllow).To(BeEmpty())
 		Expect(r.AddedDeny).To(BeEmpty())
 	})

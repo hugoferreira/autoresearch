@@ -199,11 +199,11 @@ func claudeSettingsResultToMap(r integration.ClaudeSettingsResult) map[string]an
 		action = "already_ok"
 	}
 	return map[string]any{
-		"path":        r.Path,
-		"action":      action,
-		"added":       r.Added,
-		"added_allow": r.AddedAllow,
-		"added_deny":  r.AddedDeny,
+		"path":              r.Path,
+		"action":            action,
+		"added_permissions": r.AddedPermissions,
+		"added_allow":       r.AddedAllow,
+		"added_deny":        r.AddedDeny,
 	}
 }
 

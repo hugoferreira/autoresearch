@@ -54,13 +54,13 @@ func WorktreeAllowEntries(worktreesRoot string) []string {
 // ClaudeSettingsResult reports what EnsureClaudeSettings did. Exactly one of
 // Created / Updated / AlreadyOK is true on success.
 type ClaudeSettingsResult struct {
-	Path       string
-	Created    bool     // settings.json did not exist; we created it
-	Updated    bool     // settings.json existed and we appended new entries
-	AlreadyOK  bool     // every requested entry was already present
-	Added      []string // entries we actually added (may be empty on AlreadyOK)
-	AddedAllow []string // allow entries we actually added
-	AddedDeny  []string // deny entries we actually added
+	Path             string
+	Created          bool     // settings.json did not exist; we created it
+	Updated          bool     // settings.json existed and we appended new entries
+	AlreadyOK        bool     // every requested entry was already present
+	AddedPermissions []string // permission entries we actually added
+	AddedAllow       []string // allow entries we actually added
+	AddedDeny        []string // deny entries we actually added
 }
 
 // EnsureClaudeSettings merges the given permission allow entries into
@@ -99,7 +99,7 @@ func ensureClaudeSettings(projectDir string, allowEntries, denyEntries []string,
 		res.Created = true
 		res.AddedAllow = uniqueSorted(allowEntries)
 		res.AddedDeny = uniqueSorted(denyEntries)
-		res.Added = combineAdded(res.AddedAllow, res.AddedDeny)
+		res.AddedPermissions = combineAdded(res.AddedAllow, res.AddedDeny)
 		if preview {
 			return res, nil
 		}
@@ -154,7 +154,7 @@ func ensureClaudeSettings(projectDir string, allowEntries, denyEntries []string,
 	doc["permissions"] = perms
 	res.AddedAllow = addedAllow
 	res.AddedDeny = addedDeny
-	res.Added = combineAdded(addedAllow, addedDeny)
+	res.AddedPermissions = combineAdded(addedAllow, addedDeny)
 	if preview {
 		res.Updated = true
 		return res, nil
