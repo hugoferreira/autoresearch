@@ -25,6 +25,20 @@ the lesson if warranted, then yield to the main session with
 **gate reviewer**. That keeps the handoff unambiguous and avoids relying
 on nested child-session tool availability.
 
+## Shell tool discipline
+
+The shell-execution tool name is not a shell contract. Do not assume bash,
+zsh, or any shell solely from the tool label. Prefer POSIX-safe one-liners
+for conditionals and quoting, such as `[ "$x" = y ]`; avoid fragile forms
+like `[ $x == y ]`, which fail in some shells and break on empty values.
+If you need shell-specific syntax, first identify the shell that is actually
+executing the command:
+
+    printf 'SHELL=%s argv0=%s\n' "${SHELL:-unknown}" "$0"; ps -p $$ -o comm= 2>/dev/null || true
+
+Only then use constructs that shell supports, such as `[[ "$x" == y ]]`
+in shells that implement `[[ ... ]]`.
+
 ## Before each cycle
 
 Read in this order, every time. Do not skip steps — the notebook layer is

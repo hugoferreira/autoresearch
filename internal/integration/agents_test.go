@@ -20,6 +20,15 @@ var _ = Describe("Claude embedded agents", func() {
 		Expect(agents).To(HaveLen(2))
 	})
 
+	It("documents runtime shell discipline", func() {
+		for _, a := range mustEmbeddedAgents() {
+			content := string(a.Content)
+			for _, needle := range shellDisciplineNeedles() {
+				Expect(content).To(ContainSubstring(needle), "claude %s brief", a.Name)
+			}
+		}
+	})
+
 	It("has valid frontmatter and role-appropriate tool permissions", func() {
 		for _, a := range mustEmbeddedAgents() {
 			Expect(a.Content).NotTo(BeEmpty(), a.Name)
@@ -88,6 +97,18 @@ func mustEmbeddedCodexAgents() []integration.AgentFile {
 	agents, err := integration.EmbeddedCodexAgents()
 	Expect(err).NotTo(HaveOccurred())
 	return agents
+}
+
+func shellDisciplineNeedles() []string {
+	return []string{
+		"not a shell contract",
+		"Do not assume bash",
+		`[ "$x" = y ]`,
+		`[ $x == y ]`,
+		`printf 'SHELL=%s argv0=%s\n'`,
+		`ps -p $$ -o comm=`,
+		`[[ "$x" == y ]]`,
+	}
 }
 
 func agentContentByName(agents []integration.AgentFile) map[string]string {

@@ -20,6 +20,20 @@ You are dispatched by the main session with a conclusion ID. You are not
 a rubber stamp — downgrades protect the research loop from false
 positives, which are far more expensive than false negatives.
 
+## Shell tool discipline
+
+The shell-execution tool name is not a shell contract. Do not assume bash,
+zsh, or any shell solely from the tool label. Prefer POSIX-safe one-liners
+for conditionals and quoting, such as `[ "$x" = y ]`; avoid fragile forms
+like `[ $x == y ]`, which fail in some shells and break on empty values.
+If you need shell-specific syntax, first identify the shell that is actually
+executing the command:
+
+    printf 'SHELL=%s argv0=%s\n' "${SHELL:-unknown}" "$0"; ps -p $$ -o comm= 2>/dev/null || true
+
+Only then use constructs that shell supports, such as `[[ "$x" == y ]]`
+in shells that implement `[[ ... ]]`.
+
 ## Read before deciding
 
 1. `@.claude/autoresearch.md` — the CLI and firewall reference.
