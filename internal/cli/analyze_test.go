@@ -13,13 +13,9 @@ var _ = Describe("analyze command", func() {
 	BeforeEach(saveGlobals)
 
 	It("uses a stored candidate ref even after the branch is deleted", func() {
-		dir := setupObserveScenarioStore()
-		registerScenarioInstruments(dir)
-		scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
+		dir, scenario := setupTimingObserveScenario()
 
-		writeScenarioMetrics(scenario.Worktree, "90\n", "900\n")
-		gitCommitAll(scenario.Worktree, "candidate a")
-		candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/analyze-deleted-ref")
+		candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/analyze-deleted-ref", "candidate a", "90\n", "900\n")
 		runCLIJSON[observeRecordJSON](dir,
 			"observe", scenario.ExpID,
 			"--instrument", "timing",

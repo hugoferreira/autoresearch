@@ -23,9 +23,7 @@ var _ = Describe("observe --all regressions", func() {
 			"--min-samples", "5",
 		)
 		scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "timing=1000")
-		writeScenarioMetrics(scenario.Worktree, "80\n", "900\n")
-		gitCommitAll(scenario.Worktree, "candidate")
-		candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/observe-all-min-samples")
+		candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/observe-all-min-samples", "candidate", "80\n", "900\n")
 
 		_, _, err := runCLIResult(dir,
 			"observe", scenario.ExpID,
@@ -40,9 +38,7 @@ var _ = Describe("observe --all regressions", func() {
 		dir := setupObserveScenarioStore()
 		registerScenarioTimingInstrument(dir)
 		scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "timing=1000")
-		writeScenarioMetrics(scenario.Worktree, "80\n", "900\n")
-		gitCommitAll(scenario.Worktree, "candidate")
-		candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/observe-all-status")
+		candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/observe-all-status", "candidate", "80\n", "900\n")
 
 		s, err := store.Open(dir)
 		Expect(err).NotTo(HaveOccurred())

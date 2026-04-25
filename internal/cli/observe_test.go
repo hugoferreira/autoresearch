@@ -78,6 +78,20 @@ func setupObserveScenarioExperiment(dir, instruments string, goalArgs ...string)
 	}
 }
 
+func setupTimingObserveScenario() (string, observeScenarioExperiment) {
+	GinkgoHelper()
+	dir := setupObserveScenarioStore()
+	registerScenarioInstruments(dir)
+	return dir, setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
+}
+
+func commitScenarioMetricsCandidate(worktree, refName, message, timing, size string) string {
+	GinkgoHelper()
+	writeScenarioMetrics(worktree, timing, size)
+	gitCommitAll(worktree, message)
+	return gitCreateCandidateRef(worktree, refName)
+}
+
 func setupObserveFixture() (string, *store.Store) {
 	GinkgoHelper()
 	dir := GinkgoT().TempDir()
@@ -222,9 +236,7 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("ignores observations from abandoned reset attempts", func() {
-			dir := setupObserveScenarioStore()
-			registerScenarioInstruments(dir)
-			scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
+			dir, scenario := setupTimingObserveScenario()
 			candidateRef1 := gitCreateCandidateRef(scenario.Worktree, "candidate/reset-a1")
 			first := runCLIJSON[observeRecordJSON](dir,
 				"observe", scenario.ExpID,
@@ -262,17 +274,11 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("ignores observations when the candidate commit changes", func() {
-			dir := setupObserveScenarioStore()
-			registerScenarioInstruments(dir)
-			scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
-			writeScenarioMetrics(scenario.Worktree, "90\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate a")
-			candidateRefA := gitCreateCandidateRef(scenario.Worktree, "candidate/commit-a")
+			dir, scenario := setupTimingObserveScenario()
+			candidateRefA := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/commit-a", "candidate a", "90\n", "900\n")
 			runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRefA)
 
-			writeScenarioMetrics(scenario.Worktree, "85\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate b")
-			candidateRefB := gitCreateCandidateRef(scenario.Worktree, "candidate/commit-b")
+			candidateRefB := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/commit-b", "candidate b", "85\n", "900\n")
 
 			check := runCLIJSON[observeCheckJSON](dir,
 				"observe", "check", scenario.ExpID,
@@ -284,12 +290,8 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("does not reuse observations recorded under a different candidate ref, even for the same SHA", func() {
-			dir := setupObserveScenarioStore()
-			registerScenarioInstruments(dir)
-			scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
-			writeScenarioMetrics(scenario.Worktree, "90\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate a")
-			candidateRefA := gitCreateCandidateRef(scenario.Worktree, "candidate/ref-a")
+			dir, scenario := setupTimingObserveScenario()
+			candidateRefA := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/ref-a", "candidate a", "90\n", "900\n")
 			runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRefA)
 			candidateRefB := gitCreateCandidateRef(scenario.Worktree, "candidate/ref-b")
 
@@ -303,14 +305,9 @@ var _ = Describe("observe command", func() {
 		})
 
 		It("refuses measurement when HEAD no longer matches the supplied candidate ref", func() {
-			dir := setupObserveScenarioStore()
-			registerScenarioInstruments(dir)
-			scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
-			writeScenarioMetrics(scenario.Worktree, "90\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate a")
-			candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/mismatch-a")
-			writeScenarioMetrics(scenario.Worktree, "85\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate b")
+			dir, scenario := setupTimingObserveScenario()
+			candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/mismatch-a", "candidate a", "90\n", "900\n")
+			commitScenarioMetricsCandidate(scenario.Worktree, "candidate/mismatch-b", "candidate b", "85\n", "900\n")
 
 			_, _, err := runCLIResult(dir,
 				"observe", scenario.ExpID,
@@ -323,12 +320,8 @@ var _ = Describe("observe command", func() {
 
 	Describe("worktree safety", func() {
 		It("refuses observe and observe check while the experiment worktree is dirty", func() {
-			dir := setupObserveScenarioStore()
-			registerScenarioInstruments(dir)
-			scenario := setupObserveScenarioExperiment(dir, "timing", "--constraint-max", "binary_size=1000")
-			writeScenarioMetrics(scenario.Worktree, "90\n", "900\n")
-			gitCommitAll(scenario.Worktree, "candidate a")
-			candidateRef := gitCreateCandidateRef(scenario.Worktree, "candidate/dirty-a")
+			dir, scenario := setupTimingObserveScenario()
+			candidateRef := commitScenarioMetricsCandidate(scenario.Worktree, "candidate/dirty-a", "candidate a", "90\n", "900\n")
 			first := runCLIJSON[observeRecordJSON](dir, "observe", scenario.ExpID, "--instrument", "timing", "--candidate-ref", candidateRef)
 
 			writeScenarioMetrics(scenario.Worktree, "80\n", "900\n")

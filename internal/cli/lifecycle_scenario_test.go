@@ -86,14 +86,7 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 	BeforeEach(saveGlobals)
 
 	It("keeps read surfaces consistent after an accepted win and a later stall", func() {
-		dir := gitInitScenarioRepo()
-		_, err := store.Create(dir, store.Config{
-			Build:     store.CommandSpec{Command: "true"},
-			Test:      store.CommandSpec{Command: "true"},
-			Worktrees: store.WorktreesConfig{Root: filepath.Join(GinkgoT().TempDir(), "worktrees")},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
+		dir := setupObserveScenarioStore()
 		registerScenarioInstruments(dir)
 
 		goal := runCLIJSON[cliIDResponse](dir,
@@ -209,13 +202,7 @@ var _ = Describe("CLI lifecycle scenarios", func() {
 	})
 
 	It("keeps observation evidence artifacts visible through the conclusion audit chain", func() {
-		dir := gitInitScenarioRepo()
-		_, err := store.Create(dir, store.Config{
-			Build:     store.CommandSpec{Command: "true"},
-			Test:      store.CommandSpec{Command: "true"},
-			Worktrees: store.WorktreesConfig{Root: filepath.Join(GinkgoT().TempDir(), "worktrees")},
-		})
-		Expect(err).NotTo(HaveOccurred())
+		dir := setupObserveScenarioStore()
 		writeScenarioMechanism(dir, "baseline trace\n")
 		gitRun(dir, "add", "mechanism.txt")
 		gitRun(dir, "commit", "-m", "add mechanism trace")
