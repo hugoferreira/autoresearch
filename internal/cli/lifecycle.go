@@ -187,7 +187,11 @@ suite.`,
 				if err != nil {
 					return err
 				}
-				claudeSettings, err := integration.PreviewClaudeSettings(globalProjectDir, claudeAllowEntries(trustShell))
+				claudeSettings, err := integration.PreviewClaudeSettingsPermissions(
+					globalProjectDir,
+					claudeAllowEntries(trustShell),
+					claudeDenyEntries(),
+				)
 				if err != nil {
 					return err
 				}
@@ -284,12 +288,14 @@ suite.`,
 				return fmt.Errorf("install subagents: %w", err)
 			}
 
-			// Merge autoresearch's allow entries into .claude/settings.json
+			// Merge autoresearch's permission entries into .claude/settings.json
 			// so the main session and subagents can invoke autoresearch verbs
-			// and read/edit worktree files without permission prompts.
-			settingsRes, err := integration.EnsureClaudeSettings(
+			// and read/edit worktree files without permission prompts, while
+			// refusing stale Claude harness-cache reads.
+			settingsRes, err := integration.EnsureClaudeSettingsPermissions(
 				globalProjectDir,
 				claudeAllowEntries(trustShell),
+				claudeDenyEntries(),
 			)
 			if err != nil {
 				return fmt.Errorf("update claude settings: %w", err)

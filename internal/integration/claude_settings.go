@@ -11,8 +11,9 @@ import (
 )
 
 // ClaudeSettingsRelPath is the Claude Code project settings file, relative to
-// the project root. Claude Code reads permissions.allow from this file to
-// decide which tool invocations run without prompting the user.
+// the project root. Claude Code reads permissions.allow / permissions.deny
+// from this file to decide which tool invocations run without prompting the
+// user, and which should be refused outright.
 const ClaudeSettingsRelPath = ".claude/settings.json"
 
 // AutoresearchAllowEntry is the permission grant for CLI invocations so that
@@ -20,6 +21,11 @@ const ClaudeSettingsRelPath = ".claude/settings.json"
 // call. Claude Code's Bash permission matcher treats the pattern as "command
 // name + args prefix"; `autoresearch:*` covers every verb and flag combo.
 const AutoresearchAllowEntry = "Bash(autoresearch:*)"
+
+// ClaudeHarnessToolResultsDenyEntry blocks Claude Code's file reader from
+// reaching into stale externalized tool-result cache files. These files are
+// not authoritative autoresearch state and can be arbitrarily large.
+const ClaudeHarnessToolResultsDenyEntry = "Read(~/.claude/projects/**/tool-results/**)"
 
 // WorktreeAllowEntries returns permission entries for the worktree root
 // directory so that subagents working in experiment worktrees (which live
@@ -48,11 +54,13 @@ func WorktreeAllowEntries(worktreesRoot string) []string {
 // ClaudeSettingsResult reports what EnsureClaudeSettings did. Exactly one of
 // Created / Updated / AlreadyOK is true on success.
 type ClaudeSettingsResult struct {
-	Path      string
-	Created   bool     // settings.json did not exist; we created it
-	Updated   bool     // settings.json existed and we appended new entries
-	AlreadyOK bool     // every requested entry was already present
-	Added     []string // entries we actually added (may be empty on AlreadyOK)
+	Path       string
+	Created    bool     // settings.json did not exist; we created it
+	Updated    bool     // settings.json existed and we appended new entries
+	AlreadyOK  bool     // every requested entry was already present
+	Added      []string // entries we actually added (may be empty on AlreadyOK)
+	AddedAllow []string // allow entries we actually added
+	AddedDeny  []string // deny entries we actually added
 }
 
 // EnsureClaudeSettings merges the given permission allow entries into
@@ -64,6 +72,18 @@ type ClaudeSettingsResult struct {
 // The file is parsed as generic JSON; comments or JSONC-style extensions are
 // not supported and will fail parsing. That matches Claude Code's own reader.
 func EnsureClaudeSettings(projectDir string, entries []string) (ClaudeSettingsResult, error) {
+	return EnsureClaudeSettingsPermissions(projectDir, entries, nil)
+}
+
+// EnsureClaudeSettingsPermissions merges the given permission entries into
+// <projectDir>/.claude/settings.json's `permissions.allow` and
+// `permissions.deny` arrays. It preserves unrelated settings and user-owned
+// entries in either permission list.
+func EnsureClaudeSettingsPermissions(projectDir string, allowEntries, denyEntries []string) (ClaudeSettingsResult, error) {
+	return ensureClaudeSettings(projectDir, allowEntries, denyEntries, false)
+}
+
+func ensureClaudeSettings(projectDir string, allowEntries, denyEntries []string, preview bool) (ClaudeSettingsResult, error) {
 	if projectDir == "" {
 		return ClaudeSettingsResult{}, errors.New("project dir is empty")
 	}
@@ -76,19 +96,28 @@ func EnsureClaudeSettings(projectDir string, entries []string) (ClaudeSettingsRe
 
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		res.Created = true
+		res.AddedAllow = uniqueSorted(allowEntries)
+		res.AddedDeny = uniqueSorted(denyEntries)
+		res.Added = combineAdded(res.AddedAllow, res.AddedDeny)
+		if preview {
+			return res, nil
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return res, fmt.Errorf("create .claude/: %w", err)
 		}
+		perms := map[string]any{
+			"allow": toAnySlice(res.AddedAllow),
+		}
+		if len(res.AddedDeny) > 0 {
+			perms["deny"] = toAnySlice(res.AddedDeny)
+		}
 		doc := map[string]any{
-			"permissions": map[string]any{
-				"allow": toAnySlice(uniqueSorted(entries)),
-			},
+			"permissions": perms,
 		}
 		if err := writeJSON(path, doc); err != nil {
 			return res, err
 		}
-		res.Created = true
-		res.Added = append([]string(nil), uniqueSorted(entries)...)
 		return res, nil
 	} else if err != nil {
 		return res, fmt.Errorf("read %s: %w", path, err)
@@ -108,91 +137,46 @@ func EnsureClaudeSettings(projectDir string, entries []string) (ClaudeSettingsRe
 	if perms == nil {
 		perms = map[string]any{}
 	}
-	allowAny, _ := perms["allow"].([]any)
-	present := make(map[string]bool, len(allowAny))
-	for _, v := range allowAny {
-		if s, ok := v.(string); ok {
-			present[s] = true
-		}
-	}
 
-	var added []string
-	for _, e := range entries {
-		if !present[e] {
-			allowAny = append(allowAny, e)
-			present[e] = true
-			added = append(added, e)
-		}
-	}
-	if len(added) == 0 {
+	allowAny, addedAllow := appendPermissionEntries(perms, "allow", allowEntries)
+	denyAny, addedDeny := appendPermissionEntries(perms, "deny", denyEntries)
+	if len(addedAllow) == 0 && len(addedDeny) == 0 {
 		res.AlreadyOK = true
 		return res, nil
 	}
 
-	perms["allow"] = allowAny
+	if len(addedAllow) > 0 {
+		perms["allow"] = allowAny
+	}
+	if len(addedDeny) > 0 {
+		perms["deny"] = denyAny
+	}
 	doc["permissions"] = perms
+	res.AddedAllow = addedAllow
+	res.AddedDeny = addedDeny
+	res.Added = combineAdded(addedAllow, addedDeny)
+	if preview {
+		res.Updated = true
+		return res, nil
+	}
 	if err := writeJSON(path, doc); err != nil {
 		return res, err
 	}
-	sort.Strings(added)
 	res.Updated = true
-	res.Added = added
 	return res, nil
 }
 
 // PreviewClaudeSettings reports what EnsureClaudeSettings WOULD do without
 // mutating anything. Used for --dry-run.
 func PreviewClaudeSettings(projectDir string, entries []string) (ClaudeSettingsResult, error) {
-	if projectDir == "" {
-		return ClaudeSettingsResult{}, errors.New("project dir is empty")
-	}
-	abs, err := filepath.Abs(projectDir)
-	if err != nil {
-		return ClaudeSettingsResult{}, err
-	}
-	path := filepath.Join(abs, ClaudeSettingsRelPath)
-	res := ClaudeSettingsResult{Path: path}
+	return PreviewClaudeSettingsPermissions(projectDir, entries, nil)
+}
 
-	existing, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		res.Created = true
-		res.Added = append([]string(nil), uniqueSorted(entries)...)
-		return res, nil
-	} else if err != nil {
-		return res, err
-	}
-
-	var doc map[string]any
-	if len(existing) > 0 {
-		if err := json.Unmarshal(existing, &doc); err != nil {
-			return res, fmt.Errorf("parse %s: %w", path, err)
-		}
-	}
-	present := map[string]bool{}
-	if perms, ok := doc["permissions"].(map[string]any); ok {
-		if allowAny, ok := perms["allow"].([]any); ok {
-			for _, v := range allowAny {
-				if s, ok := v.(string); ok {
-					present[s] = true
-				}
-			}
-		}
-	}
-	var added []string
-	for _, e := range entries {
-		if !present[e] {
-			added = append(added, e)
-			present[e] = true
-		}
-	}
-	if len(added) == 0 {
-		res.AlreadyOK = true
-		return res, nil
-	}
-	sort.Strings(added)
-	res.Updated = true
-	res.Added = added
-	return res, nil
+// PreviewClaudeSettingsPermissions reports what
+// EnsureClaudeSettingsPermissions WOULD do without mutating anything. Used for
+// --dry-run.
+func PreviewClaudeSettingsPermissions(projectDir string, allowEntries, denyEntries []string) (ClaudeSettingsResult, error) {
+	return ensureClaudeSettings(projectDir, allowEntries, denyEntries, true)
 }
 
 func writeJSON(path string, doc map[string]any) error {
@@ -212,6 +196,36 @@ func toAnySlice(ss []string) []any {
 	for i, s := range ss {
 		out[i] = s
 	}
+	return out
+}
+
+func appendPermissionEntries(perms map[string]any, key string, entries []string) ([]any, []string) {
+	raw, _ := perms[key].([]any)
+	present := make(map[string]bool, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			present[s] = true
+		}
+	}
+
+	var added []string
+	for _, e := range entries {
+		if !present[e] {
+			raw = append(raw, e)
+			present[e] = true
+			added = append(added, e)
+		}
+	}
+	sort.Strings(added)
+	return raw, added
+}
+
+func combineAdded(groups ...[]string) []string {
+	var out []string
+	for _, group := range groups {
+		out = append(out, group...)
+	}
+	sort.Strings(out)
 	return out
 }
 

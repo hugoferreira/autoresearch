@@ -29,6 +29,15 @@ var _ = Describe("Claude embedded agents", func() {
 		}
 	})
 
+	It("marks runtime harness caches as off-limits state sources", func() {
+		for _, a := range mustEmbeddedAgents() {
+			content := string(a.Content)
+			for _, needle := range harnessCacheNeedles() {
+				Expect(content).To(ContainSubstring(needle), "claude %s brief", a.Name)
+			}
+		}
+	})
+
 	It("tells the orchestrator to start from cycle-context", func() {
 		orchestrator := agentContentByName(mustEmbeddedAgents())["research-orchestrator"]
 		Expect(orchestrator).To(ContainSubstring("autoresearch cycle-context --json"))
@@ -115,6 +124,16 @@ func shellDisciplineNeedles() []string {
 		`printf 'SHELL=%s argv0=%s\n'`,
 		`ps -p $$ -o comm=`,
 		`[[ "$x" == y ]]`,
+	}
+}
+
+func harnessCacheNeedles() []string {
+	return []string{
+		"Harness-cache discipline",
+		"~/.claude/projects/",
+		"tool-results/",
+		"~/.codex/",
+		"authoritative surfaces",
 	}
 }
 
