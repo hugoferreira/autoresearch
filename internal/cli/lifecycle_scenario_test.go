@@ -178,16 +178,23 @@ func expectLifecycleReadSurfacesAgree(dir, goalID, candidateID, conclusionID str
 	frontier := runCLIJSON[cliFrontierResponse](dir, "frontier", "--goal", goalID)
 	dashboard := runCLIJSON[cliDashboardResponse](dir, "dashboard", "--goal", goalID)
 	status := runCLIJSON[cliStatusResponse](dir, "status", "--goal", goalID)
+	context := runCLIJSON[cliCycleContextResponse](dir, "cycle-context", "--goal", goalID)
 
 	Expect(frontier.ScopeGoalID).To(Equal(goalID))
 	Expect(frontier.GoalID).To(Equal(goalID))
 	Expect(dashboard.ScopeGoalID).To(Equal(goalID))
 	Expect(status.ScopeGoalID).To(Equal(goalID))
+	Expect(context.ScopeGoalID).To(Equal(goalID))
 	Expect(status.MainCheckoutDirty).To(BeFalse())
+	Expect(context.MainCheckoutDirty).To(BeFalse())
 	Expect(frontier.GoalAssessment.Met).To(BeTrue())
 	Expect(frontier.GoalAssessment.MetByConclusion).To(Equal(conclusionID))
+	Expect(context.GoalAssessment).NotTo(BeNil())
+	Expect(context.GoalAssessment.Met).To(BeTrue())
+	Expect(context.GoalAssessment.MetByConclusion).To(Equal(conclusionID))
 	Expect(frontier.StalledFor).To(Equal(stalledFor))
 	Expect(dashboard.StalledFor).To(Equal(frontier.StalledFor))
+	Expect(context.StalledFor).To(Equal(frontier.StalledFor))
 
 	expectedEntry := cliFrontierRow{
 		Candidate:        candidateID,
@@ -197,9 +204,12 @@ func expectLifecycleReadSurfacesAgree(dir, goalID, candidateID, conclusionID str
 	}
 	Expect(frontier.Frontier).To(ConsistOf(expectedEntry))
 	Expect(dashboard.Frontier).To(ConsistOf(frontier.Frontier))
+	Expect(context.FrontierBest).NotTo(BeNil())
+	Expect(*context.FrontierBest).To(Equal(expectedEntry))
 
 	for key, value := range status.Counts {
 		Expect(dashboard.Counts).To(HaveKeyWithValue(key, value))
+		Expect(context.Counts).To(HaveKeyWithValue(key, value))
 	}
 }
 

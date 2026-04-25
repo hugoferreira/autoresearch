@@ -54,6 +54,7 @@ routine research loop; use it before walking subcommands with --help.`,
 		budgetCommands(),
 		conclusionCommands(),
 		lessonCommands(),
+		cycleContextCommands(),
 		dashboardCommands(),
 	}
 	for _, g := range groups {
