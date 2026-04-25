@@ -36,6 +36,13 @@ var _ = Describe("Claude embedded agents", func() {
 		Expect(orchestrator).To(ContainSubstring("Use specialized read surfaces"))
 	})
 
+	It("documents automatic lineage baseline resolution", func() {
+		byName := agentContentByName(mustEmbeddedAgents())
+		Expect(byName["research-orchestrator"]).To(ContainSubstring("--baseline auto"))
+		Expect(byName["research-orchestrator"]).To(ContainSubstring("predecessor on this hypothesis lineage"))
+		Expect(byName["research-gate-reviewer"]).To(ContainSubstring("--baseline auto"))
+	})
+
 	It("has valid frontmatter and role-appropriate tool permissions", func() {
 		for _, a := range mustEmbeddedAgents() {
 			Expect(a.Content).NotTo(BeEmpty(), a.Name)

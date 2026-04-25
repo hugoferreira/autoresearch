@@ -140,7 +140,7 @@ For the routine optimization loop, the canonical command spine is:
     autoresearch experiment implement <E-id> --impl-notes "..." --json
     # create a unique reviewable git ref for the measured candidate, then:
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
-    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline <baseline-exp-id>] --json
+    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto] --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield with review pending so the parent/main session can dispatch research-gate-reviewer
@@ -280,16 +280,17 @@ intentionally want another fresh run even though the target is already met.
     autoresearch observe  check <exp-id> --instrument NAME --candidate-ref REF [--samples N]  # required for non-baseline experiments
     autoresearch observe  <exp-id> --instrument NAME --candidate-ref REF [--samples N] [--append]
     autoresearch observe  <exp-id> --all --candidate-ref REF [--samples N] [--append]         # all instruments in dependency order
-    autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>] [--instrument NAME] [--iters N]
+    autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>|auto] [--instrument NAME] [--iters N]
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
         --observations O-XXXX,O-YYYY \
-        [--baseline-experiment E-XXXX] \   # strict override; otherwise auto-derive baseline
+        [--baseline-experiment E-XXXX|auto] \   # strict override; otherwise auto-derive baseline
         [--interpretation "..."]
         # Dual baseline: absolute prefers candidate-recorded baseline, then the
         # nearest accepted supported ancestor, then the goal baseline; incremental
-        # uses the same goal's frontier best. Output reports the chosen source,
-        # ignored off-instrument observations, and both effect + incremental_effect.
+        # uses the nearest accepted supported lineage predecessor. Output reports
+        # the chosen source, ignored off-instrument observations, and both effect
+        # + incremental_effect.
 
 ### Conclusions (review and gate reviewer)
     autoresearch conclusion list       [--goal G-NNNN|all] [--hypothesis H-XXXX] [--verdict X]

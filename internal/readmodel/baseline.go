@@ -111,6 +111,45 @@ func ResolveInferredBaselineWithIndex(s *store.Store, obs *ObservationIndex, hyp
 	return &BaselineResolution{Note: joinNotes(notes...)}, nil
 }
 
+// ResolveLineageSupportedBaseline resolves the canonical incremental
+// comparator for a hypothesis: the nearest accepted supported ancestor
+// candidate on the hypothesis lineage with observations for instrument.
+func ResolveLineageSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, instrument string) (*BaselineResolution, error) {
+	obs, err := LoadObservationIndexStrict(s)
+	if err != nil {
+		return nil, err
+	}
+	return ResolveLineageSupportedBaselineWithIndex(s, obs, hyp, instrument)
+}
+
+// ResolveLineageSupportedBaselineWithIndex is ResolveLineageSupportedBaseline
+// using a preloaded observation index.
+func ResolveLineageSupportedBaselineWithIndex(s *store.Store, obs *ObservationIndex, hyp *entity.Hypothesis, instrument string) (*BaselineResolution, error) {
+	if s == nil || hyp == nil {
+		return nil, nil
+	}
+	instrument = strings.TrimSpace(instrument)
+	if instrument == "" {
+		return nil, nil
+	}
+	concls, err := s.ListConclusions()
+	if err != nil {
+		return nil, err
+	}
+	ancestor, note, err := resolveAncestorSupportedBaseline(s, hyp, instrument, concls, obs)
+	if err != nil {
+		return nil, err
+	}
+	if ancestor != nil {
+		ancestor.Note = note
+		return ancestor, nil
+	}
+	if note == "" {
+		note = fmt.Sprintf("no accepted supported ancestor on hypothesis lineage has observations on instrument %q", instrument)
+	}
+	return &BaselineResolution{Note: note}, nil
+}
+
 func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, instrument string, concls []*entity.Conclusion, obs *ObservationIndex) (*BaselineResolution, string, error) {
 	if hyp == nil || strings.TrimSpace(hyp.Parent) == "" {
 		return nil, "", nil

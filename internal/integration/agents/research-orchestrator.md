@@ -144,7 +144,7 @@ before you reach for `--help`:
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
     autoresearch experiment implement <E-id> --impl-notes "..." --json
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
-    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline <baseline-exp-id>] --json
+    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto] --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield to the main session with review pending so it can dispatch research-gate-reviewer
@@ -365,8 +365,12 @@ If an instrument fails, stop and report — do not retry or fix.
 ### 5. Analyze and conclude
 
 ```sh
-autoresearch analyze <exp-id> --candidate-ref <candidate-ref> --baseline <baseline-exp-id> --json
+autoresearch analyze <exp-id> --candidate-ref <candidate-ref> --baseline auto --json
 ```
+
+Use `--baseline auto` when the hypothesis has accepted supported ancestry;
+for a root hypothesis with no supported predecessor yet, omit `--baseline`
+and let `conclude` resolve the absolute baseline fallback.
 
 Read the `comparison` object: `delta_frac`, `ci_low_frac`,
 `ci_high_frac`, `p_value`. Then decide:
@@ -391,12 +395,12 @@ autoresearch conclude <hyp-id> \
 The CLI auto-derives two baselines. Absolute resolution prefers the
 candidate's recorded baseline when it has matching instrument data, then
 the nearest accepted supported ancestor candidate, then the goal
-baseline. Incremental resolution uses the current frontier best within
-the same goal. JSON and text output report the chosen absolute-baseline
-source, any ignored off-instrument observations, and both `effect`
-(vs absolute) and `incremental_effect` (vs frontier best, when
-available). The strict firewall always evaluates against the absolute
-baseline.
+baseline. Incremental resolution uses the nearest accepted supported
+predecessor on this hypothesis lineage. JSON and text output report the
+chosen absolute-baseline source, any ignored off-instrument observations,
+and both `effect` (vs absolute) and `incremental_effect` (vs lineage
+predecessor, when available). The strict firewall always evaluates
+against the absolute baseline.
 
 If the firewall downgrades your verdict, **the downgrade is
 authoritative**. Report it in the yield summary.

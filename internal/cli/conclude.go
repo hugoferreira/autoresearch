@@ -18,6 +18,7 @@ import (
 const (
 	concludeCandidateSourceObservations = "observations"
 	concludeBaselineSourceNone          = "none"
+	concludeBaselineAuto                = "auto"
 )
 
 type concludeIgnoredObservation struct {
@@ -81,9 +82,11 @@ The absolute baseline is resolved in this order: explicit
 --baseline-experiment (strict; no fallback), the candidate's recorded
 baseline if it has matching instrument data, the nearest accepted
 supported ancestor conclusion candidate, then the current goal's mapped
-baseline. If no usable comparator can be inferred, "supported" is
+baseline. The explicit value "auto" resolves to that nearest accepted
+supported lineage predecessor. If no usable comparator can be inferred, "supported" is
 automatically downgraded since there is no comparison. CLI and JSON
-output report which baseline source was used and any fallback note.`,
+output report which baseline source was used, the automatic incremental
+lineage predecessor, and any fallback note.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := output.Default(globalJSON)
@@ -141,12 +144,8 @@ output report which baseline source was used and any fallback note.`,
 				baseObs     []*entity.Observation
 				baselineRes *readmodel.BaselineResolution
 			)
-			if baselineExp = strings.TrimSpace(baselineExp); baselineExp != "" {
-				baseObs, baselineRes, err = baselineObservationsForExperiment(s, obsIdx, baselineExp, hyp.Predicts.Instrument)
-				if err != nil {
-					return err
-				}
-			} else {
+			switch baselineExp = strings.TrimSpace(baselineExp); baselineExp {
+			case "":
 				baselineRes, err = readmodel.ResolveInferredBaselineWithIndex(s, obsIdx, hyp, candExpRec, hyp.Predicts.Instrument)
 				if err != nil {
 					return err
@@ -157,31 +156,39 @@ output report which baseline source was used and any fallback note.`,
 				if baselineExp != "" {
 					baseObs = filterObservationsByInstrument(obsIdx.ObservationsForScope(baselineRes.Scope()), hyp.Predicts.Instrument)
 				}
+			case concludeBaselineAuto:
+				baselineRes, err = readmodel.ResolveLineageSupportedBaselineWithIndex(s, obsIdx, hyp, hyp.Predicts.Instrument)
+				if err != nil {
+					return err
+				}
+				if baselineRes == nil || baselineRes.ExperimentID == "" {
+					note := "no usable lineage baseline"
+					if baselineRes != nil && baselineRes.Note != "" {
+						note = baselineRes.Note
+					}
+					return fmt.Errorf("--baseline-experiment auto could not resolve a supported ancestor for %s: %s", hypID, note)
+				}
+				baselineExp = baselineRes.ExperimentID
+				baseObs = filterObservationsByInstrument(obsIdx.ObservationsForScope(baselineRes.Scope()), hyp.Predicts.Instrument)
+			default:
+				baseObs, baselineRes, err = baselineObservationsForExperiment(s, obsIdx, baselineExp, hyp.Predicts.Instrument)
+				if err != nil {
+					return err
+				}
 			}
 			applyBaselineResolution(&resolution, baselineRes, hyp.Predicts.Instrument)
 
-			// Resolve incremental baseline: the frontier best within the same goal.
+			// Resolve incremental baseline: the accepted supported predecessor
+			// on this hypothesis lineage.
 			var incrementalExp string
 			var incrObs []*entity.Observation
-			if goal != nil {
-				concls, err := s.ListConclusions()
-				if err != nil {
-					return err
-				}
-				scopedConcls, err := conclusionsForGoal(s, hyp.GoalID, concls)
-				if err != nil {
-					return err
-				}
-				frontierRows, _ := readmodel.ComputeFrontier(s, goal, scopedConcls)
-				if len(frontierRows) > 0 {
-					bestConcl := conclusionByID(scopedConcls, frontierRows[0].Conclusion)
-					bestObs, bestScope, ok := obsIdx.ObservationsForConclusionCandidate(bestConcl)
-					baseScope := baselineRes.Scope()
-					if ok && bestScope != candScope && bestScope != baseScope {
-						incrementalExp = bestScope.Experiment
-						incrObs = filterObservationsByInstrument(bestObs, hyp.Predicts.Instrument)
-					}
-				}
+			incrementalRes, err := readmodel.ResolveLineageSupportedBaselineWithIndex(s, obsIdx, hyp, hyp.Predicts.Instrument)
+			if err != nil {
+				return err
+			}
+			if incrementalRes != nil && incrementalRes.ExperimentID != "" && incrementalRes.Scope() != candScope {
+				incrementalExp = incrementalRes.ExperimentID
+				incrObs = filterObservationsByInstrument(obsIdx.ObservationsForScope(incrementalRes.Scope()), hyp.Predicts.Instrument)
 			}
 			if incrementalExp != "" {
 				resolution.IncrementalExperiment = incrementalExp
@@ -196,7 +203,7 @@ output report which baseline source was used and any fallback note.`,
 				cmp = &v
 			}
 
-			// Compute comparison against incremental baseline (frontier best).
+			// Compute comparison against incremental baseline (lineage predecessor).
 			var incrCmp *stats.Comparison
 			if len(incrObs) > 0 {
 				incrSamples := flattenSamples(incrObs)
@@ -465,7 +472,7 @@ output report which baseline source was used and any fallback note.`,
 			}
 			if concl.IncrementalEffect != nil {
 				ie := concl.IncrementalEffect
-				w.Textf("  incremental: %s  delta_frac=%+.4f  CI [%+.4f, %+.4f]  (vs frontier best)\n",
+				w.Textf("  incremental: %s  delta_frac=%+.4f  CI [%+.4f, %+.4f]  (vs lineage predecessor)\n",
 					incrementalExp, ie.DeltaFrac, ie.CILowFrac, ie.CIHighFrac)
 			}
 			if len(decision.Reasons) > 0 && !decision.Downgraded {
@@ -479,7 +486,7 @@ output report which baseline source was used and any fallback note.`,
 	}
 	c.Flags().StringVar(&verdict, "verdict", "", "supported | refuted | inconclusive (required)")
 	c.Flags().StringSliceVar(&obsList, "observations", nil, "comma-separated observation ids (required)")
-	c.Flags().StringVar(&baselineExp, "baseline-experiment", "", "baseline experiment id (strict override; no fallback if it lacks the predicted instrument)")
+	c.Flags().StringVar(&baselineExp, "baseline-experiment", "", "baseline experiment id, or 'auto' for the supported lineage predecessor (strict override; no fallback if unusable)")
 	c.Flags().StringVar(&interpretation, "interpretation", "", "optional prose interpretation")
 	addAuthorFlag(c, &author, "")
 	c.Flags().StringVar(&reviewedBy, "reviewed-by", "", "critic or human who reviewed")
@@ -664,15 +671,6 @@ func formatBaselineSource(res concludeResolution) string {
 	return res.BaselineSource
 }
 
-func conclusionByID(concls []*entity.Conclusion, id string) *entity.Conclusion {
-	for _, c := range concls {
-		if c != nil && c.ID == id {
-			return c
-		}
-	}
-	return nil
-}
-
 func filterObservationsByInstrument(obs []*entity.Observation, instrument string) []*entity.Observation {
 	var filtered []*entity.Observation
 	for _, o := range obs {
@@ -681,32 +679,6 @@ func filterObservationsByInstrument(obs []*entity.Observation, instrument string
 		}
 	}
 	return filtered
-}
-
-func conclusionsForGoal(s *store.Store, goalID string, concls []*entity.Conclusion) ([]*entity.Conclusion, error) {
-	if goalID == "" {
-		return nil, nil
-	}
-	goalByHypothesis := map[string]string{}
-	out := make([]*entity.Conclusion, 0, len(concls))
-	for _, c := range concls {
-		if c == nil || c.Hypothesis == "" {
-			continue
-		}
-		gid, ok := goalByHypothesis[c.Hypothesis]
-		if !ok {
-			h, err := s.ReadHypothesis(c.Hypothesis)
-			if err != nil {
-				return nil, err
-			}
-			gid = h.GoalID
-			goalByHypothesis[c.Hypothesis] = gid
-		}
-		if gid == goalID {
-			out = append(out, c)
-		}
-	}
-	return out, nil
 }
 
 // samplesForInstrument flattens every per-sample slice across observations

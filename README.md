@@ -263,7 +263,7 @@ probe, and `--append` when you intentionally want another fresh run.
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
 | **experiment** | `baseline`, `design`, `implement`, `reset`, `worktree`, `list`, `show [--worktree\|--branch\|--baseline-sha\|--env]` |
 | **observe** | `observe check <exp> --instrument <name>`, `observe <exp> --instrument <name> [--append]`, `observe <exp> --all [--append]` |
-| **analyze** | `analyze <exp> [--baseline <exp>]` |
+| **analyze** | `analyze <exp> [--baseline <exp>\|auto]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
 | **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |
 | **tree / frontier** | `tree [--goal G-NNNN\|all]`, `frontier [--goal G-NNNN\|all]` |
@@ -388,12 +388,15 @@ Every conclusion automatically compares against two baselines:
   `experiment baseline`). This is "how much did we improve over the
   original unoptimized code?" The strict firewall always evaluates
   against this baseline.
-- **Incremental** — the current frontier best. This is "how much did we
-  improve over the best result so far?" Informational only — it does not
-  gate the verdict.
+- **Incremental** — the nearest accepted supported predecessor on the
+  hypothesis lineage. This is "how much did we improve over the
+  direction we are building on?" Informational only — it does not gate
+  the verdict.
 
 The `conclude` command derives both automatically. `--baseline-experiment`
-overrides only the absolute baseline.
+overrides only the absolute baseline; pass `auto` to make that strict
+override use the same supported lineage predecessor. `analyze --baseline
+auto` resolves the same predecessor for read-only reviewer reruns.
 
 ### Predicted effects and diminishing returns
 

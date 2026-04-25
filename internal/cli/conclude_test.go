@@ -18,19 +18,20 @@ type concludeResolutionJSON struct {
 		ID     string `json:"id"`
 		Reason string `json:"reason"`
 	} `json:"ignored_observations"`
-	CandidateExperiment string `json:"candidate_experiment"`
-	CandidateAttempt    int    `json:"candidate_attempt,omitempty"`
-	CandidateRef        string `json:"candidate_ref,omitempty"`
-	CandidateSHA        string `json:"candidate_sha,omitempty"`
-	CandidateSource     string `json:"candidate_source"`
-	BaselineExperiment  string `json:"baseline_experiment,omitempty"`
-	BaselineAttempt     int    `json:"baseline_attempt,omitempty"`
-	BaselineRef         string `json:"baseline_ref,omitempty"`
-	BaselineSHA         string `json:"baseline_sha,omitempty"`
-	BaselineSource      string `json:"baseline_source"`
-	BaselineNote        string `json:"baseline_note,omitempty"`
-	AncestorHypothesis  string `json:"ancestor_hypothesis,omitempty"`
-	AncestorConclusion  string `json:"ancestor_conclusion,omitempty"`
+	CandidateExperiment   string `json:"candidate_experiment"`
+	CandidateAttempt      int    `json:"candidate_attempt,omitempty"`
+	CandidateRef          string `json:"candidate_ref,omitempty"`
+	CandidateSHA          string `json:"candidate_sha,omitempty"`
+	CandidateSource       string `json:"candidate_source"`
+	BaselineExperiment    string `json:"baseline_experiment,omitempty"`
+	BaselineAttempt       int    `json:"baseline_attempt,omitempty"`
+	BaselineRef           string `json:"baseline_ref,omitempty"`
+	BaselineSHA           string `json:"baseline_sha,omitempty"`
+	BaselineSource        string `json:"baseline_source"`
+	BaselineNote          string `json:"baseline_note,omitempty"`
+	AncestorHypothesis    string `json:"ancestor_hypothesis,omitempty"`
+	AncestorConclusion    string `json:"ancestor_conclusion,omitempty"`
+	IncrementalExperiment string `json:"incremental_experiment,omitempty"`
 }
 
 type concludeJSONResponse struct {
@@ -275,6 +276,9 @@ var _ = Describe("conclude command", func() {
 			Expect(resp.Resolution.AncestorHypothesis).To(Equal(fx.ancestorHypothesis))
 			Expect(resp.Resolution.AncestorConclusion).To(Equal(fx.ancestorConclusion))
 			Expect(resp.Resolution.BaselineNote).To(ContainSubstring(fx.goalBaseline))
+			Expect(resp.Resolution.IncrementalExperiment).To(Equal(fx.ancestorExperiment))
+			Expect(resp.Conclusion.IncrementalExp).To(Equal(fx.ancestorExperiment))
+			Expect(resp.Conclusion.IncrementalEffect).NotTo(BeNil())
 
 			s, err := store.Open(fx.dir)
 			Expect(err).NotTo(HaveOccurred())
@@ -293,6 +297,7 @@ var _ = Describe("conclude command", func() {
 			Expect(payload).To(HaveKeyWithValue("baseline_attempt", float64(1)))
 			Expect(payload).To(HaveKeyWithValue("ancestor_hypothesis", fx.ancestorHypothesis))
 			Expect(payload).To(HaveKeyWithValue("ancestor_conclusion", fx.ancestorConclusion))
+			Expect(payload).To(HaveKeyWithValue("incremental_experiment", fx.ancestorExperiment))
 			Expect(payload["observations"]).To(Equal([]any{fx.timingObservation}))
 			Expect(payload["requested_observations"]).To(Equal([]any{fx.timingObservation, fx.sizeObservation}))
 			Expect(payload["ignored_observations"]).To(ConsistOf(HaveKeyWithValue("id", fx.sizeObservation)))
@@ -327,6 +332,23 @@ var _ = Describe("conclude command", func() {
 				"--observations", strings.Join([]string{fx.timingObservation, fx.sizeObservation}, ","),
 			)
 			Expect(err).To(MatchError(ContainSubstring("baseline experiment " + fx.goalBaseline + " has no observations on instrument \"timing\"")))
+		})
+
+		It("accepts --baseline-experiment auto as a strict lineage predecessor override", func() {
+			fx := setupConcludeFallbackFixture()
+
+			resp := runCLIJSON[concludeJSONResponse](fx.dir,
+				"conclude", fx.currentHypothesis,
+				"--verdict", "supported",
+				"--baseline-experiment", "auto",
+				"--observations", fx.timingObservation,
+			)
+
+			Expect(resp.Resolution.BaselineExperiment).To(Equal(fx.ancestorExperiment))
+			Expect(resp.Resolution.BaselineSource).To(Equal(readmodel.BaselineSourceAncestorSupported))
+			Expect(resp.Resolution.AncestorHypothesis).To(Equal(fx.ancestorHypothesis))
+			Expect(resp.Resolution.AncestorConclusion).To(Equal(fx.ancestorConclusion))
+			Expect(resp.Conclusion.BaselineExp).To(Equal(fx.ancestorExperiment))
 		})
 	})
 

@@ -31,6 +31,13 @@ type cliObserveAllResponse struct {
 }
 
 type cliAnalyzeResponse struct {
+	Baseline           string `json:"baseline"`
+	BaselineResolution *struct {
+		ExperimentID       string `json:"experiment"`
+		Source             string `json:"source"`
+		AncestorHypothesis string `json:"ancestor_hypothesis"`
+		AncestorConclusion string `json:"ancestor_conclusion"`
+	} `json:"baseline_resolution,omitempty"`
 	Rows []struct {
 		Instrument string `json:"instrument"`
 		Comparison *struct {

@@ -54,6 +54,8 @@ var _ = Describe("Codex embedded agents", func() {
 				"main checkout cleanliness",
 				"main_checkout_dirty_paths",
 				"bootstrap scripts",
+				"--baseline auto",
+				"predecessor on this hypothesis lineage",
 			},
 			"research-gate-reviewer": {
 				"autoresearch lesson add",
@@ -61,6 +63,7 @@ var _ = Describe("Codex embedded agents", func() {
 				"repetitive `--help` lookups",
 				"sandbox_mode = \"read-only\"",
 				"leaf autoresearch role",
+				"--baseline auto",
 			},
 		} {
 			content, ok := byName[role]

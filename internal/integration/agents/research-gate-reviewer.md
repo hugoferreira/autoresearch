@@ -38,9 +38,9 @@ in shells that implement `[[ ... ]]`.
 
 1. `@.claude/autoresearch.md` — the CLI and firewall reference.
 2. `autoresearch conclusion show <C-id> --json` — the verdict, effect
-   (vs absolute baseline), `incremental_effect` (vs frontier best, if
-   present), `strict_check` (firewall's own assessment), interpretation,
-   author, measured candidate provenance (`candidate_ref`, `candidate_sha`),
+   (vs absolute baseline), `incremental_effect` (vs the supported
+   lineage predecessor, if present), `strict_check` (firewall's own
+   assessment), interpretation, author, measured candidate provenance (`candidate_ref`, `candidate_sha`),
    plus evidence-side join fields for cited observations:
    `observation_artifacts`, `observation_evidence_failures`, and
    `observation_read_issues`.
@@ -57,6 +57,9 @@ in shells that implement `[[ ... ]]`.
    CI, p-value, and seed are reproducible by construction. Compare the
    output against the conclusion's `effect` block; they should match.
    If they don't, something is wrong.
+   To reproduce `incremental_effect`, rerun the same command with
+   `--baseline auto`; it resolves the accepted supported lineage
+   predecessor recorded as the incremental comparator.
 5. Inspect the raw samples for sanity, not for a second implementation
    of the stats:
 
