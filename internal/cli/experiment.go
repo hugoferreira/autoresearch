@@ -536,12 +536,33 @@ func experimentListCmd() *cobra.Command {
 	return c
 }
 
+type experimentShowProjectionFlags struct {
+	Worktree    bool
+	Branch      bool
+	BaselineSHA bool
+	Env         bool
+}
+
+func (f experimentShowProjectionFlags) count() int {
+	count := 0
+	for _, set := range []bool{f.Worktree, f.Branch, f.BaselineSHA, f.Env} {
+		if set {
+			count++
+		}
+	}
+	return count
+}
+
 func experimentShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var projection experimentShowProjectionFlags
+	c := &cobra.Command{
 		Use:   "show <exp-id>",
 		Short: "Show a single experiment",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projection.count() > 1 {
+				return errors.New("--worktree, --branch, --baseline-sha, and --env are mutually exclusive")
+			}
 			w := output.Default(globalJSON)
 			s, err := openStore()
 			if err != nil {
@@ -550,6 +571,9 @@ func experimentShowCmd() *cobra.Command {
 			view, err := readmodel.ReadExperimentForRead(s, args[0])
 			if err != nil {
 				return err
+			}
+			if projection.count() == 1 {
+				return emitExperimentShowProjection(w, view, projection)
 			}
 			if w.IsJSON() {
 				return w.JSON(view)
@@ -579,6 +603,58 @@ func experimentShowCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&projection.Worktree, "worktree", false, "print only the experiment worktree path")
+	c.Flags().BoolVar(&projection.Branch, "branch", false, "print only the experiment branch")
+	c.Flags().BoolVar(&projection.BaselineSHA, "baseline-sha", false, "print only the resolved baseline SHA")
+	c.Flags().BoolVar(&projection.Env, "env", false, "print shell-evalable WORKTREE, BRANCH, and BASELINE_SHA assignments")
+	return c
+}
+
+func emitExperimentShowProjection(w *output.Writer, view *readmodel.ExperimentReadView, projection experimentShowProjectionFlags) error {
+	switch {
+	case projection.Worktree:
+		if view.Worktree == "" {
+			return fmt.Errorf("%s has no worktree (status=%s)", view.ID, view.Status)
+		}
+		return w.Emit(view.Worktree, map[string]string{"worktree": view.Worktree})
+	case projection.Branch:
+		if view.Branch == "" {
+			return fmt.Errorf("%s has no branch (status=%s)", view.ID, view.Status)
+		}
+		return w.Emit(view.Branch, map[string]string{"branch": view.Branch})
+	case projection.BaselineSHA:
+		if view.Baseline.SHA == "" {
+			return fmt.Errorf("%s has no baseline SHA", view.ID)
+		}
+		return w.Emit(view.Baseline.SHA, map[string]string{"baseline_sha": view.Baseline.SHA})
+	case projection.Env:
+		if view.Worktree == "" {
+			return fmt.Errorf("%s has no worktree (status=%s)", view.ID, view.Status)
+		}
+		if view.Branch == "" {
+			return fmt.Errorf("%s has no branch (status=%s)", view.ID, view.Status)
+		}
+		if view.Baseline.SHA == "" {
+			return fmt.Errorf("%s has no baseline SHA", view.ID)
+		}
+		payload := map[string]string{
+			"worktree":     view.Worktree,
+			"branch":       view.Branch,
+			"baseline_sha": view.Baseline.SHA,
+		}
+		text := strings.Join([]string{
+			"WORKTREE=" + shellQuote(view.Worktree),
+			"BRANCH=" + shellQuote(view.Branch),
+			"BASELINE_SHA=" + shellQuote(view.Baseline.SHA),
+		}, "\n")
+		return w.Emit(text, payload)
+	default:
+		return nil
+	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 // writeWorktreeBrief assembles a frozen context snapshot and writes it into

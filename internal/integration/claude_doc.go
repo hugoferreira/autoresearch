@@ -250,7 +250,12 @@ unless the goal names them.
     autoresearch experiment reset      <exp-id> --reason "..."
     autoresearch experiment worktree   <exp-id>
     autoresearch experiment list       [--goal G-NNNN|all] [--status ...] [--hypothesis ...]
-    autoresearch experiment show       <exp-id>
+    autoresearch experiment show       <exp-id> [--worktree|--branch|--baseline-sha|--env]
+
+For shell-heavy work, use ` + "`experiment show`" + ` projections rather than
+scraping human text:
+
+    git -C "$(autoresearch experiment show E-0011 --worktree)" diff "$(autoresearch experiment show E-0011 --baseline-sha)" -- src/
 
 Instrument dependencies: instruments may declare ` + "`--requires`" + ` dependencies
 (e.g. ` + "`test=pass`" + `). When you ` + "`observe`" + `, the CLI checks that all required

@@ -267,6 +267,11 @@ autoresearch experiment implement <exp-id> \
 Capture the `.worktree` path from the response. Then spawn a **coder
 helper** via the Agent tool:
 
+If you need the path later, recover it with
+`autoresearch experiment show <exp-id> --worktree`; use
+`--branch`, `--baseline-sha`, or `--env` for shell substitutions instead
+of scraping `experiment show` text.
+
 ```
 Spawn Agent:
   prompt: "You are implementing an optimization experiment in a git
