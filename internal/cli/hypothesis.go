@@ -112,13 +112,14 @@ func hypothesisAddCmd() *cobra.Command {
 					Direction:  predDirection,
 					MinEffect:  predMinEffect,
 				},
-				KillIf:     killIf,
-				InspiredBy: inspiredBy,
-				Status:     entity.StatusOpen,
-				Author:     or(author, "human"),
-				CreatedAt:  nowUTC(),
-				Tags:       tags,
-				Body:       entity.AppendMarkdownSection("", "Rationale", rationale),
+				KillIf:                  killIf,
+				InspiredBy:              inspiredBy,
+				AllowInvalidatedLessons: allowInvalidated,
+				Status:                  entity.StatusOpen,
+				Author:                  or(author, "human"),
+				CreatedAt:               nowUTC(),
+				Tags:                    tags,
+				Body:                    entity.AppendMarkdownSection("", "Rationale", rationale),
 			}
 			if err := firewall.ValidateHypothesis(h, cfg); err != nil {
 				return err
@@ -145,6 +146,9 @@ func hypothesisAddCmd() *cobra.Command {
 			}
 			if len(inspiredBy) > 0 {
 				eventData["inspired_by"] = inspiredBy
+			}
+			if allowInvalidated {
+				eventData["allow_invalidated_lessons"] = true
 			}
 			if err := emitEvent(s, "hypothesis.add", or(author, "human"), id, eventData); err != nil {
 				return err

@@ -138,6 +138,7 @@ goal and names the instrument that will measure its predicted effect.
 | `Predicts` | `Predicts` | `predicts` | What the hypothesis predicts. |
 | `KillIf` | `[]string` | `kill_if` | At least one kill criterion required. |
 | `InspiredBy` | `[]string` | `inspired_by` | Lesson IDs (`L-NNNN`). Firewall accepts only `active` lessons on `system` or `reviewed_decisive` chains. |
+| `AllowInvalidatedLessons` | `bool` | `allow_invalidated_lessons` | Records that `hypothesis add --allow-invalidated` was intentionally used for a retrospective contrast; downstream preflight preserves that narrow override. |
 | `Status` | `string` | `status` | See state machine below. |
 | `Priority` | `string` | `priority` | Set to `human` by `hypothesis promote`. Generator picks priority=human first. |
 | `Author` | `string` | `author` | |
