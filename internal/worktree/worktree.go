@@ -110,6 +110,22 @@ func Diff(projectDir, base, branch string) (string, error) {
 	return string(out), nil
 }
 
+// DiffSummary returns a compact file list and shortstat for a git diff range.
+func DiffSummary(projectDir, base, branch string) (files []string, shortStat string, err error) {
+	out, err := run(projectDir, "diff", "--name-only", base+".."+branch)
+	if err != nil {
+		return nil, "", err
+	}
+	if out != "" {
+		files = strings.Split(out, "\n")
+	}
+	shortStat, err = run(projectDir, "diff", "--shortstat", base+".."+branch)
+	if err != nil {
+		return nil, "", err
+	}
+	return files, shortStat, nil
+}
+
 // CherryPick applies the commits in baseSHA..branch onto the current HEAD.
 func CherryPick(projectDir, baseSHA, branch string) (string, error) {
 	return run(projectDir, "cherry-pick", baseSHA+".."+branch)
