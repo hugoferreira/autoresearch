@@ -402,6 +402,10 @@ lineage predecessor, and any fallback note.`,
 			if err := emitEvent(s, kind, or(author, "agent:analyst"), id, eventData); err != nil {
 				return err
 			}
+			lintReport, err := readmodel.LintConclusion(s, id)
+			if err != nil {
+				return fmt.Errorf("lint conclusion: %w", err)
+			}
 
 			// Report.
 			if w.IsJSON() {
@@ -411,6 +415,7 @@ lineage predecessor, and any fallback note.`,
 					"conclusion": concl,
 					"decision":   decision,
 					"resolution": resolution,
+					"lint":       lintReport,
 				})
 			}
 			if decision.Downgraded {
@@ -426,6 +431,7 @@ lineage predecessor, and any fallback note.`,
 				}
 				w.Textln("")
 			}
+			renderConclusionLintWarningText(w, lintReport)
 			w.Textf("wrote %s\n", id)
 			w.Textf("  hypothesis:  %s (now %s)\n", hypID, hyp.Status)
 			w.Textf("  candidate:   %s  (source=%s, n=%d)\n", candExp, resolution.CandidateSource, effect.NCandidate)
