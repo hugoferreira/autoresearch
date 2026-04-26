@@ -48,8 +48,8 @@ func RankRelevantLessons(views []*LessonReadView, ctx LessonRelevanceContext) []
 		if view == nil || view.Lesson == nil {
 			continue
 		}
-		row, direct := scoreRelevantLesson(view, focus, decisiveCitations, maxOrdinal)
-		if direct || row.Score > 0 {
+		row, eligible := scoreRelevantLesson(view, focus, decisiveCitations, maxOrdinal)
+		if eligible {
 			rows = append(rows, row)
 		}
 	}
@@ -175,7 +175,7 @@ func scoreRelevantLesson(view *LessonReadView, focus lessonRelevanceFocus, decis
 		row.SourceChain = view.Provenance.SourceChain
 	}
 
-	direct := false
+	eligible := false
 	add := func(points int, reason string) {
 		row.Score += points
 		addLessonRelevanceReason(&row, reason)
@@ -194,27 +194,28 @@ func scoreRelevantLesson(view *LessonReadView, focus lessonRelevanceFocus, decis
 		add(8, "system scope")
 	}
 	if _, ok := focus.currentInspiredBy[view.ID]; ok {
-		direct = true
+		eligible = true
 		add(100, "cited by current hypothesis")
 	}
 	if _, ok := focus.openInspiredBy[view.ID]; ok {
+		eligible = true
 		add(25, "cited by open hypothesis")
 	}
 	for _, subject := range view.Subjects {
 		if reason, ok := focus.subjectReasons[subject]; ok {
-			direct = true
+			eligible = true
 			add(60, "matches "+reason+" "+subject)
 		}
 	}
 	if view.PredictedEffect != nil {
 		if _, ok := focus.instruments[view.PredictedEffect.Instrument]; ok {
-			direct = true
+			eligible = true
 			add(25, "predicts relevant instrument "+view.PredictedEffect.Instrument)
 		}
 	}
 	matchingTags := lessonMatchingTags(view.Tags, focus.tags)
 	if len(matchingTags) > 0 {
-		direct = true
+		eligible = true
 		add(10*len(matchingTags), "tag match: "+strings.Join(matchingTags, ","))
 	}
 	if n := decisiveCitations[view.ID]; n > 0 {
@@ -228,7 +229,7 @@ func scoreRelevantLesson(view *LessonReadView, focus lessonRelevanceFocus, decis
 			add(2, "recent")
 		}
 	}
-	return row, direct
+	return row, eligible
 }
 
 func lessonMatchingTags(tags []string, focus map[string]struct{}) []string {

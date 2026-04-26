@@ -25,12 +25,12 @@ var _ = Describe("lesson relevant", func() {
 			"lesson", "relevant",
 			"--goal", "G-0001",
 			"--hypothesis", "H-0001",
-			"--limit", "3",
+			"--limit", "10",
 		)
 
 		Expect(got.ScopeGoalID).To(Equal("G-0001"))
 		Expect(got.Hypothesis).To(Equal("H-0001"))
-		Expect(got.Limit).To(Equal(3))
+		Expect(got.Limit).To(Equal(10))
 		Expect(got.Lessons).To(HaveLen(3))
 		Expect(got.Lessons[0].ID).To(Equal("L-0001"))
 		Expect(got.Lessons[0].Reasons).To(ContainElement("cited by current hypothesis"))

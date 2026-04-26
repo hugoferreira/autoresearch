@@ -199,7 +199,7 @@ var _ = Describe("lesson read views", func() {
 				Predicts:   entity.Predicts{Instrument: "timing", Target: "kernel"},
 				Tags:       []string{"histogram"},
 			},
-			Limit: 3,
+			Limit: 10,
 		})
 
 		Expect(got).To(HaveLen(3))
@@ -212,5 +212,31 @@ var _ = Describe("lesson read views", func() {
 		)))
 		Expect(got).To(ContainElement(HaveField("ID", "L-0003")))
 		Expect(got).NotTo(ContainElement(HaveField("ID", "L-0004")))
+	})
+
+	It("does not treat status, system scope, or recency as relevance by themselves", func() {
+		views := []*LessonReadView{
+			{Lesson: &entity.Lesson{
+				ID:     "L-0001",
+				Claim:  "recent active system lesson",
+				Scope:  entity.LessonScopeSystem,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"docs"},
+			}},
+			{Lesson: &entity.Lesson{
+				ID:     "L-0002",
+				Claim:  "newer active hypothesis lesson",
+				Scope:  entity.LessonScopeHypothesis,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"unrelated"},
+			}},
+		}
+
+		got := RankRelevantLessons(views, LessonRelevanceContext{
+			Goal:  &entity.Goal{Objective: entity.Objective{Instrument: "timing", Direction: "decrease"}},
+			Limit: 10,
+		})
+
+		Expect(got).To(BeEmpty())
 	})
 })
