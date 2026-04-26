@@ -21,6 +21,7 @@ type cycleContextSnapshot struct {
 	MainCheckoutDirty      bool                             `json:"main_checkout_dirty"`
 	MainCheckoutDirtyPaths []string                         `json:"main_checkout_dirty_paths"`
 	Budgets                readmodel.BudgetSnapshot         `json:"budgets"`
+	BudgetAdvisory         readmodel.BudgetAdvisory         `json:"budget_advisory"`
 	Counts                 map[string]int                   `json:"counts"`
 	Instruments            map[string]store.Instrument      `json:"instruments"`
 	ActiveScratch          []readmodel.ScratchWorkspaceView `json:"active_scratch"`
@@ -147,6 +148,11 @@ func captureCycleContext(s *store.Store, scope goalScope) (*cycleContextSnapshot
 				cycleContextScope: *payload,
 			})
 		}
+		advisory, err := buildCycleContextBudgetAdvisory(s, inputs, scope, nil)
+		if err != nil {
+			return nil, err
+		}
+		snap.BudgetAdvisory = advisory
 		return snap, nil
 	}
 
@@ -163,6 +169,11 @@ func captureCycleContext(s *store.Store, scope goalScope) (*cycleContextSnapshot
 	}
 	snap.Counts = counts
 	snap.cycleContextScope = payload
+	advisory, err := buildCycleContextBudgetAdvisory(s, inputs, scope, goal)
+	if err != nil {
+		return nil, err
+	}
+	snap.BudgetAdvisory = advisory
 	return snap, nil
 }
 
@@ -304,6 +315,38 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 	return payload, counts, nil
 }
 
+func buildCycleContextBudgetAdvisory(s *store.Store, inputs *cycleContextInputs, scope goalScope, goal *entity.Goal) (readmodel.BudgetAdvisory, error) {
+	resolver := newGoalScopeResolver(s, scope)
+	hyps := resolver.filterHypotheses(inputs.hypotheses)
+	exps, err := resolver.filterExperiments(inputs.experiments)
+	if err != nil {
+		return readmodel.BudgetAdvisory{}, err
+	}
+	concls, err := resolver.filterConclusions(inputs.conclusions)
+	if err != nil {
+		return readmodel.BudgetAdvisory{}, err
+	}
+	obs, err := resolver.filterObservations(inputs.observations)
+	if err != nil {
+		return readmodel.BudgetAdvisory{}, err
+	}
+	events, err := resolver.filterEvents(inputs.events)
+	if err != nil {
+		return readmodel.BudgetAdvisory{}, err
+	}
+	return readmodel.BuildBudgetAdvisory(readmodel.BudgetAdvisoryInputs{
+		Config:       inputs.cfg,
+		State:        inputs.state,
+		Goal:         goal,
+		Hypotheses:   hyps,
+		Experiments:  exps,
+		Observations: obs,
+		Conclusions:  concls,
+		Events:       events,
+		Now:          inputs.now,
+	}), nil
+}
+
 func addCycleContextBaselineRecommendations(
 	s *store.Store,
 	inFlight []dashboardInFlight,
@@ -397,6 +440,7 @@ func renderCycleContextText(w *output.Writer, snap *cycleContextSnapshot) {
 		w.Textln("main checkout:  clean")
 	}
 	w.Textf("instruments:    %d\n", len(snap.Instruments))
+	w.Textf("budget warnings: %d\n", len(snap.BudgetAdvisory.Warnings))
 	w.Textf("active scratch: %d\n", len(snap.ActiveScratch))
 	if snap.ScopeAll {
 		w.Textf("goals:          %d\n", len(snap.Goals))

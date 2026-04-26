@@ -175,6 +175,13 @@ only when this reference does not answer the question you have.
         # when no high-value next experiment remains or review is still pending.
         # stale-experiment-minutes: when > 0, status and dashboard flag idle experiments.
 
+` + "`cycle-context --json`" + ` and ` + "`status --json`" + ` include ` + "`budget_advisory`" + `:
+configured limits, effective advisory thresholds, current usage, frontier
+stall state, stale experiments, and warnings. Unset ` + "`max_experiments`" + ` /
+` + "`max_wall_time_h`" + ` remain unlimited for hard enforcement; recommended
+thresholds only produce read-side warnings. Treat warnings as stop/re-steer
+signals unless the human explicitly raises or clears a budget.
+
 ### Goal lifecycle (serialized, one active at a time)
 
 Goals are the top-level unit of research. At most one is active; every

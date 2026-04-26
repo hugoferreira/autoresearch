@@ -48,6 +48,7 @@ type cliCycleContextResponse struct {
 	MainCheckoutDirty      bool                             `json:"main_checkout_dirty"`
 	MainCheckoutDirtyPaths []string                         `json:"main_checkout_dirty_paths"`
 	Counts                 map[string]int                   `json:"counts"`
+	BudgetAdvisory         readmodel.BudgetAdvisory         `json:"budget_advisory"`
 	Instruments            map[string]store.Instrument      `json:"instruments"`
 	ActiveScratch          []readmodel.ScratchWorkspaceView `json:"active_scratch"`
 	StaleScratch           []readmodel.ScratchWorkspaceView `json:"stale_scratch,omitempty"`
@@ -81,6 +82,10 @@ var _ = Describe("cycle-context command", func() {
 		Expect(ctx.Counts).To(HaveKeyWithValue("observations", 0))
 		Expect(ctx.Counts).To(HaveKeyWithValue("conclusions", 0))
 		Expect(ctx.Counts).To(HaveKeyWithValue("lessons", 0))
+		Expect(ctx.BudgetAdvisory.EffectiveLimits.MaxExperiments).To(Equal(0))
+		Expect(ctx.BudgetAdvisory.LimitSources.MaxExperiments).To(Equal("unlimited"))
+		Expect(ctx.BudgetAdvisory.EffectiveLimits.StaleExperimentMinutes).To(Equal(readmodel.DefaultBudgetAdvisoryStaleExperimentMinutes))
+		Expect(ctx.BudgetAdvisory.Warnings).To(BeEmpty())
 		Expect(ctx.Instruments).To(BeEmpty())
 		Expect(ctx.Goals).To(BeEmpty())
 	})
