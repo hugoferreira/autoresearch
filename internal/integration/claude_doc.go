@@ -262,6 +262,23 @@ scraping human text:
 
     git -C "$(autoresearch experiment show E-0011 --worktree)" diff "$(autoresearch experiment show E-0011 --baseline-sha)" -- src/
 
+### Scratch probes
+    autoresearch scratch create --from HEAD --name NAME [--notes "..."]  # temporary premise-check worktree
+    autoresearch scratch path   <S-id>
+    autoresearch scratch show   <S-id>
+    autoresearch scratch list   [--status active|cleaned|all]
+    autoresearch scratch cleanup <S-id> [--reason "..."]
+
+Scratch workspaces live under ` + "`worktrees.root/scratch/`" + ` on
+` + "`autoresearch/scratch/...`" + ` branches. They are for temporary
+instrumentation before a hypothesis deserves a real experiment: they do not
+increment experiment counts, do not enter the frontier, and are not conclusion
+evidence. Promote a useful probe by creating a normal hypothesis/experiment and
+capturing evidence through ` + "`observe`" + ` and its artifacts.
+` + "`status --json`" + ` and ` + "`cycle-context --json`" + ` report
+` + "`active_scratch`" + ` / ` + "`stale_scratch`" + ` so agents can clean up
+unfinished probes.
+
 Instrument dependencies: instruments may declare ` + "`--requires`" + ` dependencies
 (e.g. ` + "`test=pass`" + `). When you ` + "`observe`" + `, the CLI checks that all required
 instruments have already been observed with a passing result on the same

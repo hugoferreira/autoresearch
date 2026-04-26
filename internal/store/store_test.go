@@ -38,6 +38,7 @@ var _ = Describe("store initialization", func() {
 			s.ConclusionsDir(),
 			s.ArtifactsDir(),
 			s.LessonsDir(),
+			s.ScratchDir(),
 		} {
 			Expect(d).To(BeADirectory())
 		}
