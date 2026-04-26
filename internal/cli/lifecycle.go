@@ -456,7 +456,34 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			allEvents, err := s.Events(0)
+			if err != nil {
+				return err
+			}
+			events, err := resolver.filterEvents(allEvents)
+			if err != nil {
+				return err
+			}
+			var goal *entity.Goal
+			if !scope.All && scope.GoalID != "" {
+				goal, err = s.ReadGoal(scope.GoalID)
+				if err != nil {
+					return err
+				}
+			}
 			counts := readmodel.BuildCounts(len(hyps), len(exps), len(obs), len(concls))
+			now := time.Now().UTC()
+			advisory := readmodel.BuildBudgetAdvisory(readmodel.BudgetAdvisoryInputs{
+				Config:       cfg,
+				State:        st,
+				Goal:         goal,
+				Hypotheses:   hyps,
+				Experiments:  exps,
+				Observations: obs,
+				Conclusions:  concls,
+				Events:       events,
+				Now:          now,
+			})
 
 			payload := mergeGoalScopePayload(map[string]any{
 				"root":                      s.Root(),
@@ -466,12 +493,12 @@ func statusCmd() *cobra.Command {
 				"pause_reason":              st.PauseReason,
 				"current_goal_id":           st.CurrentGoalID,
 				"counts":                    counts,
+				"budget_advisory":           advisory,
 				"last_event_at":             st.LastEventAt,
 				"main_checkout_dirty":       mainCheckout.Dirty,
 				"main_checkout_dirty_paths": mainCheckout.Paths,
 			}, scope)
 
-			now := time.Now().UTC()
 			activeScratch, staleScratch, err := activeScratchForRead(s, now)
 			if err != nil {
 				return err
@@ -483,19 +510,7 @@ func statusCmd() *cobra.Command {
 				payload["stale_scratch"] = staleScratch
 			}
 
-			// Stale experiment detection: reuse the same read-side
-			// actionability policy as dashboard/frontier instead of open-coding
-			// another "live enough to steer from" definition here.
-			var stale []staleExperimentView
-			if staleMinutes := cfg.Budgets.StaleExperimentMinutes; staleMinutes > 0 {
-				allEvents, err := s.Events(0)
-				if err != nil {
-					return err
-				}
-				expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
-				threshold := time.Duration(staleMinutes) * time.Minute
-				_, stale = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, threshold, now)
-			}
+			stale := advisory.StaleExperiments
 			if len(stale) > 0 {
 				payload["stale_experiments"] = stale
 			}
@@ -505,10 +520,8 @@ func statusCmd() *cobra.Command {
 			// observations anywhere. A nudge for the orchestrator that it
 			// may be skipping a required measurement.
 			var unobservedInstruments []string
-			if !scope.All && scope.GoalID != "" {
-				if goal, err := s.ReadGoal(scope.GoalID); err == nil {
-					unobservedInstruments = readmodel.FindUnobservedGoalInstruments(goal, obs)
-				}
+			if goal != nil {
+				unobservedInstruments = readmodel.FindUnobservedGoalInstruments(goal, obs)
 			}
 			if len(unobservedInstruments) > 0 {
 				payload["unobserved_goal_instruments"] = unobservedInstruments
@@ -550,9 +563,22 @@ func statusCmd() *cobra.Command {
 			} else {
 				w.Textln("last event:     (none)")
 			}
+			if len(advisory.Warnings) > 0 {
+				w.Textln("")
+				w.Textln("budget advisory warnings:")
+				for _, warning := range advisory.Warnings {
+					subject := ""
+					if warning.Subject != "" {
+						subject = " [" + warning.Subject + "]"
+					}
+					w.Textf("  %-30s %-8s%s %s\n", warning.Code, warning.Severity, subject, warning.Message)
+				}
+			}
 			if len(stale) > 0 {
 				w.Textln("")
-				w.Textf("stale experiments (>%dm since last activity):\n", cfg.Budgets.StaleExperimentMinutes)
+				w.Textf("stale experiments (>%dm %s threshold since last activity):\n",
+					advisory.EffectiveLimits.StaleExperimentMinutes,
+					advisory.LimitSources.StaleExperimentMinutes)
 				for _, se := range stale {
 					w.Textf("  %-8s  %-12s  hyp=%-8s  %s ago  (last: %s)\n",
 						se.ID, se.Status, se.Hypothesis,

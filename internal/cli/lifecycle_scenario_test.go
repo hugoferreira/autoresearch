@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/bytter/autoresearch/internal/readmodel"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -37,9 +38,11 @@ type cliDashboardResponse struct {
 }
 
 type cliStatusResponse struct {
-	ScopeGoalID       string         `json:"scope_goal_id,omitempty"`
-	MainCheckoutDirty bool           `json:"main_checkout_dirty"`
-	Counts            map[string]int `json:"counts"`
+	ScopeGoalID       string                          `json:"scope_goal_id,omitempty"`
+	MainCheckoutDirty bool                            `json:"main_checkout_dirty"`
+	Counts            map[string]int                  `json:"counts"`
+	BudgetAdvisory    readmodel.BudgetAdvisory        `json:"budget_advisory"`
+	StaleExperiments  []readmodel.StaleExperimentView `json:"stale_experiments,omitempty"`
 }
 
 type cliLifecycleFixture struct {

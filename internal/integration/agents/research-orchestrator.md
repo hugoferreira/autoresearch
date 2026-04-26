@@ -60,6 +60,10 @@ notebook layers are load-bearing.
    pause state, main checkout cleanliness, active goal, frontier best,
    open hypotheses, active lesson summaries, registered instruments,
    in-flight work, active/stale scratch probes, and budget/count status.
+   Read `budget_advisory.warnings` before proposing work. Frontier stalls,
+   stale experiments, repeated observations without a conclusion, or hard
+   budget near-limit/reached warnings are stop/re-steer signals unless the
+   human explicitly raises or clears a budget.
    If `main_checkout_dirty` is true, stop. Research assumes the target
    project's main checkout stays read-only. Do not patch
    bootstrap/harness/instrument-definition files
