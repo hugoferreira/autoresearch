@@ -512,6 +512,7 @@ Verbs:
         [--predict-instrument X --predict-direction {increase|decrease} --predict-min-effect N [--predict-max-effect M]]
     autoresearch lesson list [--goal G-NNNN|all] [--scope ...] [--status active|provisional|invalidated|superseded|all] [--subject ...] [--tag ...] [--since L-NNNN]
                               [--summary | --fields id,scope,status,tags,...]
+    autoresearch lesson relevant [--goal G-NNNN] [--hypothesis H-NNNN] [--limit N]   # ranked small lesson subset
     autoresearch lesson show <L-id>
     autoresearch lesson supersede <L-old> --by <L-new> --reason "..."
     autoresearch lesson accuracy   # compare predicted effects vs actual outcomes (read-only)
@@ -560,10 +561,12 @@ example.
 
 **3. The reading contract.** Lessons are load-bearing, not decorative:
 
-- The **orchestrator** MUST read active lesson summaries at the start of
-  every cycle. ` + "`cycle-context --json`" + ` provides them in ` + "`active_lessons`" + `;
-  use ` + "`lesson list --summary --json`" + ` only when deeper active lesson
-  detail is needed. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
+- The **orchestrator** MUST read ranked relevant lessons at the start of
+  every cycle. ` + "`cycle-context --json`" + ` provides them in ` + "`relevant_lessons`" + `
+  and keeps the legacy active-only summary in ` + "`active_lessons`" + `. Use
+  ` + "`lesson relevant --hypothesis H-XXXX --json`" + ` to focus a specific
+  proposal, and ` + "`lesson list --summary --json`" + ` only when deeper active
+  lesson detail is needed. Its ` + "`--rationale`" + ` on ` + "`hypothesis add`" + ` must
   either cite a lesson ID or explicitly note "no relevant lesson". When
   citing lessons, pass their IDs via ` + "`--inspired-by L-XXXX,L-YYYY`" + ` to
   create a structured link. ` + "`lesson accuracy`" + ` uses this link to compare

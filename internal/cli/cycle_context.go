@@ -34,15 +34,16 @@ type cycleContextGoal struct {
 }
 
 type cycleContextScope struct {
-	Goal           *entity.Goal                  `json:"goal,omitempty"`
-	FrontierBest   *frontierRow                  `json:"frontier_best"`
-	FrontierStallK int                           `json:"frontier_stall_k"`
-	StalledFor     int                           `json:"stalled_for"`
-	StallReached   bool                          `json:"stall_reached"`
-	GoalAssessment *frontierGoalAssessment       `json:"goal_assessment,omitempty"`
-	OpenHypotheses []*entity.Hypothesis          `json:"open_hypotheses"`
-	InFlight       []dashboardInFlight           `json:"in_flight"`
-	ActiveLessons  []readmodel.LessonSummaryView `json:"active_lessons"`
+	Goal            *entity.Goal                   `json:"goal,omitempty"`
+	FrontierBest    *frontierRow                   `json:"frontier_best"`
+	FrontierStallK  int                            `json:"frontier_stall_k"`
+	StalledFor      int                            `json:"stalled_for"`
+	StallReached    bool                           `json:"stall_reached"`
+	GoalAssessment  *frontierGoalAssessment        `json:"goal_assessment,omitempty"`
+	OpenHypotheses  []*entity.Hypothesis           `json:"open_hypotheses"`
+	InFlight        []dashboardInFlight            `json:"in_flight"`
+	ActiveLessons   []readmodel.LessonSummaryView  `json:"active_lessons"`
+	RelevantLessons []readmodel.RelevantLessonView `json:"relevant_lessons"`
 }
 
 type cycleContextInputs struct {
@@ -238,30 +239,48 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 	expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
 	inFlight, _ := readmodel.BuildExperimentActivity(exps, expClassByID, events, 0, inputs.now)
 
-	lessonViews, err := readmodel.ListLessonsForRead(s, lessons, readmodel.LessonListOptions{Status: entity.LessonStatusActive})
+	activeLessonViews, err := readmodel.ListLessonsForRead(s, lessons, readmodel.LessonListOptions{Status: entity.LessonStatusActive})
 	if err != nil {
 		return nil, nil, err
 	}
+	allLessonViews, err := readmodel.ListLessonsForRead(s, lessons, readmodel.LessonListOptions{Status: readmodel.LessonStatusAll})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var frontierBest *frontierRow
+	var stalledFor int
 
 	payload := &cycleContextScope{
 		Goal:           goal,
 		FrontierStallK: inputs.cfg.Budgets.FrontierStallK,
 		OpenHypotheses: openHypotheses(hyps),
 		InFlight:       nonNilInFlight(inFlight),
-		ActiveLessons:  nonNilLessonSummaries(readmodel.BuildLessonSummaryViews(lessonViews)),
+		ActiveLessons:  nonNilLessonSummaries(readmodel.BuildLessonSummaryViews(activeLessonViews)),
 	}
 
 	if goal != nil {
 		frontier := readmodel.BuildFrontierSnapshot(goal, concls, readmodel.NewObservationIndex(obs), expClassByID)
 		if len(frontier.Rows) > 0 {
 			best := frontier.Rows[0]
-			payload.FrontierBest = &best
+			frontierBest = &best
+			payload.FrontierBest = frontierBest
 		}
-		payload.StalledFor = frontier.StalledFor
-		payload.StallReached = inputs.cfg.Budgets.FrontierStallK > 0 && frontier.StalledFor >= inputs.cfg.Budgets.FrontierStallK
-		assessment := frontier.Assessment
-		payload.GoalAssessment = &assessment
+		stalledFor = frontier.StalledFor
+		payload.StalledFor = stalledFor
+		payload.StallReached = inputs.cfg.Budgets.FrontierStallK > 0 && stalledFor >= inputs.cfg.Budgets.FrontierStallK
+		frontierAssessment := frontier.Assessment
+		payload.GoalAssessment = &frontierAssessment
 	}
+	payload.RelevantLessons = nonNilRelevantLessons(readmodel.RankRelevantLessons(allLessonViews, readmodel.LessonRelevanceContext{
+		Goal:                goal,
+		OpenHypotheses:      payload.OpenHypotheses,
+		InFlightExperiments: relevantInFlightExperiments(exps),
+		FrontierBest:        frontierBest,
+		Conclusions:         concls,
+		Hypotheses:          hyps,
+		Limit:               readmodel.DefaultRelevantLessonLimit,
+	}))
 
 	counts := readmodel.BuildCountsWithLessons(len(hyps), len(exps), len(obs), len(concls), len(lessons))
 	return payload, counts, nil
@@ -294,6 +313,13 @@ func nonNilInFlight(in []dashboardInFlight) []dashboardInFlight {
 func nonNilLessonSummaries(in []readmodel.LessonSummaryView) []readmodel.LessonSummaryView {
 	if in == nil {
 		return []readmodel.LessonSummaryView{}
+	}
+	return in
+}
+
+func nonNilRelevantLessons(in []readmodel.RelevantLessonView) []readmodel.RelevantLessonView {
+	if in == nil {
+		return []readmodel.RelevantLessonView{}
 	}
 	return in
 }
@@ -349,4 +375,5 @@ func renderCycleContextGoalText(w *output.Writer, goalID string, scope *cycleCon
 	w.Textf("open hypotheses: %d\n", len(scope.OpenHypotheses))
 	w.Textf("in flight:      %d\n", len(scope.InFlight))
 	w.Textf("active lessons: %d\n", len(scope.ActiveLessons))
+	w.Textf("relevant lessons: %d\n", len(scope.RelevantLessons))
 }

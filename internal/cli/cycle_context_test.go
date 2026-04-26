@@ -23,40 +23,42 @@ type cliCycleContextInFlight struct {
 }
 
 type cliCycleContextGoal struct {
-	GoalID         string                        `json:"goal_id"`
-	Counts         map[string]int                `json:"counts"`
-	Goal           *entity.Goal                  `json:"goal,omitempty"`
-	FrontierBest   *cliFrontierRow               `json:"frontier_best"`
-	FrontierStallK int                           `json:"frontier_stall_k"`
-	StalledFor     int                           `json:"stalled_for"`
-	StallReached   bool                          `json:"stall_reached"`
-	GoalAssessment *cliCycleContextAssessment    `json:"goal_assessment,omitempty"`
-	OpenHypotheses []entity.Hypothesis           `json:"open_hypotheses"`
-	InFlight       []cliCycleContextInFlight     `json:"in_flight"`
-	ActiveLessons  []readmodel.LessonSummaryView `json:"active_lessons"`
+	GoalID          string                         `json:"goal_id"`
+	Counts          map[string]int                 `json:"counts"`
+	Goal            *entity.Goal                   `json:"goal,omitempty"`
+	FrontierBest    *cliFrontierRow                `json:"frontier_best"`
+	FrontierStallK  int                            `json:"frontier_stall_k"`
+	StalledFor      int                            `json:"stalled_for"`
+	StallReached    bool                           `json:"stall_reached"`
+	GoalAssessment  *cliCycleContextAssessment     `json:"goal_assessment,omitempty"`
+	OpenHypotheses  []entity.Hypothesis            `json:"open_hypotheses"`
+	InFlight        []cliCycleContextInFlight      `json:"in_flight"`
+	ActiveLessons   []readmodel.LessonSummaryView  `json:"active_lessons"`
+	RelevantLessons []readmodel.RelevantLessonView `json:"relevant_lessons"`
 }
 
 type cliCycleContextResponse struct {
-	Project                string                        `json:"project"`
-	ScopeGoalID            string                        `json:"scope_goal_id,omitempty"`
-	ScopeAll               bool                          `json:"scope_all"`
-	Paused                 bool                          `json:"paused"`
-	PauseReason            string                        `json:"pause_reason,omitempty"`
-	Mode                   string                        `json:"mode"`
-	MainCheckoutDirty      bool                          `json:"main_checkout_dirty"`
-	MainCheckoutDirtyPaths []string                      `json:"main_checkout_dirty_paths"`
-	Counts                 map[string]int                `json:"counts"`
-	Instruments            map[string]store.Instrument   `json:"instruments"`
-	Goal                   *entity.Goal                  `json:"goal,omitempty"`
-	FrontierBest           *cliFrontierRow               `json:"frontier_best"`
-	FrontierStallK         int                           `json:"frontier_stall_k"`
-	StalledFor             int                           `json:"stalled_for"`
-	StallReached           bool                          `json:"stall_reached"`
-	GoalAssessment         *cliCycleContextAssessment    `json:"goal_assessment,omitempty"`
-	OpenHypotheses         []entity.Hypothesis           `json:"open_hypotheses"`
-	InFlight               []cliCycleContextInFlight     `json:"in_flight"`
-	ActiveLessons          []readmodel.LessonSummaryView `json:"active_lessons"`
-	Goals                  []cliCycleContextGoal         `json:"goals,omitempty"`
+	Project                string                         `json:"project"`
+	ScopeGoalID            string                         `json:"scope_goal_id,omitempty"`
+	ScopeAll               bool                           `json:"scope_all"`
+	Paused                 bool                           `json:"paused"`
+	PauseReason            string                         `json:"pause_reason,omitempty"`
+	Mode                   string                         `json:"mode"`
+	MainCheckoutDirty      bool                           `json:"main_checkout_dirty"`
+	MainCheckoutDirtyPaths []string                       `json:"main_checkout_dirty_paths"`
+	Counts                 map[string]int                 `json:"counts"`
+	Instruments            map[string]store.Instrument    `json:"instruments"`
+	Goal                   *entity.Goal                   `json:"goal,omitempty"`
+	FrontierBest           *cliFrontierRow                `json:"frontier_best"`
+	FrontierStallK         int                            `json:"frontier_stall_k"`
+	StalledFor             int                            `json:"stalled_for"`
+	StallReached           bool                           `json:"stall_reached"`
+	GoalAssessment         *cliCycleContextAssessment     `json:"goal_assessment,omitempty"`
+	OpenHypotheses         []entity.Hypothesis            `json:"open_hypotheses"`
+	InFlight               []cliCycleContextInFlight      `json:"in_flight"`
+	ActiveLessons          []readmodel.LessonSummaryView  `json:"active_lessons"`
+	RelevantLessons        []readmodel.RelevantLessonView `json:"relevant_lessons"`
+	Goals                  []cliCycleContextGoal          `json:"goals,omitempty"`
 }
 
 var _ = Describe("cycle-context command", func() {
@@ -147,6 +149,11 @@ var _ = Describe("cycle-context command", func() {
 		Expect(ctx.ActiveLessons).To(ContainElement(SatisfyAll(
 			HaveField("ID", lesson.ID),
 			HaveField("Status", entity.LessonStatusActive),
+			HaveField("Claim", "tightening the hot loop paid off in this fixture"),
+		)))
+		Expect(ctx.RelevantLessons).To(ContainElement(SatisfyAll(
+			HaveField("ID", lesson.ID),
+			HaveField("Score", BeNumerically(">", 0)),
 			HaveField("Claim", "tightening the hot loop paid off in this fixture"),
 		)))
 		Expect(ctx.Instruments).To(HaveKey("timing"))

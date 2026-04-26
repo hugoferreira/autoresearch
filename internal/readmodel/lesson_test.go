@@ -153,4 +153,90 @@ var _ = Describe("lesson read views", func() {
 		_, err := ParseLessonFields("id,nope")
 		Expect(err).To(HaveOccurred())
 	})
+
+	It("ranks direct, tagged, system, and invalidated lessons with explicit reasons", func() {
+		views := []*LessonReadView{
+			{Lesson: &entity.Lesson{
+				ID:     "L-0001",
+				Claim:  "inspired lesson",
+				Scope:  entity.LessonScopeHypothesis,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"histogram"},
+			}},
+			{Lesson: &entity.Lesson{
+				ID:     "L-0002",
+				Claim:  "invalidated timing warning",
+				Scope:  entity.LessonScopeHypothesis,
+				Status: entity.LessonStatusInvalidated,
+				Tags:   []string{"timing"},
+				PredictedEffect: &entity.PredictedEffect{
+					Instrument: "timing",
+					Direction:  "decrease",
+					MinEffect:  0.05,
+				},
+			}},
+			{Lesson: &entity.Lesson{
+				ID:     "L-0003",
+				Claim:  "system timing lesson",
+				Scope:  entity.LessonScopeSystem,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"timing"},
+			}},
+			{Lesson: &entity.Lesson{
+				ID:     "L-0004",
+				Claim:  "unrelated system lesson",
+				Scope:  entity.LessonScopeSystem,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"docs"},
+			}},
+		}
+
+		got := RankRelevantLessons(views, LessonRelevanceContext{
+			Goal: &entity.Goal{Objective: entity.Objective{Instrument: "timing", Direction: "decrease"}},
+			Hypothesis: &entity.Hypothesis{
+				ID:         "H-0001",
+				InspiredBy: []string{"L-0001"},
+				Predicts:   entity.Predicts{Instrument: "timing", Target: "kernel"},
+				Tags:       []string{"histogram"},
+			},
+			Limit: 10,
+		})
+
+		Expect(got).To(HaveLen(3))
+		Expect(got[0].ID).To(Equal("L-0001"))
+		Expect(got[0].Reasons).To(ContainElement("cited by current hypothesis"))
+		Expect(got).To(ContainElement(SatisfyAll(
+			HaveField("ID", "L-0002"),
+			HaveField("Status", entity.LessonStatusInvalidated),
+			HaveField("Reasons", ContainElement("invalidated")),
+		)))
+		Expect(got).To(ContainElement(HaveField("ID", "L-0003")))
+		Expect(got).NotTo(ContainElement(HaveField("ID", "L-0004")))
+	})
+
+	It("does not treat status, system scope, or recency as relevance by themselves", func() {
+		views := []*LessonReadView{
+			{Lesson: &entity.Lesson{
+				ID:     "L-0001",
+				Claim:  "recent active system lesson",
+				Scope:  entity.LessonScopeSystem,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"docs"},
+			}},
+			{Lesson: &entity.Lesson{
+				ID:     "L-0002",
+				Claim:  "newer active hypothesis lesson",
+				Scope:  entity.LessonScopeHypothesis,
+				Status: entity.LessonStatusActive,
+				Tags:   []string{"unrelated"},
+			}},
+		}
+
+		got := RankRelevantLessons(views, LessonRelevanceContext{
+			Goal:  &entity.Goal{Objective: entity.Objective{Instrument: "timing", Direction: "decrease"}},
+			Limit: 10,
+		})
+
+		Expect(got).To(BeEmpty())
+	})
 })

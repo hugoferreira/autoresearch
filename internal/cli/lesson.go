@@ -41,6 +41,7 @@ the whole point — the loop should not re-derive what it already knows.`,
 	l.AddCommand(
 		lessonAddCmd(),
 		lessonListCmd(),
+		lessonRelevantCmd(),
 		lessonShowCmd(),
 		lessonSupersedeCmd(),
 		lessonAccuracyCmd(),
@@ -178,6 +179,55 @@ If unsure, prefer scope=hypothesis.`,
 	c.Flags().Float64Var(&predictMinEffect, "predict-min-effect", 0, "minimum predicted fractional effect (required with --predict-instrument)")
 	c.Flags().Float64Var(&predictMaxEffect, "predict-max-effect", 0, "maximum predicted fractional effect (optional, 0 = unbounded)")
 	addAuthorFlag(c, &author, "")
+	return c
+}
+
+func lessonRelevantCmd() *cobra.Command {
+	var (
+		goalFlag string
+		hypID    string
+		limit    int
+	)
+	c := &cobra.Command{
+		Use:   "relevant",
+		Short: "Rank lessons for the current goal or hypothesis",
+		Long: `Return a small ranked lesson subset for the next research step.
+The ranking keeps statuses explicit, so directly relevant invalidated
+lessons can appear as cautionary context instead of being silently hidden.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := output.Default(globalJSON)
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			rows, scope, err := captureRelevantLessons(s, goalFlag, hypID, limit)
+			if err != nil {
+				return err
+			}
+			if w.IsJSON() {
+				return w.JSON(mergeGoalScopePayload(map[string]any{
+					"hypothesis": strings.TrimSpace(hypID),
+					"limit":      resolvedRelevantLessonLimit(limit),
+					"lessons":    rows,
+				}, scope))
+			}
+			if len(rows) == 0 {
+				w.Textln("(no relevant lessons)")
+				return nil
+			}
+			for _, row := range rows {
+				w.Textf("  %-8s score=%-4d %-11s %-11s %s\n",
+					row.ID, row.Score, row.Scope, row.Status, row.Claim)
+				if len(row.Reasons) > 0 {
+					w.Textf("            reason: %s\n", strings.Join(row.Reasons, "; "))
+				}
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&goalFlag, "goal", "", "goal to scope relevance to (defaults to active goal; use 'all' for every goal)")
+	c.Flags().StringVar(&hypID, "hypothesis", "", "current hypothesis id to prioritize direct lesson links")
+	c.Flags().IntVar(&limit, "limit", readmodel.DefaultRelevantLessonLimit, "maximum lessons to return (0 uses default)")
 	return c
 }
 
