@@ -121,6 +121,29 @@ var _ = Describe("analyze command", func() {
 		))
 	})
 
+	It("emits machine-readable baseline candidates for ambiguous inferred baselines", func() {
+		fx := setupAnalyzeScopedBaselineFixture()
+
+		stdout, _, err := runCLIResult(fx.dir,
+			"--json",
+			"analyze", fx.candidateID,
+			"--candidate-ref", fx.candidateRef,
+			"--baseline", "auto",
+			"--instrument", "timing",
+		)
+
+		Expect(err).To(MatchError(ContainSubstring("candidate recorded baseline " + fx.baselineID + " has multiple observation scopes")))
+		var payload analyzeBaselineErrorResponse
+		Expect(json.Unmarshal([]byte(stdout), &payload)).To(Succeed(), "stdout:\n%s", stdout)
+		Expect(payload.Status).To(Equal("error"))
+		Expect(payload.Experiment).To(Equal(fx.candidateID))
+		Expect(payload.Baseline).To(Equal(fx.baselineID))
+		Expect(payload.BaselineCandidates).To(ConsistOf(
+			HaveField("Ref", fx.baselineRefA),
+			HaveField("Ref", fx.baselineRefB),
+		))
+	})
+
 	It("uses --baseline-ref to disambiguate a baseline experiment", func() {
 		fx := setupAnalyzeScopedBaselineFixture()
 
@@ -383,6 +406,21 @@ func setupAnalyzeScopedBaselineFixture() analyzeScopedBaselineFixture {
 
 	dir, s := createCLIStoreDir()
 	now := time.Now().UTC()
+	Expect(s.WriteGoal(&entity.Goal{
+		ID:        "G-0001",
+		Status:    entity.GoalStatusActive,
+		CreatedAt: &now,
+		Objective: entity.Objective{Instrument: "timing", Direction: "decrease"},
+	})).To(Succeed())
+	Expect(s.WriteHypothesis(&entity.Hypothesis{
+		ID:        "H-0001",
+		GoalID:    "G-0001",
+		Claim:     "stack on the measured baseline",
+		Status:    entity.StatusOpen,
+		Author:    "test",
+		CreatedAt: now,
+		Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.05},
+	})).To(Succeed())
 	baselineRefA := "refs/heads/baseline/E-0001-a1"
 	baselineRefB := "refs/heads/baseline/E-0001-a2"
 	candidateRef := "refs/heads/candidate/E-0002-a1"

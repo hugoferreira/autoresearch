@@ -51,6 +51,13 @@ type BaselineCandidate struct {
 	Samples      int      `json:"samples"`
 }
 
+type BaselineScopeAmbiguityError struct {
+	Message    string              `json:"-"`
+	Candidates []BaselineCandidate `json:"baseline_candidates"`
+}
+
+func (e *BaselineScopeAmbiguityError) Error() string { return e.Message }
+
 func LoadObservationIndex(s *store.Store) *ObservationIndex {
 	idx, err := LoadObservationIndexStrict(s)
 	if err != nil {
@@ -193,6 +200,14 @@ func (idx *ObservationIndex) BaselineCandidatesForExperimentInstrument(expID, in
 		return []BaselineCandidate{}
 	}
 	scopes := idx.ScopesForExperimentInstrument(expID, instrument)
+	return idx.BaselineCandidatesForScopes(scopes, instrument)
+}
+
+func (idx *ObservationIndex) BaselineCandidatesForScopes(scopes []ObservationScope, instrument string) []BaselineCandidate {
+	if idx == nil {
+		return []BaselineCandidate{}
+	}
+	instrument = strings.TrimSpace(instrument)
 	out := make([]BaselineCandidate, 0, len(scopes))
 	for _, scope := range scopes {
 		obs := idx.ObservationsForScope(scope)

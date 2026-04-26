@@ -128,6 +128,9 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 				}
 				baselineRes, err = readmodel.ResolveInferredBaselineWithIndex(s, obsIdx, hyp, exp, analyzeBaselineInstrument(instName, hyp.Predicts.Instrument))
 				if err != nil {
+					if w.IsJSON() {
+						emitAnalyzeBaselineError(w, expID, "", err)
+					}
 					return err
 				}
 				if baselineRes == nil || baselineRes.ExperimentID == "" {

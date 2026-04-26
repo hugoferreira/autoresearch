@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -175,17 +176,50 @@ func analyzeBaselineRefMatches(stored, ref string) bool {
 }
 
 func emitAnalyzeBaselineError(w *output.Writer, expID, baselineExp string, err error) {
-	selectionErr, ok := err.(*analyzeBaselineSelectionError)
-	if !ok || len(selectionErr.candidates) == 0 {
+	candidates, ok := analyzeBaselineErrorCandidates(err)
+	if !ok || len(candidates) == 0 {
 		return
 	}
+	baselineExp = inferAnalyzeBaselineErrorExperiment(baselineExp, candidates)
 	_ = w.JSON(map[string]any{
 		"status":              "error",
-		"error":               selectionErr.Error(),
+		"error":               err.Error(),
 		"experiment":          expID,
 		"baseline":            baselineExp,
-		"baseline_candidates": selectionErr.candidates,
+		"baseline_candidates": candidates,
 	})
+}
+
+func analyzeBaselineErrorCandidates(err error) ([]readmodel.BaselineCandidate, bool) {
+	var selectionErr *analyzeBaselineSelectionError
+	if errors.As(err, &selectionErr) {
+		return selectionErr.candidates, true
+	}
+	var scopeErr *readmodel.BaselineScopeAmbiguityError
+	if errors.As(err, &scopeErr) {
+		return scopeErr.Candidates, true
+	}
+	return nil, false
+}
+
+func inferAnalyzeBaselineErrorExperiment(expID string, candidates []readmodel.BaselineCandidate) string {
+	expID = strings.TrimSpace(expID)
+	if expID != "" {
+		return expID
+	}
+	seen := map[string]struct{}{}
+	for _, c := range candidates {
+		if strings.TrimSpace(c.Experiment) != "" {
+			seen[c.Experiment] = struct{}{}
+		}
+	}
+	if len(seen) != 1 {
+		return ""
+	}
+	for id := range seen {
+		return id
+	}
+	return ""
 }
 
 func analyzeBaselineInstrument(requested, fallback string) string {
