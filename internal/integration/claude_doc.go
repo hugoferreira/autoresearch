@@ -297,6 +297,7 @@ intentionally want another fresh run even though the target is already met.
 ### Conclusions (review and gate reviewer)
     autoresearch conclusion list       [--goal G-NNNN|all] [--hypothesis H-XXXX] [--verdict X]
     autoresearch conclusion show       <C-id>
+    autoresearch conclusion lint       <C-id>  # read-only citation/ref/mechanism evidence lint
     autoresearch review-packet         <C-id>
     autoresearch conclusion accept     <C-id> --reviewed-by ... --rationale "..."
         # Gate reviewer's acceptance: sets reviewed_by, promotes hypothesis

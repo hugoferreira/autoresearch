@@ -15,7 +15,7 @@ func conclusionCommands() []*cobra.Command {
 		Use:   "conclusion",
 		Short: "Inspect and (for the critic) downgrade existing conclusions",
 	}
-	c.AddCommand(conclusionListCmd(), conclusionShowCmd(), conclusionDowngradeCmd(), conclusionAcceptCmd(), conclusionAppealCmd())
+	c.AddCommand(conclusionListCmd(), conclusionShowCmd(), conclusionLintCmd(), conclusionDowngradeCmd(), conclusionAcceptCmd(), conclusionAppealCmd())
 	return []*cobra.Command{c}
 }
 
