@@ -6,6 +6,9 @@
 *.out
 coverage.txt
 
+# Local Codex agent workspace
+.agents/
+
 # OS / editor junk
 .DS_Store
 .idea/
