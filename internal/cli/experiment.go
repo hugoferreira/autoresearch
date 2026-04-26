@@ -28,6 +28,7 @@ func experimentCommands() []*cobra.Command {
 		experimentImplementCmd(),
 		experimentResetCmd(),
 		experimentBaselineCmd(),
+		experimentPreflightCmd(),
 		experimentWorktreeCmd(),
 		experimentListCmd(),
 		experimentShowCmd(),
@@ -698,15 +699,38 @@ func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes 
 		}
 	}
 
-	if lessons, err := s.ListLessons(); err == nil {
+	if cfg, err := s.Config(); err == nil {
+		brief.InstrumentContracts = briefInstrumentContracts(cfg, e.Instruments)
+	}
+	brief.ForbiddenChanges = []string{
+		"target project main checkout",
+		"bootstrap or harness scripts outside this worktree",
+		"instrument definitions or autoresearch config",
+		"unrelated refactors, formatting churn, or cleanup",
+		".research state files",
+	}
+
+	lessonAccuracy := map[string]lessonAccuracySummary{}
+	lessons, err := s.ListLessons()
+	if err == nil {
+		if _, concls, hyps, accErr := collectLessonAccuracyInputs(s); accErr == nil {
+			if _, summaries, accErr := computeLessonAccuracy(s, lessons, concls, buildLessonLinkIndex(hyps)); accErr == nil {
+				lessonAccuracy = summaries
+			}
+		}
 		for _, l := range lessons {
 			if !lessonIsSteering(s, l) {
 				continue
 			}
 			brief.Lessons = append(brief.Lessons, entity.BriefLesson{
-				ID:    l.ID,
-				Claim: l.Claim,
-				Scope: l.Scope,
+				ID:              l.ID,
+				Claim:           l.Claim,
+				Scope:           l.Scope,
+				Status:          l.EffectiveStatus(),
+				SourceChain:     l.EffectiveSourceChain(),
+				Tags:            append([]string(nil), l.Tags...),
+				PredictedEffect: clonePredictedEffect(l.PredictedEffect),
+				Accuracy:        briefLessonAccuracy(lessonAccuracy[l.ID]),
 			})
 		}
 	}
@@ -736,4 +760,55 @@ func writeWorktreeBrief(s *store.Store, e *entity.Experiment, wtPath, implNotes 
 		return fmt.Errorf("rename temp brief: %w", err)
 	}
 	return nil
+}
+
+func briefInstrumentContracts(cfg *store.Config, instruments []string) []entity.BriefInstrumentContract {
+	if cfg == nil || len(instruments) == 0 {
+		return nil
+	}
+	out := make([]entity.BriefInstrumentContract, 0, len(instruments))
+	for _, name := range instruments {
+		inst, ok := cfg.Instruments[name]
+		if !ok {
+			continue
+		}
+		contract := entity.BriefInstrumentContract{
+			Name:       name,
+			Cmd:        append([]string(nil), inst.Cmd...),
+			Parser:     inst.Parser,
+			Pattern:    inst.Pattern,
+			Unit:       inst.Unit,
+			MinSamples: inst.MinSamples,
+			Requires:   append([]string(nil), inst.Requires...),
+		}
+		for _, ev := range inst.Evidence {
+			contract.Evidence = append(contract.Evidence, entity.BriefEvidenceSpec{
+				Name: ev.Name,
+				Cmd:  ev.Cmd,
+			})
+		}
+		out = append(out, contract)
+	}
+	return out
+}
+
+func clonePredictedEffect(pe *entity.PredictedEffect) *entity.PredictedEffect {
+	if pe == nil {
+		return nil
+	}
+	out := *pe
+	return &out
+}
+
+func briefLessonAccuracy(summary lessonAccuracySummary) *entity.BriefLessonAccuracy {
+	if summary.Total == 0 {
+		return nil
+	}
+	return &entity.BriefLessonAccuracy{
+		Total:      summary.Total,
+		Hit:        summary.Hit,
+		Overshoot:  summary.Overshoot,
+		Undershoot: summary.Undershoot,
+		Trend:      summary.trend(),
+	}
 }

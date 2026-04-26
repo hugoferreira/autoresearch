@@ -475,9 +475,11 @@ worktree cannot reach back to the main `.research/` store (different tree
 entirely), so they read this file for context.
 
 **Struct:** `internal/entity/brief.go` — `Brief` (+ `BriefGoal`,
-`BriefHypothesis`, `BriefExperiment`, `BriefLesson`). Pure JSON. See the
-file for the field list — it mirrors the subset of the main entities an
-implementer or observer needs.
+`BriefHypothesis`, `BriefExperiment`, `BriefLesson`,
+`BriefInstrumentContract`). Pure JSON. See the file for the field list — it
+mirrors the subset of the main entities an implementer or observer needs,
+including active lesson status/source/accuracy, instrument command/parser/
+evidence contracts, and explicit forbidden-change guardrails.
 
 The brief is never updated. If `experiment reset` rewinds an experiment,
 the next `experiment implement` writes a fresh brief.

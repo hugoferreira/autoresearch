@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -90,6 +91,8 @@ func renderReviewPacketText(w *output.Writer, p *readmodel.ReviewPacket) {
 	if len(p.Analysis.Command) > 0 {
 		w.Textf("analysis:      %s\n", readmodel.ReviewPacketCommandString(p.Analysis.Command))
 	}
+	renderReviewPacketLint(w, p.Lint)
+	renderReviewPacketPairedAnalysis(w, p.PairedAnalysis)
 	if len(p.Diff.Command) > 0 {
 		w.Textf("diff:          %s\n", readmodel.ReviewPacketCommandString(p.Diff.Command))
 		if p.Diff.ShortStat != "" {
@@ -105,6 +108,47 @@ func renderReviewPacketText(w *output.Writer, p *readmodel.ReviewPacket) {
 		w.Textln("read_issues:")
 		for _, issue := range p.ReadIssues {
 			w.Textf("  - %s %s: %s\n", issue.Kind, issue.Subject, issue.Message)
+		}
+	}
+}
+
+func renderReviewPacketLint(w *output.Writer, report *readmodel.ConclusionLintReport) {
+	if report == nil {
+		return
+	}
+	status := "ok"
+	if !report.OK {
+		status = "issues"
+	}
+	w.Textf("lint:          %s (%d errors, %d warnings)\n", status, report.Errors, report.Warnings)
+	for _, issue := range report.Issues {
+		subject := issue.Subject
+		if subject != "" {
+			subject = " " + subject
+		}
+		w.Textf("  - [%s] %s%s: %s\n", issue.Severity, issue.Code, subject, issue.Message)
+	}
+}
+
+func renderReviewPacketPairedAnalysis(w *output.Writer, analyses map[string]readmodel.ReviewPacketPairedAnalysis) {
+	if len(analyses) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(analyses))
+	for id := range analyses {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	w.Textln("paired_analysis:")
+	for _, id := range ids {
+		a := analyses[id]
+		w.Textf("  - %s mode=%s instrument=%s candidate=%s baseline=%s delta_frac=%+.4f CI [%+.4f, %+.4f]\n",
+			id, a.Mode, a.Instrument, a.CandidateExperiment, a.BaselineExperiment,
+			a.Comparison.DeltaFrac, a.Comparison.CILowFrac, a.Comparison.CIHighFrac)
+		if len(a.Warnings) > 0 {
+			for _, warning := range a.Warnings {
+				w.Textf("      warning: %s\n", warning)
+			}
 		}
 	}
 }

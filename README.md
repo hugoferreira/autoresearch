@@ -264,11 +264,11 @@ probe, and `--append` when you intentionally want another fresh run.
 | **goal** | `goal set`, `goal new`, `goal show`, `goal list`, `goal conclude`, `goal abandon` |
 | **steering** | `steering show`, `steering append` |
 | **hypothesis** | `add`, `list`, `show`, `promote`, `kill`, `reopen`, `worktree`, `diff`, `apply` |
-| **experiment** | `baseline`, `design`, `implement`, `reset`, `worktree`, `list`, `show [--worktree\|--branch\|--baseline-sha\|--env]` |
+| **experiment** | `baseline`, `design`, `preflight`, `implement`, `reset`, `worktree`, `list`, `show [--worktree\|--branch\|--baseline-sha\|--env]` |
 | **observe** | `observe check <exp> --instrument <name>`, `observe <exp> --instrument <name> [--append]`, `observe <exp> --all [--append]` |
 | **analyze** | `analyze <exp> [--baseline <exp>\|auto]` |
 | **conclude** | `conclude <hyp> --verdict ... --observations ...` |
-| **conclusion** | `list`, `show`, `accept`, `downgrade`, `appeal` |
+| **conclusion** | `list`, `show`, `lint`, `accept`, `downgrade`, `appeal` |
 | **tree / frontier** | `tree [--goal G-NNNN\|all]`, `frontier [--goal G-NNNN\|all]` |
 | **log** | `log [--goal G-NNNN\|all] [--tail --kind --since --follow]` |
 | **report** | `report <hyp>` |
@@ -285,8 +285,8 @@ Exit codes: `0` success, `1` generic error, `2` cobra usage, `3` paused,
 
 `cycle-context --json` is the one-shot boot snapshot for research agents:
 pause state, main checkout cleanliness, active goal, frontier best, open
-hypotheses, active lesson summaries, instruments, in-flight work, and
-budget/count status.
+hypotheses, active lesson summaries, instruments, in-flight work,
+review-pending conclusions, recent downgrades, and budget/count status.
 
 For shell-heavy work, prefer terse experiment projections over scraping
 human text:

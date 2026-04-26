@@ -59,12 +59,18 @@ notebook layers are load-bearing.
 2. `autoresearch cycle-context --json` — the trusted boot snapshot:
    pause state, main checkout cleanliness, active goal, frontier best,
    open hypotheses, active lesson summaries, registered instruments,
-   in-flight work, active/stale scratch probes, and budget/count status.
+   in-flight work, review-pending conclusions, recent downgrades,
+   active/stale scratch probes, and budget/count status.
    Read `budget_advisory.warnings` before proposing work. Frontier stalls,
    stale experiments, repeated observations without a conclusion, or hard
    budget near-limit/reached warnings are stop/re-steer signals unless the
    human explicitly raises or clears a budget.
-   If `main_checkout_dirty` is true, stop. Research assumes the target
+   If `review_pending_conclusions[]` is non-empty, stop and yield with
+   `dispatch research-gate-reviewer on <C-id>` for the newest pending
+   conclusion. Do not start a new cycle while decisive evidence is still
+   unreviewed. If `recent_downgrades[]` is non-empty, classify the newest
+   downgrade reason before proposing work; measurement-contract gaps are
+   pause-and-yield signals. If `main_checkout_dirty` is true, stop. Research assumes the target
    project's main checkout stays read-only. Do not patch
    bootstrap/harness/instrument-definition files
    there mid-run; surface any setup drift as explicit maintenance
@@ -86,12 +92,8 @@ does not include the deeper detail you need.
 
 Some conclusions from earlier cycles may have been downgraded by the
 gate reviewer. You are invoked fresh each cycle, so you will not
-remember them — read them back every time:
-
-    autoresearch conclusion list --json | \
-        jq '[.[] | select(.strict.downgraded_from != null and .reviewed_by != null)]'
-
-For each downgraded conclusion, the `strict.reasons` array holds the
+remember them — read `cycle-context --json`'s `recent_downgrades[]`
+every time. For each downgraded conclusion, `reasons[]` holds the
 critic's specific objection(s). Classify before picking a hypothesis:
 
 - **Measurement-contract gaps** — reasons like "mechanism claim not
@@ -158,6 +160,7 @@ before you reach for `--help`:
     autoresearch experiment baseline --json                              # once per goal, if missing
     autoresearch hypothesis add ... --author agent:orchestrator --json
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
+    autoresearch experiment preflight <E-id> --json
     autoresearch experiment implement <E-id> --impl-notes "..." --json
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
     autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto|--baseline <E-id> [--baseline-ref <ref>]|--baseline-observation O-XXXX] --json
@@ -299,6 +302,17 @@ stdout+stderr as `evidence/<name>` artifacts on the resulting
 observation. Use them to ground mechanism claims; do not write
 mechanism prose that depends on an uncaptured analysis.
 
+Before creating the worktree, run the design preflight:
+
+```sh
+autoresearch experiment preflight <exp-id> --json
+```
+
+If preflight reports errors, stop and redesign instead of implementing.
+Warnings are not automatic stops, but the design notes or handoff must
+explain how they are handled — especially missing mechanism evidence or
+baseline ambiguity.
+
 ### 3. Implement
 
 Create the worktree from the main project, then spawn a coder helper:
@@ -321,7 +335,8 @@ Spawn Agent:
   prompt: "You are implementing an optimization experiment in a git
     worktree. Read .autoresearch-brief.json in the worktree root for
     the full context: the goal, hypothesis, experiment plan, and
-    lessons learned so far.
+    lessons learned so far. Honor its forbidden_changes list and
+    instrument_contracts.
 
     Worktree: <worktree path>
 
@@ -391,6 +406,24 @@ To run a single instrument instead:
 ```sh
 autoresearch observe <exp-id> --instrument <name> --candidate-ref <candidate-ref> --json
 ```
+
+For fragile primary effects, use paired measurement for the primary
+instrument after build/test/constraint observations pass:
+
+```sh
+autoresearch observe-pair <exp-id> \
+    --baseline <baseline-exp-id> \
+    --instrument <primary-instrument> \
+    --candidate-ref <candidate-ref> \
+    --samples <N> --mode interleave --json
+autoresearch analyze-pair <P-id> --json
+```
+
+Use this path when `predicts-min-effect <= 0.05`, when prior lessons
+mention noise/drift, or when the primary instrument is timing/perf-like.
+If `analyze-pair` reports baseline drift comparable to the candidate
+effect, do not write a confident supported/refuted interpretation from
+the unpaired comparison alone.
 
 If an instrument fails, stop and report — do not retry or fix.
 
@@ -466,6 +499,8 @@ configure rescuers — the goal does.
 **Interpretation rules:**
 
 - Cite specific numbers from the analyze output.
+- If you used `observe-pair`, cite the pair id and any `analyze-pair`
+  drift warnings in the interpretation.
 - Link the mechanism (the code change) to the measurement (the effect).
 - Every mechanism claim must be backed by either the diff itself or a
   persisted evidence artifact on one of the cited observations. Name

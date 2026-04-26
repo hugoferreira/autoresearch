@@ -24,45 +24,49 @@ type cliCycleContextInFlight struct {
 }
 
 type cliCycleContextGoal struct {
-	GoalID          string                         `json:"goal_id"`
-	Counts          map[string]int                 `json:"counts"`
-	Goal            *entity.Goal                   `json:"goal,omitempty"`
-	FrontierBest    *cliFrontierRow                `json:"frontier_best"`
-	FrontierStallK  int                            `json:"frontier_stall_k"`
-	StalledFor      int                            `json:"stalled_for"`
-	StallReached    bool                           `json:"stall_reached"`
-	GoalAssessment  *cliCycleContextAssessment     `json:"goal_assessment,omitempty"`
-	OpenHypotheses  []entity.Hypothesis            `json:"open_hypotheses"`
-	InFlight        []cliCycleContextInFlight      `json:"in_flight"`
-	ActiveLessons   []readmodel.LessonSummaryView  `json:"active_lessons"`
-	RelevantLessons []readmodel.RelevantLessonView `json:"relevant_lessons"`
+	GoalID                   string                         `json:"goal_id"`
+	Counts                   map[string]int                 `json:"counts"`
+	Goal                     *entity.Goal                   `json:"goal,omitempty"`
+	FrontierBest             *cliFrontierRow                `json:"frontier_best"`
+	FrontierStallK           int                            `json:"frontier_stall_k"`
+	StalledFor               int                            `json:"stalled_for"`
+	StallReached             bool                           `json:"stall_reached"`
+	GoalAssessment           *cliCycleContextAssessment     `json:"goal_assessment,omitempty"`
+	OpenHypotheses           []entity.Hypothesis            `json:"open_hypotheses"`
+	InFlight                 []cliCycleContextInFlight      `json:"in_flight"`
+	ActiveLessons            []readmodel.LessonSummaryView  `json:"active_lessons"`
+	RelevantLessons          []readmodel.RelevantLessonView `json:"relevant_lessons"`
+	ReviewPendingConclusions []cycleContextConclusionSignal `json:"review_pending_conclusions"`
+	RecentDowngrades         []cycleContextConclusionSignal `json:"recent_downgrades"`
 }
 
 type cliCycleContextResponse struct {
-	Project                string                           `json:"project"`
-	ScopeGoalID            string                           `json:"scope_goal_id,omitempty"`
-	ScopeAll               bool                             `json:"scope_all"`
-	Paused                 bool                             `json:"paused"`
-	PauseReason            string                           `json:"pause_reason,omitempty"`
-	Mode                   string                           `json:"mode"`
-	MainCheckoutDirty      bool                             `json:"main_checkout_dirty"`
-	MainCheckoutDirtyPaths []string                         `json:"main_checkout_dirty_paths"`
-	Counts                 map[string]int                   `json:"counts"`
-	BudgetAdvisory         readmodel.BudgetAdvisory         `json:"budget_advisory"`
-	Instruments            map[string]store.Instrument      `json:"instruments"`
-	ActiveScratch          []readmodel.ScratchWorkspaceView `json:"active_scratch"`
-	StaleScratch           []readmodel.ScratchWorkspaceView `json:"stale_scratch,omitempty"`
-	Goal                   *entity.Goal                     `json:"goal,omitempty"`
-	FrontierBest           *cliFrontierRow                  `json:"frontier_best"`
-	FrontierStallK         int                              `json:"frontier_stall_k"`
-	StalledFor             int                              `json:"stalled_for"`
-	StallReached           bool                             `json:"stall_reached"`
-	GoalAssessment         *cliCycleContextAssessment       `json:"goal_assessment,omitempty"`
-	OpenHypotheses         []entity.Hypothesis              `json:"open_hypotheses"`
-	InFlight               []cliCycleContextInFlight        `json:"in_flight"`
-	ActiveLessons          []readmodel.LessonSummaryView    `json:"active_lessons"`
-	RelevantLessons        []readmodel.RelevantLessonView   `json:"relevant_lessons"`
-	Goals                  []cliCycleContextGoal            `json:"goals,omitempty"`
+	Project                  string                           `json:"project"`
+	ScopeGoalID              string                           `json:"scope_goal_id,omitempty"`
+	ScopeAll                 bool                             `json:"scope_all"`
+	Paused                   bool                             `json:"paused"`
+	PauseReason              string                           `json:"pause_reason,omitempty"`
+	Mode                     string                           `json:"mode"`
+	MainCheckoutDirty        bool                             `json:"main_checkout_dirty"`
+	MainCheckoutDirtyPaths   []string                         `json:"main_checkout_dirty_paths"`
+	Counts                   map[string]int                   `json:"counts"`
+	BudgetAdvisory           readmodel.BudgetAdvisory         `json:"budget_advisory"`
+	Instruments              map[string]store.Instrument      `json:"instruments"`
+	ActiveScratch            []readmodel.ScratchWorkspaceView `json:"active_scratch"`
+	StaleScratch             []readmodel.ScratchWorkspaceView `json:"stale_scratch,omitempty"`
+	Goal                     *entity.Goal                     `json:"goal,omitempty"`
+	FrontierBest             *cliFrontierRow                  `json:"frontier_best"`
+	FrontierStallK           int                              `json:"frontier_stall_k"`
+	StalledFor               int                              `json:"stalled_for"`
+	StallReached             bool                             `json:"stall_reached"`
+	GoalAssessment           *cliCycleContextAssessment       `json:"goal_assessment,omitempty"`
+	OpenHypotheses           []entity.Hypothesis              `json:"open_hypotheses"`
+	InFlight                 []cliCycleContextInFlight        `json:"in_flight"`
+	ActiveLessons            []readmodel.LessonSummaryView    `json:"active_lessons"`
+	RelevantLessons          []readmodel.RelevantLessonView   `json:"relevant_lessons"`
+	ReviewPendingConclusions []cycleContextConclusionSignal   `json:"review_pending_conclusions"`
+	RecentDowngrades         []cycleContextConclusionSignal   `json:"recent_downgrades"`
+	Goals                    []cliCycleContextGoal            `json:"goals,omitempty"`
 }
 
 var _ = Describe("cycle-context command", func() {
@@ -104,6 +108,49 @@ var _ = Describe("cycle-context command", func() {
 
 		Expect(ctx.Paused).To(BeTrue())
 		Expect(ctx.PauseReason).To(Equal("waiting for reviewer"))
+	})
+
+	It("surfaces review-pending conclusions and recent downgrades", func() {
+		dir := setupObserveScenarioStore()
+		registerScenarioInstruments(dir)
+		fixture := setupLifecycleFixture(dir)
+
+		win := setupLifecycleCandidate(dir, cliLifecycleCandidateSpec{
+			Claim: "tighten the hot loop", MinEffect: "0.1",
+			RefName: "candidate/context-pending", Message: "improve timing",
+			Timing: "80\n", Size: "900\n",
+		})
+		obs := observeLifecycleCandidate(dir, win)
+		concl := runCLIJSON[cliIDResponse](dir,
+			"conclude", win.HypothesisID,
+			"--verdict", "supported",
+			"--baseline-experiment", fixture.BaselineID,
+			"--observations", observeResultID(obs, "timing"),
+		)
+
+		ctx := runCLIJSON[cliCycleContextResponse](dir, "cycle-context", "--goal", fixture.GoalID)
+		Expect(ctx.ReviewPendingConclusions).To(ContainElement(SatisfyAll(
+			HaveField("ID", concl.ID),
+			HaveField("Hypothesis", win.HypothesisID),
+			HaveField("Verdict", entity.VerdictSupported),
+			HaveField("RecommendedAction", ContainSubstring("dispatch research-gate-reviewer")),
+		)))
+		Expect(ctx.RecentDowngrades).To(BeEmpty())
+
+		runCLIJSON[cliIDResponse](dir,
+			"conclusion", "downgrade", concl.ID,
+			"--reviewed-by", "agent:gate-reviewer",
+			"--reason", "effect is dominated by baseline drift",
+		)
+
+		ctx = runCLIJSON[cliCycleContextResponse](dir, "cycle-context", "--goal", fixture.GoalID)
+		Expect(ctx.ReviewPendingConclusions).To(BeEmpty())
+		Expect(ctx.RecentDowngrades).To(ContainElement(SatisfyAll(
+			HaveField("ID", concl.ID),
+			HaveField("RequestedFrom", entity.VerdictSupported),
+			HaveField("Reasons", ContainElement(ContainSubstring("baseline drift"))),
+			HaveField("RecommendedAction", ContainSubstring("classify downgrade")),
+		)))
 	})
 
 	It("captures frontier best, open work, active lessons, and instruments for the active goal", func() {

@@ -4,24 +4,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/bytter/autoresearch/internal/entity"
+	"github.com/bytter/autoresearch/internal/stats"
 	"github.com/bytter/autoresearch/internal/store"
 	"github.com/bytter/autoresearch/internal/worktree"
 )
 
 type ReviewPacket struct {
-	Conclusion          *entity.Conclusion        `json:"conclusion"`
-	Goal                *entity.Goal              `json:"goal,omitempty"`
-	Hypothesis          *entity.Hypothesis        `json:"hypothesis,omitempty"`
-	CandidateExperiment *ExperimentReadView       `json:"candidate_experiment,omitempty"`
-	BaselineExperiment  *ExperimentReadView       `json:"baseline_experiment,omitempty"`
-	Observations        []ReviewPacketObservation `json:"observations"`
-	ConstraintChecks    []entity.ClauseCheck      `json:"constraint_checks,omitempty"`
-	Analysis            ReviewPacketAnalysis      `json:"analysis"`
-	Diff                ReviewPacketDiff          `json:"diff"`
-	ReadIssues          []ReviewPacketReadIssue   `json:"read_issues,omitempty"`
+	Conclusion          *entity.Conclusion                    `json:"conclusion"`
+	Goal                *entity.Goal                          `json:"goal,omitempty"`
+	Hypothesis          *entity.Hypothesis                    `json:"hypothesis,omitempty"`
+	CandidateExperiment *ExperimentReadView                   `json:"candidate_experiment,omitempty"`
+	BaselineExperiment  *ExperimentReadView                   `json:"baseline_experiment,omitempty"`
+	Observations        []ReviewPacketObservation             `json:"observations"`
+	ConstraintChecks    []entity.ClauseCheck                  `json:"constraint_checks,omitempty"`
+	Analysis            ReviewPacketAnalysis                  `json:"analysis"`
+	Lint                *ConclusionLintReport                 `json:"lint,omitempty"`
+	PairedAnalysis      map[string]ReviewPacketPairedAnalysis `json:"paired_analysis,omitempty"`
+	Diff                ReviewPacketDiff                      `json:"diff"`
+	ReadIssues          []ReviewPacketReadIssue               `json:"read_issues,omitempty"`
 }
 
 type ReviewPacketObservation struct {
@@ -65,6 +69,26 @@ type ReviewPacketReadIssue struct {
 	Message string `json:"message"`
 }
 
+type ReviewPacketPairedAnalysis struct {
+	PairID              string                 `json:"pair_id"`
+	Mode                string                 `json:"mode"`
+	Instrument          string                 `json:"instrument"`
+	CandidateExperiment string                 `json:"candidate_experiment"`
+	CandidateRef        string                 `json:"candidate_ref,omitempty"`
+	CandidateSHA        string                 `json:"candidate_sha,omitempty"`
+	BaselineExperiment  string                 `json:"baseline_experiment"`
+	BaselineRef         string                 `json:"baseline_ref,omitempty"`
+	BaselineSHA         string                 `json:"baseline_sha,omitempty"`
+	Observations        []string               `json:"observations"`
+	Candidate           stats.Summary          `json:"candidate"`
+	Baseline            stats.Summary          `json:"baseline"`
+	BaselineBefore      *stats.Summary         `json:"baseline_before,omitempty"`
+	BaselineAfter       *stats.Summary         `json:"baseline_after,omitempty"`
+	Comparison          stats.Comparison       `json:"comparison"`
+	Drift               PairedObservationDrift `json:"drift"`
+	Warnings            []string               `json:"warnings,omitempty"`
+}
+
 func BuildReviewPacket(s *store.Store, conclusionID, projectDir string) (*ReviewPacket, error) {
 	c, err := s.ReadConclusion(conclusionID)
 	if err != nil {
@@ -89,6 +113,12 @@ func BuildReviewPacket(s *store.Store, conclusionID, projectDir string) (*Review
 	readPacketExperiment(s, p, c.CandidateExp, true)
 	readPacketExperiment(s, p, c.BaselineExp, false)
 	readPacketObservations(s, p, c.Observations)
+	readPacketPairedAnalysis(s, p)
+	if lint, err := LintConclusion(s, conclusionID); err != nil {
+		appendPacketIssue(p, "lint", conclusionID, err.Error())
+	} else {
+		p.Lint = lint
+	}
 	buildReviewPacketDiff(p, projectDir)
 	return p, nil
 }
@@ -159,6 +189,68 @@ func readPacketObservations(s *store.Store, p *ReviewPacket, ids []string) {
 		}
 		p.Observations = append(p.Observations, row)
 	}
+}
+
+func readPacketPairedAnalysis(s *store.Store, p *ReviewPacket) {
+	pairIDs := map[string]struct{}{}
+	for _, row := range p.Observations {
+		if row.Pair == nil || strings.TrimSpace(row.Pair.PairID) == "" {
+			continue
+		}
+		pairIDs[row.Pair.PairID] = struct{}{}
+	}
+	if len(pairIDs) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(pairIDs))
+	for id := range pairIDs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		analysis, err := AnalyzePairedObservation(s, id, 0)
+		if err != nil {
+			appendPacketIssue(p, "paired_analysis", id, err.Error())
+			continue
+		}
+		if p.PairedAnalysis == nil {
+			p.PairedAnalysis = map[string]ReviewPacketPairedAnalysis{}
+		}
+		p.PairedAnalysis[id] = summarizePairedAnalysisForPacket(analysis)
+	}
+}
+
+func summarizePairedAnalysisForPacket(a *PairedObservationAnalysis) ReviewPacketPairedAnalysis {
+	if a == nil {
+		return ReviewPacketPairedAnalysis{}
+	}
+	return ReviewPacketPairedAnalysis{
+		PairID:              a.PairID,
+		Mode:                a.Mode,
+		Instrument:          a.Instrument,
+		CandidateExperiment: a.CandidateExperiment,
+		CandidateRef:        a.CandidateRef,
+		CandidateSHA:        a.CandidateSHA,
+		BaselineExperiment:  a.BaselineExperiment,
+		BaselineRef:         a.BaselineRef,
+		BaselineSHA:         a.BaselineSHA,
+		Observations:        append([]string(nil), a.Observations...),
+		Candidate:           a.Candidate.Summary,
+		Baseline:            a.Baseline.Summary,
+		BaselineBefore:      cloneStatsSummary(a.BaselineBefore),
+		BaselineAfter:       cloneStatsSummary(a.BaselineAfter),
+		Comparison:          a.Comparison,
+		Drift:               a.Drift,
+		Warnings:            append([]string(nil), a.Warnings...),
+	}
+}
+
+func cloneStatsSummary(in *stats.Summary) *stats.Summary {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func checkPacketArtifact(s *store.Store, artifact entity.Artifact) ReviewPacketArtifact {

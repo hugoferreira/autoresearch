@@ -47,16 +47,26 @@ arbitrarily large and stale. If you need prior state, call the relevant
 ## Read before deciding
 
 1. `@.claude/autoresearch.md` — the CLI and firewall reference.
-2. `autoresearch conclusion show <C-id> --json` — the verdict, effect
+2. `autoresearch review-packet <C-id> --json` — the packet-first review
+   surface. It joins the conclusion, goal, hypothesis, experiments, cited
+   observations, artifacts, constraint checks, reproducible analysis command,
+   lint report, paired-measurement diagnostics, git diff summary, and explicit
+   read issues.
+3. `autoresearch conclusion lint <C-id> --json` — confirm the packet lint
+   status is current. Treat lint errors as downgrade-by-default unless the
+   packet evidence explicitly resolves them. Lint warnings are not automatic
+   downgrades, but your rationale must account for any warning that touches
+   refs, constraints, uncited same-scope observations, or mechanism evidence.
+4. `autoresearch conclusion show <C-id> --json` — the verdict, effect
    (vs absolute baseline), `incremental_effect` (vs the supported
    lineage predecessor, if present), `strict_check` (firewall's own
    assessment), interpretation, author, measured candidate provenance (`candidate_ref`, `candidate_sha`),
    plus evidence-side join fields for cited observations:
    `observation_artifacts`, `observation_evidence_failures`, and
    `observation_read_issues`.
-3. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
+5. `autoresearch hypothesis show <hyp-id> --json` — the claim, predicted
    instrument, `min_effect`, `kill_if` clauses.
-4. Read the stats from `autoresearch analyze` yourself:
+6. Read the stats from `autoresearch analyze` yourself:
 
        autoresearch analyze <candidate-exp-id> \
            --candidate-ref <candidate-ref> \
@@ -70,7 +80,10 @@ arbitrarily large and stale. If you need prior state, call the relevant
    To reproduce `incremental_effect`, rerun the same command with
    `--baseline auto`; it resolves the accepted supported lineage
    predecessor recorded as the incremental comparator.
-5. Inspect the raw samples for sanity, not for a second implementation
+   If the packet includes `paired_analysis`, inspect its drift warnings.
+   Downgrade or request a follow-up when baseline drift is comparable to the
+   candidate effect and the conclusion treats the effect as stable.
+7. Inspect the raw samples for sanity, not for a second implementation
    of the stats:
 
        autoresearch observation show <O-id> --include-raw --json
@@ -88,11 +101,12 @@ arbitrarily large and stale. If you need prior state, call the relevant
 
 Do not burn turns on repetitive `--help` lookups for the routine review
 verbs. This brief plus `.claude/autoresearch.md` already covers
-`conclusion show`, `hypothesis show`, `analyze`, the artifact readers,
-and `conclusion accept` / `conclusion downgrade`. Use `--help` only if
-the needed flag is genuinely absent from those references.
+`review-packet`, `conclusion lint`, `conclusion show`, `hypothesis show`,
+`analyze`, the artifact readers, and `conclusion accept` /
+`conclusion downgrade`. Use `--help` only if the needed flag is genuinely
+absent from those references.
 
-6. **Verify mechanism claims against evidence artifacts** — the
+8. **Verify mechanism claims against evidence artifacts** — the
    conclusion JSON carries `observation_artifacts`, keyed by observation
    id. Evidence side-artifacts are named `evidence/<name>`. Use
    `observation_evidence_failures` to distinguish "evidence capture was
@@ -109,7 +123,7 @@ the needed flag is genuinely absent from those references.
    an evidence artifact. A read issue or capture failure is not positive
    evidence, and neither should be read as "no evidence was needed".
 
-7. **Review the code change for correctness and gaming** — this is as
+9. **Review the code change for correctness and gaming** — this is as
    important as the statistics:
 
        git show <candidate-ref>

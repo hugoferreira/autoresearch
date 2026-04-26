@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"sort"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -37,16 +38,30 @@ type cycleContextGoal struct {
 }
 
 type cycleContextScope struct {
-	Goal            *entity.Goal                   `json:"goal,omitempty"`
-	FrontierBest    *frontierRow                   `json:"frontier_best"`
-	FrontierStallK  int                            `json:"frontier_stall_k"`
-	StalledFor      int                            `json:"stalled_for"`
-	StallReached    bool                           `json:"stall_reached"`
-	GoalAssessment  *frontierGoalAssessment        `json:"goal_assessment,omitempty"`
-	OpenHypotheses  []*entity.Hypothesis           `json:"open_hypotheses"`
-	InFlight        []dashboardInFlight            `json:"in_flight"`
-	ActiveLessons   []readmodel.LessonSummaryView  `json:"active_lessons"`
-	RelevantLessons []readmodel.RelevantLessonView `json:"relevant_lessons"`
+	Goal                     *entity.Goal                   `json:"goal,omitempty"`
+	FrontierBest             *frontierRow                   `json:"frontier_best"`
+	FrontierStallK           int                            `json:"frontier_stall_k"`
+	StalledFor               int                            `json:"stalled_for"`
+	StallReached             bool                           `json:"stall_reached"`
+	GoalAssessment           *frontierGoalAssessment        `json:"goal_assessment,omitempty"`
+	OpenHypotheses           []*entity.Hypothesis           `json:"open_hypotheses"`
+	InFlight                 []dashboardInFlight            `json:"in_flight"`
+	ActiveLessons            []readmodel.LessonSummaryView  `json:"active_lessons"`
+	RelevantLessons          []readmodel.RelevantLessonView `json:"relevant_lessons"`
+	ReviewPendingConclusions []cycleContextConclusionSignal `json:"review_pending_conclusions"`
+	RecentDowngrades         []cycleContextConclusionSignal `json:"recent_downgrades"`
+}
+
+type cycleContextConclusionSignal struct {
+	ID                  string    `json:"id"`
+	Hypothesis          string    `json:"hypothesis,omitempty"`
+	Verdict             string    `json:"verdict"`
+	RequestedFrom       string    `json:"requested_from,omitempty"`
+	ReviewedBy          string    `json:"reviewed_by,omitempty"`
+	CandidateExperiment string    `json:"candidate_experiment,omitempty"`
+	Reasons             []string  `json:"reasons,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	RecommendedAction   string    `json:"recommended_action"`
 }
 
 type cycleContextInputs struct {
@@ -281,11 +296,13 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 	var stalledFor int
 
 	payload := &cycleContextScope{
-		Goal:           goal,
-		FrontierStallK: inputs.cfg.Budgets.FrontierStallK,
-		OpenHypotheses: openHypotheses(hyps),
-		InFlight:       nonNilInFlight(inFlight),
-		ActiveLessons:  nonNilLessonSummaries(readmodel.BuildLessonSummaryViews(activeLessonViews)),
+		Goal:                     goal,
+		FrontierStallK:           inputs.cfg.Budgets.FrontierStallK,
+		OpenHypotheses:           openHypotheses(hyps),
+		InFlight:                 nonNilInFlight(inFlight),
+		ActiveLessons:            nonNilLessonSummaries(readmodel.BuildLessonSummaryViews(activeLessonViews)),
+		ReviewPendingConclusions: reviewPendingConclusionSignals(concls),
+		RecentDowngrades:         recentDowngradeSignals(concls, 5),
 	}
 
 	if goal != nil {
@@ -397,6 +414,67 @@ func openHypotheses(hyps []*entity.Hypothesis) []*entity.Hypothesis {
 	return out
 }
 
+func reviewPendingConclusionSignals(concls []*entity.Conclusion) []cycleContextConclusionSignal {
+	out := make([]cycleContextConclusionSignal, 0)
+	for _, c := range concls {
+		if c == nil || c.ReviewedBy != "" {
+			continue
+		}
+		if c.Verdict != entity.VerdictSupported && c.Verdict != entity.VerdictRefuted {
+			continue
+		}
+		out = append(out, conclusionSignal(c, "dispatch research-gate-reviewer on "+c.ID))
+	}
+	sortConclusionSignalsNewestFirst(out)
+	if out == nil {
+		return []cycleContextConclusionSignal{}
+	}
+	return out
+}
+
+func recentDowngradeSignals(concls []*entity.Conclusion, limit int) []cycleContextConclusionSignal {
+	out := make([]cycleContextConclusionSignal, 0)
+	for _, c := range concls {
+		if c == nil || c.Strict.RequestedFrom == "" {
+			continue
+		}
+		out = append(out, conclusionSignal(c, "classify downgrade reason before proposing another hypothesis"))
+	}
+	sortConclusionSignalsNewestFirst(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	if out == nil {
+		return []cycleContextConclusionSignal{}
+	}
+	return out
+}
+
+func conclusionSignal(c *entity.Conclusion, action string) cycleContextConclusionSignal {
+	reasons := make([]string, len(c.Strict.Reasons))
+	copy(reasons, c.Strict.Reasons)
+	return cycleContextConclusionSignal{
+		ID:                  c.ID,
+		Hypothesis:          c.Hypothesis,
+		Verdict:             c.Verdict,
+		RequestedFrom:       c.Strict.RequestedFrom,
+		ReviewedBy:          c.ReviewedBy,
+		CandidateExperiment: c.CandidateExp,
+		Reasons:             reasons,
+		CreatedAt:           c.CreatedAt,
+		RecommendedAction:   action,
+	}
+}
+
+func sortConclusionSignalsNewestFirst(rows []cycleContextConclusionSignal) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+			return rows[i].ID > rows[j].ID
+		}
+		return rows[i].CreatedAt.After(rows[j].CreatedAt)
+	})
+}
+
 func nonNilStrings(in []string) []string {
 	if in == nil {
 		return []string{}
@@ -477,6 +555,8 @@ func renderCycleContextGoalText(w *output.Writer, goalID string, scope *cycleCon
 	w.Textln("")
 	w.Textf("open hypotheses: %d\n", len(scope.OpenHypotheses))
 	w.Textf("in flight:      %d\n", len(scope.InFlight))
+	w.Textf("review pending: %d\n", len(scope.ReviewPendingConclusions))
+	w.Textf("recent downgrades: %d\n", len(scope.RecentDowngrades))
 	w.Textf("active lessons: %d\n", len(scope.ActiveLessons))
 	w.Textf("relevant lessons: %d\n", len(scope.RelevantLessons))
 }

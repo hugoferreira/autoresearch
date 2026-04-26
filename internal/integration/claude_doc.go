@@ -137,6 +137,7 @@ For the routine optimization loop, the canonical command spine is:
     autoresearch experiment baseline --json                              # once per goal, if missing
     autoresearch hypothesis add ... --author agent:orchestrator --json
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
+    autoresearch experiment preflight <E-id> --json                       # read-only design quality gate
     autoresearch experiment implement <E-id> --impl-notes "..." --json
     # create a unique reviewable git ref for the measured candidate, then:
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
@@ -181,6 +182,10 @@ stall state, stale experiments, and warnings. Unset ` + "`max_experiments`" + ` 
 ` + "`max_wall_time_h`" + ` remain unlimited for hard enforcement; recommended
 thresholds only produce read-side warnings. Treat warnings as stop/re-steer
 signals unless the human explicitly raises or clears a budget.
+` + "`cycle-context --json`" + ` also reports ` + "`review_pending_conclusions`" + ` and
+` + "`recent_downgrades`" + `; do not start another cycle while decisive
+evidence is unreviewed, and classify downgrade reasons before proposing
+more work.
 
 ### Goal lifecycle (serialized, one active at a time)
 
@@ -258,6 +263,7 @@ unless the goal names them.
 ### Experiments
     autoresearch experiment baseline   [--baseline HEAD]                       # one-shot: design+implement+observe for a baseline
     autoresearch experiment design     <hyp-id> --instruments a,b,c --baseline HEAD
+    autoresearch experiment preflight  <exp-id>                                # read-only design quality gate before implement
     autoresearch experiment implement  <exp-id>
     autoresearch experiment reset      <exp-id> --reason "..."
     autoresearch experiment worktree   <exp-id>
@@ -354,7 +360,7 @@ observations in the conclusion as usual.
 
 Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
 
-Use ` + "`review-packet <C-id> --json`" + ` as the gate reviewer's first read. It joins the conclusion, hypothesis, candidate/baseline experiments, cited observations, artifact metadata, constraint checks, analysis refs, git diff summary, and explicit read issues without mutating ` + "`.research/`" + `.
+Use ` + "`review-packet <C-id> --json`" + ` as the gate reviewer's first read, followed by ` + "`conclusion lint <C-id> --json`" + `. The packet joins the conclusion, hypothesis, candidate/baseline experiments, cited observations, artifact metadata, constraint checks, analysis refs, paired-measurement diagnostics, lint report, git diff summary, and explicit read issues without mutating ` + "`.research/`" + `.
 
 In ` + "`--json`" + ` mode, ` + "`conclusion show`" + ` returns the conclusion plus three
 additive maps keyed by cited observation id:
@@ -690,10 +696,11 @@ project root cannot accidentally descend into any experiment worktree — this
 is by design.
 
 ` + "`experiment implement`" + ` writes a ` + "`.autoresearch-brief.json`" + ` into the worktree
-root: a frozen, read-only snapshot of the goal, hypothesis, experiment, and
-active lessons at implement time. The orchestrator's coder helper reads
-this file instead of reaching back to ` + "`.research/`" + `, which is unreachable
-from inside the worktree. The brief is gitignored automatically.
+root: a frozen, read-only snapshot of the goal, hypothesis, experiment,
+instrument contracts, forbidden changes, and active lessons at implement
+time. The orchestrator's coder helper reads this file instead of reaching
+back to ` + "`.research/`" + `, which is unreachable from inside the worktree.
+The brief is gitignored automatically.
 
 Research assumes the target project's **main checkout** stays stable while
 experiments run. Experiment and harness changes belong in experiment

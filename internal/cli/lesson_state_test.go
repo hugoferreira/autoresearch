@@ -279,6 +279,21 @@ var _ = Describe("Lesson state", func() {
 				writeLesson(l)
 			}
 
+			Expect(s.UpdateConfig(func(cfg *store.Config) error {
+				cfg.Instruments = map[string]store.Instrument{
+					"host_timing": {
+						Cmd:        []string{"sh", "-c", "cat timing.txt"},
+						Parser:     "builtin:scalar",
+						Pattern:    "([0-9]+)",
+						Unit:       "ns",
+						MinSamples: 5,
+						Requires:   []string{"host_test=pass"},
+						Evidence:   []store.EvidenceSpec{{Name: "profile", Cmd: "profile --json"}},
+					},
+				}
+				return nil
+			})).To(Succeed())
+
 			wt := GinkgoT().TempDir()
 			Expect(writeWorktreeBrief(s, e, wt, "")).To(Succeed())
 			data, err := os.ReadFile(filepath.Join(wt, entity.BriefFileName))
@@ -291,6 +306,18 @@ var _ = Describe("Lesson state", func() {
 				HaveField("ID", "L-0001"),
 				HaveField("ID", "L-0004"),
 			))
+			Expect(brief.Lessons).To(ContainElement(SatisfyAll(
+				HaveField("ID", "L-0001"),
+				HaveField("Status", entity.LessonStatusActive),
+				HaveField("SourceChain", entity.LessonSourceReviewedDecisive),
+			)))
+			Expect(brief.InstrumentContracts).To(ContainElement(SatisfyAll(
+				HaveField("Name", "host_timing"),
+				HaveField("Parser", "builtin:scalar"),
+				HaveField("Requires", ContainElement("host_test=pass")),
+				HaveField("Evidence", ContainElement(HaveField("Name", "profile"))),
+			)))
+			Expect(brief.ForbiddenChanges).To(ContainElement(ContainSubstring("main checkout")))
 		})
 	})
 })
