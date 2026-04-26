@@ -9,6 +9,7 @@ const (
 	KindHypothesis  EntityKind = "H"
 	KindExperiment  EntityKind = "E"
 	KindObservation EntityKind = "O"
+	KindPair        EntityKind = "P"
 	KindConclusion  EntityKind = "C"
 	KindLesson      EntityKind = "L"
 )

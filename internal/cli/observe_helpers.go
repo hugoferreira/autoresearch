@@ -76,6 +76,8 @@ type observeSampleCheck struct {
 	AdditionalSamples int    `json:"additional_samples"`
 }
 
+type observationDecorator func(*entity.Observation)
+
 func buildObserveSampleCheck(cfg *store.Config, expID, instName string, requestedSamples int, observations []*entity.Observation) (observeSampleCheck, error) {
 	inst, ok := cfg.Instruments[instName]
 	if !ok {
@@ -526,6 +528,19 @@ func runAndRecordObservation(
 	samples int,
 	author string,
 ) (*entity.Observation, error) {
+	return runAndRecordObservationWithDecorator(s, cfg, exp, scope, instName, samples, author, nil)
+}
+
+func runAndRecordObservationWithDecorator(
+	s *store.Store,
+	cfg *store.Config,
+	exp *entity.Experiment,
+	scope observeScope,
+	instName string,
+	samples int,
+	author string,
+	decorate observationDecorator,
+) (*entity.Observation, error) {
 	inst := cfg.Instruments[instName]
 
 	ctx := context.Background()
@@ -587,6 +602,9 @@ func runAndRecordObservation(
 		BaselineSHA:      exp.Baseline.SHA,
 		Author:           or(author, "agent:observer"),
 		Aux:              result.Aux,
+	}
+	if decorate != nil {
+		decorate(obs)
 	}
 	obs.Normalize()
 	if err := s.WriteObservation(obs); err != nil {

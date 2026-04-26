@@ -27,6 +27,7 @@ type ReviewPacket struct {
 type ReviewPacketObservation struct {
 	ID               string                   `json:"id"`
 	Observation      *entity.Observation      `json:"observation,omitempty"`
+	Pair             *PairedObservationMeta   `json:"pair,omitempty"`
 	Artifacts        []ReviewPacketArtifact   `json:"artifacts,omitempty"`
 	EvidenceFailures []entity.EvidenceFailure `json:"evidence_failures,omitempty"`
 	ReadIssue        string                   `json:"read_issue,omitempty"`
@@ -145,6 +146,9 @@ func readPacketObservations(s *store.Store, p *ReviewPacket, ids []string) {
 			continue
 		}
 		row.Observation = obs
+		if meta, ok := ObservationPairMeta(obs); ok {
+			row.Pair = meta
+		}
 		row.EvidenceFailures = cloneEvidenceFailures(obs.EvidenceFailures)
 		for _, artifact := range obs.Artifacts {
 			checked := checkPacketArtifact(s, artifact)

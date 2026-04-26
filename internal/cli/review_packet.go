@@ -151,6 +151,15 @@ func renderReviewPacketObservations(w *output.Writer, rows []readmodel.ReviewPac
 		if o.CandidateSHA != "" {
 			w.Textf(" sha=%s", shortSHA(o.CandidateSHA))
 		}
+		if row.Pair != nil {
+			w.Textf(" pair=%s arm=%s", row.Pair.PairID, row.Pair.Arm)
+			if row.Pair.Segment != "" {
+				w.Textf(" segment=%s", row.Pair.Segment)
+			}
+			if row.Pair.Mode != "" {
+				w.Textf(" mode=%s", row.Pair.Mode)
+			}
+		}
 		w.Textln("")
 		for _, artifact := range row.Artifacts {
 			a := artifact.Artifact
