@@ -11,18 +11,20 @@ import (
 )
 
 type cycleContextSnapshot struct {
-	Project                string                      `json:"project"`
-	ScopeGoalID            string                      `json:"scope_goal_id,omitempty"`
-	ScopeAll               bool                        `json:"scope_all"`
-	CapturedAt             time.Time                   `json:"captured_at"`
-	Paused                 bool                        `json:"paused"`
-	PauseReason            string                      `json:"pause_reason,omitempty"`
-	Mode                   string                      `json:"mode"`
-	MainCheckoutDirty      bool                        `json:"main_checkout_dirty"`
-	MainCheckoutDirtyPaths []string                    `json:"main_checkout_dirty_paths"`
-	Budgets                readmodel.BudgetSnapshot    `json:"budgets"`
-	Counts                 map[string]int              `json:"counts"`
-	Instruments            map[string]store.Instrument `json:"instruments"`
+	Project                string                           `json:"project"`
+	ScopeGoalID            string                           `json:"scope_goal_id,omitempty"`
+	ScopeAll               bool                             `json:"scope_all"`
+	CapturedAt             time.Time                        `json:"captured_at"`
+	Paused                 bool                             `json:"paused"`
+	PauseReason            string                           `json:"pause_reason,omitempty"`
+	Mode                   string                           `json:"mode"`
+	MainCheckoutDirty      bool                             `json:"main_checkout_dirty"`
+	MainCheckoutDirtyPaths []string                         `json:"main_checkout_dirty_paths"`
+	Budgets                readmodel.BudgetSnapshot         `json:"budgets"`
+	Counts                 map[string]int                   `json:"counts"`
+	Instruments            map[string]store.Instrument      `json:"instruments"`
+	ActiveScratch          []readmodel.ScratchWorkspaceView `json:"active_scratch"`
+	StaleScratch           []readmodel.ScratchWorkspaceView `json:"stale_scratch,omitempty"`
 	*cycleContextScope
 	Goals []cycleContextGoal `json:"goals,omitempty"`
 }
@@ -57,6 +59,7 @@ type cycleContextInputs struct {
 	conclusions  []*entity.Conclusion
 	observations []*entity.Observation
 	lessons      []*entity.Lesson
+	scratch      []*entity.Scratch
 	events       []store.Event
 }
 
@@ -117,6 +120,14 @@ func captureCycleContext(s *store.Store, scope goalScope) (*cycleContextSnapshot
 		Budgets:                readmodel.BuildBudgetSnapshot(inputs.cfg, inputs.state, inputs.now),
 		Instruments:            inputs.instruments,
 		Counts:                 readmodel.BuildCountsWithLessons(len(inputs.hypotheses), len(inputs.experiments), len(inputs.observations), len(inputs.conclusions), len(inputs.lessons)),
+		ActiveScratch:          readmodel.ActiveScratchWorkspaces(inputs.scratch, inputs.now),
+	}
+	if inputs.cfg.Budgets.StaleExperimentMinutes > 0 {
+		snap.StaleScratch = readmodel.StaleScratchWorkspaces(
+			inputs.scratch,
+			time.Duration(inputs.cfg.Budgets.StaleExperimentMinutes)*time.Minute,
+			inputs.now,
+		)
 	}
 
 	if scope.All {
@@ -192,6 +203,10 @@ func loadCycleContextInputs(s *store.Store) (*cycleContextInputs, error) {
 	if err != nil {
 		return nil, err
 	}
+	scratch, err := s.ListScratch()
+	if err != nil {
+		return nil, err
+	}
 	events, err := s.Events(0)
 	if err != nil {
 		return nil, err
@@ -207,6 +222,7 @@ func loadCycleContextInputs(s *store.Store) (*cycleContextInputs, error) {
 		conclusions:  concls,
 		observations: obs,
 		lessons:      lessons,
+		scratch:      scratch,
 		events:       events,
 	}, nil
 }
@@ -381,6 +397,7 @@ func renderCycleContextText(w *output.Writer, snap *cycleContextSnapshot) {
 		w.Textln("main checkout:  clean")
 	}
 	w.Textf("instruments:    %d\n", len(snap.Instruments))
+	w.Textf("active scratch: %d\n", len(snap.ActiveScratch))
 	if snap.ScopeAll {
 		w.Textf("goals:          %d\n", len(snap.Goals))
 		for _, goal := range snap.Goals {

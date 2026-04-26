@@ -115,6 +115,8 @@ func (s *Store) InvalidateFromEvents(events []Event) {
 			s.conclCache.drop(s.conclusionPath(e.Subject))
 		case e.Subject[0] == 'L' && e.Subject[1] == '-':
 			s.lessonCache.drop(s.lessonPath(e.Subject))
+		case e.Subject[0] == 'S' && e.Subject[1] == '-':
+			s.scratchCache.drop(s.scratchPath(e.Subject))
 		case e.Subject[0] == 'G' && e.Subject[1] == '-':
 			s.goalCache.drop(s.goalPath(e.Subject))
 		}

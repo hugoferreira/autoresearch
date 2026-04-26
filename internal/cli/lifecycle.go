@@ -471,6 +471,18 @@ func statusCmd() *cobra.Command {
 				"main_checkout_dirty_paths": mainCheckout.Paths,
 			}, scope)
 
+			now := time.Now().UTC()
+			activeScratch, staleScratch, err := activeScratchForRead(s, now)
+			if err != nil {
+				return err
+			}
+			if len(activeScratch) > 0 {
+				payload["active_scratch"] = activeScratch
+			}
+			if len(staleScratch) > 0 {
+				payload["stale_scratch"] = staleScratch
+			}
+
 			// Stale experiment detection: reuse the same read-side
 			// actionability policy as dashboard/frontier instead of open-coding
 			// another "live enough to steer from" definition here.
@@ -481,7 +493,6 @@ func statusCmd() *cobra.Command {
 					return err
 				}
 				expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
-				now := time.Now().UTC()
 				threshold := time.Duration(staleMinutes) * time.Minute
 				_, stale = readmodel.BuildExperimentActivity(exps, expClassByID, allEvents, threshold, now)
 			}
@@ -546,6 +557,20 @@ func statusCmd() *cobra.Command {
 					w.Textf("  %-8s  %-12s  hyp=%-8s  %s ago  (last: %s)\n",
 						se.ID, se.Status, se.Hypothesis,
 						formatStaleAge(se.StaleMinutes), se.LastEventKind)
+				}
+			}
+			if len(activeScratch) > 0 {
+				w.Textln("")
+				w.Textln("active scratch workspaces:")
+				for _, sc := range activeScratch {
+					w.Textf("  %-8s  %-24s  %s\n", sc.ID, sc.Name, sc.Worktree)
+				}
+			}
+			if len(staleScratch) > 0 {
+				w.Textln("")
+				w.Textf("stale scratch workspaces (>%dm old):\n", cfg.Budgets.StaleExperimentMinutes)
+				for _, sc := range staleScratch {
+					w.Textf("  %-8s  %-24s  %s ago  %s\n", sc.ID, sc.Name, formatStaleAge(sc.AgeMinutes), sc.Worktree)
 				}
 			}
 			if len(unobservedInstruments) > 0 {

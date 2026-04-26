@@ -25,6 +25,7 @@ const (
 	ConclusionsDir  = "conclusions"
 	ArtifactsDir    = "artifacts"
 	LessonsDir      = "lessons"
+	ScratchDir      = "scratch"
 )
 
 var (
@@ -37,27 +38,29 @@ type Store struct {
 
 	// mtime-indexed caches over the parsed entity files; see cache.go.
 	// Populated lazily on first Read; invalidated by Write<Entity>.
-	hypCache    *entryCache[*entity.Hypothesis]
-	expCache    *entryCache[*entity.Experiment]
-	obsCache    *entryCache[*entity.Observation]
-	conclCache  *entryCache[*entity.Conclusion]
-	lessonCache *entryCache[*entity.Lesson]
-	goalCache   *entryCache[*entity.Goal]
-	stateCache  *entryCache[*State]
-	configCache *entryCache[*Config]
+	hypCache     *entryCache[*entity.Hypothesis]
+	expCache     *entryCache[*entity.Experiment]
+	obsCache     *entryCache[*entity.Observation]
+	conclCache   *entryCache[*entity.Conclusion]
+	lessonCache  *entryCache[*entity.Lesson]
+	scratchCache *entryCache[*entity.Scratch]
+	goalCache    *entryCache[*entity.Goal]
+	stateCache   *entryCache[*State]
+	configCache  *entryCache[*Config]
 }
 
 func newStore(root string) *Store {
 	return &Store{
-		root:        root,
-		hypCache:    newEntryCache[*entity.Hypothesis](),
-		expCache:    newEntryCache[*entity.Experiment](),
-		obsCache:    newEntryCache[*entity.Observation](),
-		conclCache:  newEntryCache[*entity.Conclusion](),
-		lessonCache: newEntryCache[*entity.Lesson](),
-		goalCache:   newEntryCache[*entity.Goal](),
-		stateCache:  newEntryCache[*State](),
-		configCache: newEntryCache[*Config](),
+		root:         root,
+		hypCache:     newEntryCache[*entity.Hypothesis](),
+		expCache:     newEntryCache[*entity.Experiment](),
+		obsCache:     newEntryCache[*entity.Observation](),
+		conclCache:   newEntryCache[*entity.Conclusion](),
+		lessonCache:  newEntryCache[*entity.Lesson](),
+		scratchCache: newEntryCache[*entity.Scratch](),
+		goalCache:    newEntryCache[*entity.Goal](),
+		stateCache:   newEntryCache[*State](),
+		configCache:  newEntryCache[*Config](),
 	}
 }
 
@@ -126,6 +129,7 @@ func Create(projectDir string, cfg Config) (*Store, error) {
 		s.ConclusionsDir(),
 		s.ArtifactsDir(),
 		s.LessonsDir(),
+		s.ScratchDir(),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("create %s: %w", d, err)
@@ -157,6 +161,7 @@ func (s *Store) ObservationsDir() string { return filepath.Join(s.DirPath(), Obs
 func (s *Store) ConclusionsDir() string  { return filepath.Join(s.DirPath(), ConclusionsDir) }
 func (s *Store) ArtifactsDir() string    { return filepath.Join(s.DirPath(), ArtifactsDir) }
 func (s *Store) LessonsDir() string      { return filepath.Join(s.DirPath(), LessonsDir) }
+func (s *Store) ScratchDir() string      { return filepath.Join(s.DirPath(), ScratchDir) }
 
 // WorktreesRoot returns the configured absolute root directory under which
 // this project's experiment worktrees live. It is deliberately outside the

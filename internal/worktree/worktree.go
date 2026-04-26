@@ -60,6 +60,12 @@ func RenameBranch(projectDir, oldName, newName string) error {
 	return err
 }
 
+// DeleteBranch force-deletes a local branch after its worktree is removed.
+func DeleteBranch(projectDir, name string) error {
+	_, err := run(projectDir, "branch", "-D", name)
+	return err
+}
+
 // ListBranches returns branch names matching a glob pattern (e.g.
 // "autoresearch/*@*" for archived experiment branches).
 func ListBranches(projectDir, pattern string) ([]string, error) {

@@ -59,9 +59,10 @@ notebook layers are load-bearing.
 2. `autoresearch cycle-context --json` — the trusted boot snapshot:
    pause state, main checkout cleanliness, active goal, frontier best,
    open hypotheses, active lesson summaries, registered instruments,
-   in-flight work, and budget/count status. If `main_checkout_dirty` is
-   true, stop. Research assumes the target project's main checkout stays
-   read-only. Do not patch bootstrap/harness/instrument-definition files
+   in-flight work, active/stale scratch probes, and budget/count status.
+   If `main_checkout_dirty` is true, stop. Research assumes the target
+   project's main checkout stays read-only. Do not patch
+   bootstrap/harness/instrument-definition files
    there mid-run; surface any setup drift as explicit maintenance
    instead. If `active_lessons` rules out a class of intervention, do
    not propose that class without new evidence. If a lesson recommends a
@@ -159,6 +160,19 @@ before you reach for `--help`:
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield to the main session with review pending so it can dispatch research-gate-reviewer
+
+For a cheap premise check that needs temporary instrumentation before a
+hypothesis is worth designing, use a scratch workspace instead of touching
+the main checkout:
+
+    autoresearch scratch create --from HEAD --name <short-name> --json
+    autoresearch scratch path <S-id>
+    autoresearch scratch cleanup <S-id> --reason "..." --json
+
+Scratch workspaces are temporary and non-evidence. Promote useful findings by
+creating a normal hypothesis/experiment and capturing evidence through
+`observe` and its artifacts. `cycle-context --json` reports
+`active_scratch` and `stale_scratch`; clean stale probes before continuing.
 
 ## The cycle
 
