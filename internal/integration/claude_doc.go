@@ -282,6 +282,7 @@ intentionally want another fresh run even though the target is already met.
     autoresearch observe  <exp-id> --all --candidate-ref REF [--samples N] [--append]         # all instruments in dependency order
     autoresearch observation show <O-id> [--include-raw]                    # read-only; raw samples are bounded
     autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>|auto] [--instrument NAME] [--iters N]
+    autoresearch review-packet <C-id>                                       # read-only gate-review evidence bundle
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
         --observations O-XXXX,O-YYYY \
@@ -296,6 +297,7 @@ intentionally want another fresh run even though the target is already met.
 ### Conclusions (review and gate reviewer)
     autoresearch conclusion list       [--goal G-NNNN|all] [--hypothesis H-XXXX] [--verdict X]
     autoresearch conclusion show       <C-id>
+    autoresearch review-packet         <C-id>
     autoresearch conclusion accept     <C-id> --reviewed-by ... --rationale "..."
         # Gate reviewer's acceptance: sets reviewed_by, promotes hypothesis
         # from "unreviewed" to "supported"/"refuted". Required before apply.
@@ -308,6 +310,8 @@ intentionally want another fresh run even though the target is already met.
         # reviewed_by, records rebuttal. Only valid for critic downgrades.
 
 Decisive conclusions (` + "`supported`" + ` / ` + "`refuted`" + `) are provisional until gate review resolves them via ` + "`conclusion accept`" + ` or ` + "`conclusion downgrade`" + `. If a delegated one-cycle ` + "`research-orchestrator`" + ` returns a decisive conclusion, the parent/main session owns the next handoff: dispatch ` + "`research-gate-reviewer`" + ` from the parent, do not nest another orchestrator, and do not start another cycle while the chain is still ` + "`unreviewed`" + `. If you cannot dispatch a reviewer, stop after writing the conclusion and yield to the human/main session.
+
+Use ` + "`review-packet <C-id> --json`" + ` as the gate reviewer's first read. It joins the conclusion, hypothesis, candidate/baseline experiments, cited observations, artifact metadata, constraint checks, analysis refs, git diff summary, and explicit read issues without mutating ` + "`.research/`" + `.
 
 In ` + "`--json`" + ` mode, ` + "`conclusion show`" + ` returns the conclusion plus three
 additive maps keyed by cited observation id:
