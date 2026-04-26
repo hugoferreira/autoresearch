@@ -153,6 +153,85 @@ var _ = Describe("cycle-context command", func() {
 		)))
 	})
 
+	It("orders recent downgrades by reviewer event time", func() {
+		dir, s := createCLIStoreDir()
+		now := time.Now().UTC()
+		Expect(s.WriteGoal(&entity.Goal{
+			ID:        "G-0001",
+			Status:    entity.GoalStatusActive,
+			CreatedAt: &now,
+			Objective: entity.Objective{Instrument: "timing", Target: "kernel", Direction: "decrease"},
+			Constraints: []entity.Constraint{
+				{Instrument: "host_test", Require: "pass"},
+			},
+		})).To(Succeed())
+		Expect(s.UpdateState(func(st *store.State) error {
+			st.CurrentGoalID = "G-0001"
+			st.Counters["G"] = 1
+			return nil
+		})).To(Succeed())
+		for _, h := range []*entity.Hypothesis{
+			{
+				ID:        "H-0001",
+				GoalID:    "G-0001",
+				Claim:     "older conclusion",
+				Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.1},
+				KillIf:    []string{"tests fail"},
+				Status:    entity.StatusInconclusive,
+				Author:    "agent:orchestrator",
+				CreatedAt: now.Add(-4 * time.Hour),
+			},
+			{
+				ID:        "H-0002",
+				GoalID:    "G-0001",
+				Claim:     "newer conclusion",
+				Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.1},
+				KillIf:    []string{"tests fail"},
+				Status:    entity.StatusInconclusive,
+				Author:    "agent:orchestrator",
+				CreatedAt: now.Add(-3 * time.Hour),
+			},
+		} {
+			Expect(s.WriteHypothesis(h)).To(Succeed())
+		}
+		Expect(s.WriteConclusion(&entity.Conclusion{
+			ID:         "C-0001",
+			Hypothesis: "H-0001",
+			Verdict:    entity.VerdictInconclusive,
+			Strict:     entity.Strict{RequestedFrom: entity.VerdictSupported, Reasons: []string{"critic downgrade: latest reviewer finding"}},
+			ReviewedBy: "agent:gate-reviewer",
+			Author:     "agent:orchestrator",
+			CreatedAt:  now.Add(-4 * time.Hour),
+		})).To(Succeed())
+		Expect(s.WriteConclusion(&entity.Conclusion{
+			ID:         "C-0002",
+			Hypothesis: "H-0002",
+			Verdict:    entity.VerdictInconclusive,
+			Strict:     entity.Strict{RequestedFrom: entity.VerdictSupported, Reasons: []string{"critic downgrade: earlier reviewer finding"}},
+			ReviewedBy: "agent:gate-reviewer",
+			Author:     "agent:orchestrator",
+			CreatedAt:  now.Add(-1 * time.Hour),
+		})).To(Succeed())
+		Expect(s.AppendEvent(store.Event{
+			Kind:    "conclusion.critic_downgrade",
+			Subject: "C-0002",
+			Actor:   "agent:gate-reviewer",
+			Ts:      now.Add(-30 * time.Minute),
+		})).To(Succeed())
+		Expect(s.AppendEvent(store.Event{
+			Kind:    "conclusion.critic_downgrade",
+			Subject: "C-0001",
+			Actor:   "agent:gate-reviewer",
+			Ts:      now,
+		})).To(Succeed())
+
+		ctx := runCLIJSON[cliCycleContextResponse](dir, "cycle-context", "--goal", "G-0001")
+
+		Expect(ctx.RecentDowngrades).To(HaveLen(2))
+		Expect(ctx.RecentDowngrades[0].ID).To(Equal("C-0001"))
+		Expect(ctx.RecentDowngrades[1].ID).To(Equal("C-0002"))
+	})
+
 	It("captures frontier best, open work, active lessons, and instruments for the active goal", func() {
 		dir := setupObserveScenarioStore()
 		registerScenarioInstruments(dir)

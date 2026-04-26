@@ -302,7 +302,7 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 		InFlight:                 nonNilInFlight(inFlight),
 		ActiveLessons:            nonNilLessonSummaries(readmodel.BuildLessonSummaryViews(activeLessonViews)),
 		ReviewPendingConclusions: reviewPendingConclusionSignals(concls),
-		RecentDowngrades:         recentDowngradeSignals(concls, 5),
+		RecentDowngrades:         recentDowngradeSignals(concls, events, 5),
 	}
 
 	if goal != nil {
@@ -432,20 +432,62 @@ func reviewPendingConclusionSignals(concls []*entity.Conclusion) []cycleContextC
 	return out
 }
 
-func recentDowngradeSignals(concls []*entity.Conclusion, limit int) []cycleContextConclusionSignal {
-	out := make([]cycleContextConclusionSignal, 0)
+func recentDowngradeSignals(concls []*entity.Conclusion, events []store.Event, limit int) []cycleContextConclusionSignal {
+	eventTimes := latestDowngradeEventTimes(events)
+	type rankedSignal struct {
+		signal cycleContextConclusionSignal
+		sortAt time.Time
+	}
+	rows := make([]rankedSignal, 0)
 	for _, c := range concls {
 		if c == nil || c.Strict.RequestedFrom == "" {
 			continue
 		}
-		out = append(out, conclusionSignal(c, "classify downgrade reason before proposing another hypothesis"))
+		sortAt := c.CreatedAt
+		if ts, ok := eventTimes[c.ID]; ok {
+			sortAt = ts
+		}
+		rows = append(rows, rankedSignal{
+			signal: conclusionSignal(c, "classify downgrade reason before proposing another hypothesis"),
+			sortAt: sortAt,
+		})
 	}
-	sortConclusionSignalsNewestFirst(out)
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].sortAt.Equal(rows[j].sortAt) {
+			if rows[i].signal.CreatedAt.Equal(rows[j].signal.CreatedAt) {
+				return rows[i].signal.ID > rows[j].signal.ID
+			}
+			return rows[i].signal.CreatedAt.After(rows[j].signal.CreatedAt)
+		}
+		return rows[i].sortAt.After(rows[j].sortAt)
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	out := make([]cycleContextConclusionSignal, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.signal)
 	}
 	if out == nil {
 		return []cycleContextConclusionSignal{}
+	}
+	return out
+}
+
+func latestDowngradeEventTimes(events []store.Event) map[string]time.Time {
+	out := map[string]time.Time{}
+	for _, ev := range events {
+		switch ev.Kind {
+		case "conclusion.downgrade", "conclusion.critic_downgrade":
+		default:
+			continue
+		}
+		if ev.Subject == "" {
+			continue
+		}
+		if prev, ok := out[ev.Subject]; !ok || ev.Ts.After(prev) {
+			out[ev.Subject] = ev.Ts
+		}
 	}
 	return out
 }
