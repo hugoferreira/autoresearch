@@ -118,7 +118,9 @@ func (r *ExperimentPreflightReport) checkLessons(s *store.Store, hyp *entity.Hyp
 				"confirm the design notes explain why this lesson applies")
 		}
 	}
-	if err := firewall.CheckInspiredByLessonsReviewed(s, lessons); err != nil {
+	if err := firewall.CheckInspiredByLessonsReviewedWithOptions(s, lessons, firewall.InspiredByLessonOptions{
+		AllowInvalidated: hyp.AllowInvalidatedLessons,
+	}); err != nil {
 		r.add(PreflightSeverityError, "lesson_not_reviewed", "",
 			err.Error(),
 			"use only active lessons sourced from system facts or reviewed decisive chains")

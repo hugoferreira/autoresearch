@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"time"
+
+	"github.com/bytter/autoresearch/internal/entity"
 	"github.com/bytter/autoresearch/internal/readmodel"
+	"github.com/bytter/autoresearch/internal/store"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -71,6 +75,84 @@ var _ = Describe("experiment preflight", func() {
 
 		text := runCLI(dir, "experiment", "preflight", exp.ID)
 		expectText(text, "missing_constraint_instrument", "mechanism_evidence_unconfigured")
+	})
+
+	It("preserves the invalidated lesson override for retrospective contrasts", func() {
+		dir := setupObserveScenarioStore()
+		registerScenarioInstruments(dir)
+		setupLifecycleFixture(dir)
+		s, err := store.Open(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(s.WriteLesson(&entity.Lesson{
+			ID:        "L-0900",
+			Claim:     "invalidated timing lesson kept for contrast",
+			Scope:     entity.LessonScopeHypothesis,
+			Subjects:  []string{"H-0900"},
+			Status:    entity.LessonStatusInvalidated,
+			Author:    "agent:critic",
+			CreatedAt: time.Now().UTC(),
+		})).To(Succeed())
+
+		hyp := runCLIJSON[cliIDResponse](dir,
+			"hypothesis", "add",
+			"--claim", "contrast against an invalidated timing lesson",
+			"--predicts-instrument", "timing",
+			"--predicts-target", "kernel",
+			"--predicts-direction", "decrease",
+			"--predicts-min-effect", "0.1",
+			"--kill-if", "tests fail",
+			"--inspired-by", "L-0900",
+			"--allow-invalidated",
+		)
+		exp := runCLIJSON[cliIDResponse](dir,
+			"experiment", "design", hyp.ID,
+			"--baseline", "HEAD",
+			"--instruments", "timing,binary_size,host_test",
+		)
+
+		report := runCLIJSON[readmodel.ExperimentPreflightReport](dir, "experiment", "preflight", exp.ID)
+
+		Expect(report.OK).To(BeTrue())
+		Expect(preflightIssueCodes(report.Issues)).NotTo(ContainElement("lesson_not_reviewed"))
+	})
+
+	It("still rejects invalidated lessons without the persisted override", func() {
+		dir := setupObserveScenarioStore()
+		registerScenarioInstruments(dir)
+		fixture := setupLifecycleFixture(dir)
+		s, err := store.Open(dir)
+		Expect(err).NotTo(HaveOccurred())
+		now := time.Now().UTC()
+		Expect(s.WriteLesson(&entity.Lesson{
+			ID:        "L-0901",
+			Claim:     "invalidated timing lesson",
+			Scope:     entity.LessonScopeHypothesis,
+			Subjects:  []string{"H-0901"},
+			Status:    entity.LessonStatusInvalidated,
+			Author:    "agent:critic",
+			CreatedAt: now,
+		})).To(Succeed())
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:         "H-0901",
+			GoalID:     fixture.GoalID,
+			Claim:      "legacy invalidated timing lesson citation",
+			Predicts:   entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.1},
+			KillIf:     []string{"tests fail"},
+			InspiredBy: []string{"L-0901"},
+			Status:     entity.StatusOpen,
+			Author:     "agent:orchestrator",
+			CreatedAt:  now,
+		})).To(Succeed())
+		exp := runCLIJSON[cliIDResponse](dir,
+			"experiment", "design", "H-0901",
+			"--baseline", "HEAD",
+			"--instruments", "timing,binary_size,host_test",
+		)
+
+		report := runCLIJSON[readmodel.ExperimentPreflightReport](dir, "experiment", "preflight", exp.ID)
+
+		Expect(report.OK).To(BeFalse())
+		Expect(preflightIssueCodes(report.Issues)).To(ContainElement("lesson_not_reviewed"))
 	})
 })
 

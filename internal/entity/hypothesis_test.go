@@ -20,12 +20,14 @@ var _ = Describe("Hypothesis markdown serialization", func() {
 				Direction:  "decrease",
 				MinEffect:  0.10,
 			},
-			KillIf:    []string{"flash delta > 1024 bytes", "CI crosses zero"},
-			Status:    entity.StatusOpen,
-			Author:    "human:alice",
-			CreatedAt: time.Date(2026, 4, 11, 10, 0, 0, 0, time.UTC),
-			Tags:      []string{"perf", "unroll"},
-			Body:      "# Notes\n\nIdea from the CMSIS reference.\n",
+			KillIf:                  []string{"flash delta > 1024 bytes", "CI crosses zero"},
+			InspiredBy:              []string{"L-0001"},
+			AllowInvalidatedLessons: true,
+			Status:                  entity.StatusOpen,
+			Author:                  "human:alice",
+			CreatedAt:               time.Date(2026, 4, 11, 10, 0, 0, 0, time.UTC),
+			Tags:                    []string{"perf", "unroll"},
+			Body:                    "# Notes\n\nIdea from the CMSIS reference.\n",
 		}
 
 		data, err := h.Marshal()
@@ -37,6 +39,8 @@ var _ = Describe("Hypothesis markdown serialization", func() {
 		Expect(back.Claim).To(Equal(h.Claim))
 		Expect(back.Predicts).To(Equal(h.Predicts))
 		Expect(back.KillIf).To(Equal(h.KillIf))
+		Expect(back.InspiredBy).To(Equal(h.InspiredBy))
+		Expect(back.AllowInvalidatedLessons).To(BeTrue())
 		Expect(back.Body).To(Equal(h.Body))
 	})
 })
