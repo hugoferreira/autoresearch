@@ -23,6 +23,8 @@ type EvidenceFailure struct {
 	Error    string `json:"error,omitempty"`
 }
 
+const ObservationAuxPair = "pair"
+
 type Observation struct {
 	ID         string    `json:"id"`
 	Experiment string    `json:"experiment"`

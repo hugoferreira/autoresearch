@@ -102,6 +102,22 @@ var _ = Describe("review-packet command", func() {
 			BaselineSHA:  baseSHA,
 			Command:      "cat timing.txt",
 			Author:       "agent:observer",
+			Aux: map[string]any{
+				entity.ObservationAuxPair: readmodel.PairedObservationMeta{
+					PairID:              "P-0001",
+					Mode:                "bracket",
+					Arm:                 readmodel.PairArmCandidate,
+					Segment:             readmodel.PairSegmentCandidate,
+					Order:               2,
+					Instrument:          "timing",
+					CandidateExperiment: "E-0001",
+					CandidateRef:        "refs/heads/candidate/review-packet",
+					CandidateSHA:        candidateSHA,
+					BaselineExperiment:  "E-0000",
+					BaselineRef:         "HEAD",
+					BaselineSHA:         baseSHA,
+				},
+			},
 		})).To(Succeed())
 		Expect(s.WriteObservation(&entity.Observation{
 			ID:           "O-0002",
@@ -156,6 +172,7 @@ var _ = Describe("review-packet command", func() {
 		Expect(got.CandidateExperiment.ID).To(Equal("E-0001"))
 		Expect(got.BaselineExperiment.ID).To(Equal("E-0000"))
 		Expect(got.Observations).To(HaveLen(2))
+		Expect(got.Observations[0].Pair.PairID).To(Equal("P-0001"))
 		Expect(got.Observations[0].Artifacts[0].Readable).To(BeTrue())
 		Expect(got.ConstraintChecks).To(ConsistOf(HaveField("Instrument", "host_test")))
 		Expect(got.Analysis.Command).To(ContainElement("--candidate-ref"))
@@ -164,7 +181,7 @@ var _ = Describe("review-packet command", func() {
 
 		runCLI(dir, "pause", "--reason", "gate review")
 		text := runCLI(dir, "review-packet", "C-0001")
-		expectText(text, "review_packet: C-0001", "claim:         tighten the hot loop", "constraint_checks:", "analysis:", "diff:", "artifact primary")
+		expectText(text, "review_packet: C-0001", "claim:         tighten the hot loop", "constraint_checks:", "analysis:", "diff:", "pair=P-0001 arm=candidate", "artifact primary")
 		expectNoText(text, "read_issues:")
 	})
 

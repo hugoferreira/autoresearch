@@ -141,6 +141,9 @@ For the routine optimization loop, the canonical command spine is:
     # create a unique reviewable git ref for the measured candidate, then:
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
     autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto] --json
+    # when drift is a risk, use a paired measurement unit:
+    autoresearch observe-pair <E-id> --baseline <baseline-E-id> --instrument NAME --candidate-ref <ref> --samples N --mode interleave --json
+    autoresearch analyze-pair <P-id> --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield with review pending so the parent/main session can dispatch research-gate-reviewer
@@ -275,13 +278,23 @@ refs for you. Use normal git to create a unique reviewable candidate ref before
 measuring. Use ` + "`observe check`" + ` as the cheap probe before rerunning an
 expensive measurement. Use ` + "`observe --append`" + ` only when you
 intentionally want another fresh run even though the target is already met.
+Use ` + "`observe-pair`" + ` when baseline drift could be the same order as the
+claimed effect. It records candidate and baseline arms under one ` + "`P-XXXX`" + `
+pair id, preserves raw samples on ordinary ` + "`O-XXXX`" + ` observations, and
+stores pair metadata (` + "`pair_id`" + `, arm, mode, order, refs, SHAs) in observation
+aux data. ` + "`--mode bracket`" + ` records baseline -> candidate -> baseline;
+` + "`--mode interleave`" + ` alternates one-sample baseline/candidate runs.
+Analyze with ` + "`analyze-pair <P-id> --json`" + ` and cite the generated
+observations in the conclusion as usual.
 
 ### Observations and analysis
     autoresearch observe  check <exp-id> --instrument NAME --candidate-ref REF [--samples N]  # required for non-baseline experiments
     autoresearch observe  <exp-id> --instrument NAME --candidate-ref REF [--samples N] [--append]
     autoresearch observe  <exp-id> --all --candidate-ref REF [--samples N] [--append]         # all instruments in dependency order
+    autoresearch observe-pair <candidate-exp> --baseline <baseline-exp> --instrument NAME --candidate-ref REF [--baseline-ref REF] [--samples N] [--mode interleave|bracket]
     autoresearch observation show <O-id> [--include-raw]                    # read-only; raw samples are bounded
     autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>|auto] [--instrument NAME] [--iters N]
+    autoresearch analyze-pair <P-id> [--iters N]                            # read-only paired delta + drift diagnostics
     autoresearch review-packet <C-id>                                       # read-only gate-review evidence bundle
     autoresearch conclude <hyp-id> \
         --verdict {supported|refuted|inconclusive} \
