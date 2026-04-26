@@ -155,7 +155,7 @@ before you reach for `--help`:
     autoresearch experiment design <H-id> --baseline HEAD --instruments ... --design-notes "..." --author agent:orchestrator --json
     autoresearch experiment implement <E-id> --impl-notes "..." --json
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
-    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto] --json
+    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto|--baseline <E-id> [--baseline-ref <ref>]|--baseline-observation O-XXXX] --json
     autoresearch conclude <H-id> --verdict ... --observations O-... --interpretation "..." --author agent:orchestrator --json
     autoresearch lesson add ... --from <C-id> --author agent:orchestrator --json   # decisive conclusions
     # then yield to the main session with review pending so it can dispatch research-gate-reviewer
@@ -382,9 +382,16 @@ If an instrument fails, stop and report — do not retry or fix.
 autoresearch analyze <exp-id> --candidate-ref <candidate-ref> --baseline auto --json
 ```
 
-Use `--baseline auto` when the hypothesis has accepted supported ancestry;
-for a root hypothesis with no supported predecessor yet, omit `--baseline`
-and let `conclude` resolve the absolute baseline fallback.
+Use `--baseline auto` when the tool can infer the comparison from the
+candidate-recorded baseline, accepted supported ancestry, or goal baseline.
+For a root hypothesis with no compatible measured baseline yet, omit
+`--baseline` and let `conclude` resolve the absolute baseline fallback.
+If an explicit baseline experiment has multiple measured scopes, pass
+`--baseline-ref <stored-ref>` or `--baseline-observation O-XXXX`; JSON
+ambiguity errors include `baseline_candidates` with refs, SHAs,
+observation IDs, instruments, and sample counts. `cycle-context --json`
+reports `recommended_baseline` on in-flight work when the tool can infer
+one.
 
 Read the `comparison` object: `delta_frac`, `ci_low_frac`,
 `ci_high_frac`, `p_value`. Then decide:

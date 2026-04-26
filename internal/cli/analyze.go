@@ -20,10 +20,12 @@ func analyzeCommands() []*cobra.Command {
 
 func analyzeCmd() *cobra.Command {
 	var (
-		baselineExp  string
-		instName     string
-		iters        int
-		candidateRef string
+		baselineExp         string
+		baselineRef         string
+		baselineObservation string
+		instName            string
+		iters               int
+		candidateRef        string
 	)
 	c := &cobra.Command{
 		Use:   "analyze <exp-id>",
@@ -88,9 +90,28 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 			var baseObs []*entity.Observation
 			var baselineRes *readmodel.BaselineResolution
 			baselineExp = strings.TrimSpace(baselineExp)
+			baselineRef = strings.TrimSpace(baselineRef)
+			baselineObservation = strings.TrimSpace(baselineObservation)
+			if baselineExp == "" && baselineRef != "" {
+				return fmt.Errorf("--baseline-ref requires --baseline <baseline-exp-id>")
+			}
 			switch baselineExp {
 			case "":
+				if baselineObservation != "" {
+					obsIdx, err := readmodel.LoadObservationIndexStrict(s)
+					if err != nil {
+						return err
+					}
+					baseObs, baselineRes, err = selectAnalyzeBaselineObservations(s, obsIdx, "", instName, "", baselineObservation)
+					if err != nil {
+						return err
+					}
+					baselineExp = baselineRes.ExperimentID
+				}
 			case analyzeBaselineAuto:
+				if baselineRef != "" || baselineObservation != "" {
+					return fmt.Errorf("--baseline-ref and --baseline-observation cannot be combined with --baseline auto")
+				}
 				if exp.IsBaseline {
 					return fmt.Errorf("--baseline auto is only valid for non-baseline experiments")
 				}
@@ -105,34 +126,29 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 				if err != nil {
 					return err
 				}
-				baselineRes, err = readmodel.ResolveLineageSupportedBaselineWithIndex(s, obsIdx, hyp, hyp.Predicts.Instrument)
+				baselineRes, err = readmodel.ResolveInferredBaselineWithIndex(s, obsIdx, hyp, exp, analyzeBaselineInstrument(instName, hyp.Predicts.Instrument))
 				if err != nil {
 					return err
 				}
 				if baselineRes == nil || baselineRes.ExperimentID == "" {
-					note := "no usable lineage baseline"
+					note := "no usable baseline"
 					if baselineRes != nil && baselineRes.Note != "" {
 						note = baselineRes.Note
 					}
-					return fmt.Errorf("--baseline auto could not resolve a supported ancestor for experiment %s: %s", expID, note)
+					return fmt.Errorf("--baseline auto could not resolve a baseline for experiment %s: %s", expID, note)
 				}
 				baselineExp = baselineRes.ExperimentID
 				baseObs = obsIdx.ObservationsForScope(baselineRes.Scope())
 			default:
-				baseObs, err = s.ListObservationsForExperiment(baselineExp)
+				obsIdx, err := readmodel.LoadObservationIndexStrict(s)
 				if err != nil {
 					return err
 				}
-				if len(baseObs) == 0 {
-					return fmt.Errorf("baseline experiment %s has no observations", baselineExp)
-				}
-				if err := ensureAnalyzeObservationsSingleScope(
-					"baseline experiment",
-					baselineExp,
-					"recorded scopes",
-					baseObs,
-					"analyze requires a baseline experiment with a single recorded scope",
-				); err != nil {
+				baseObs, baselineRes, err = selectAnalyzeBaselineObservations(s, obsIdx, baselineExp, instName, baselineRef, baselineObservation)
+				if err != nil {
+					if w.IsJSON() {
+						emitAnalyzeBaselineError(w, expID, baselineExp, err)
+					}
 					return err
 				}
 			}
@@ -221,6 +237,8 @@ refs, pass --candidate-ref to analyze the specific measured candidate.`,
 		},
 	}
 	c.Flags().StringVar(&baselineExp, "baseline", "", "baseline experiment id to compare against, or 'auto' for the supported lineage predecessor")
+	c.Flags().StringVar(&baselineRef, "baseline-ref", "", "for an explicit --baseline experiment, restrict baseline observations to the stored ref")
+	c.Flags().StringVar(&baselineObservation, "baseline-observation", "", "use the baseline scope containing this observation id")
 	c.Flags().StringVar(&instName, "instrument", "", "only analyze this instrument")
 	c.Flags().IntVar(&iters, "iters", 0, "bootstrap iterations (0 uses default 2000)")
 	c.Flags().StringVar(&candidateRef, "candidate-ref", "", "for non-baseline experiments, restrict analysis to observations recorded on this candidate ref")

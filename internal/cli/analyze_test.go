@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/bytter/autoresearch/internal/entity"
@@ -9,6 +11,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+type analyzeBaselineErrorResponse struct {
+	Status             string                        `json:"status"`
+	Error              string                        `json:"error"`
+	Experiment         string                        `json:"experiment"`
+	Baseline           string                        `json:"baseline"`
+	BaselineCandidates []readmodel.BaselineCandidate `json:"baseline_candidates"`
+}
 
 var _ = Describe("analyze command", func() {
 	BeforeEach(saveGlobals)
@@ -72,6 +82,82 @@ var _ = Describe("analyze command", func() {
 			"--baseline", baselineID,
 		)
 		Expect(err).To(MatchError(ContainSubstring("baseline experiment " + baselineID + " has observations for multiple recorded scopes")))
+	})
+
+	It("emits machine-readable baseline candidates for ambiguous JSON analysis", func() {
+		fx := setupAnalyzeScopedBaselineFixture()
+
+		stdout, _, err := runCLIResult(fx.dir,
+			"--json",
+			"analyze", fx.candidateID,
+			"--candidate-ref", fx.candidateRef,
+			"--baseline", fx.baselineID,
+			"--instrument", "timing",
+		)
+
+		Expect(err).To(MatchError(ContainSubstring("baseline experiment " + fx.baselineID + " has observations for multiple recorded scopes")))
+		var payload analyzeBaselineErrorResponse
+		Expect(json.Unmarshal([]byte(stdout), &payload)).To(Succeed(), "stdout:\n%s", stdout)
+		Expect(payload.Status).To(Equal("error"))
+		Expect(payload.Experiment).To(Equal(fx.candidateID))
+		Expect(payload.Baseline).To(Equal(fx.baselineID))
+		Expect(payload.BaselineCandidates).To(ConsistOf(
+			SatisfyAll(
+				HaveField("Experiment", fx.baselineID),
+				HaveField("Attempt", 1),
+				HaveField("Ref", fx.baselineRefA),
+				HaveField("Observations", ConsistOf("O-0001")),
+				HaveField("Instruments", ConsistOf("timing")),
+				HaveField("Samples", 3),
+			),
+			SatisfyAll(
+				HaveField("Experiment", fx.baselineID),
+				HaveField("Attempt", 2),
+				HaveField("Ref", fx.baselineRefB),
+				HaveField("Observations", ConsistOf("O-0002")),
+				HaveField("Instruments", ConsistOf("timing")),
+				HaveField("Samples", 3),
+			),
+		))
+	})
+
+	It("uses --baseline-ref to disambiguate a baseline experiment", func() {
+		fx := setupAnalyzeScopedBaselineFixture()
+
+		resp := runCLIJSON[cliAnalyzeResponse](fx.dir,
+			"analyze", fx.candidateID,
+			"--candidate-ref", fx.candidateRef,
+			"--baseline", fx.baselineID,
+			"--baseline-ref", strings.TrimPrefix(fx.baselineRefB, "refs/heads/"),
+			"--instrument", "timing",
+		)
+
+		Expect(resp.Baseline).To(Equal(fx.baselineID))
+		Expect(resp.BaselineResolution).NotTo(BeNil())
+		Expect(resp.BaselineResolution.Source).To(Equal(readmodel.BaselineSourceExplicit))
+		Expect(resp.BaselineResolution.Attempt).To(Equal(2))
+		Expect(resp.BaselineResolution.Ref).To(Equal(fx.baselineRefB))
+		Expect(resp.Rows).To(HaveLen(1))
+		Expect(resp.Rows[0].Comparison).NotTo(BeNil())
+	})
+
+	It("uses --baseline-observation to infer and disambiguate the baseline scope", func() {
+		fx := setupAnalyzeScopedBaselineFixture()
+
+		resp := runCLIJSON[cliAnalyzeResponse](fx.dir,
+			"analyze", fx.candidateID,
+			"--candidate-ref", fx.candidateRef,
+			"--baseline-observation", "O-0001",
+			"--instrument", "timing",
+		)
+
+		Expect(resp.Baseline).To(Equal(fx.baselineID))
+		Expect(resp.BaselineResolution).NotTo(BeNil())
+		Expect(resp.BaselineResolution.Source).To(Equal(readmodel.BaselineSourceExplicit))
+		Expect(resp.BaselineResolution.Attempt).To(Equal(1))
+		Expect(resp.BaselineResolution.Ref).To(Equal(fx.baselineRefA))
+		Expect(resp.Rows).To(HaveLen(1))
+		Expect(resp.Rows[0].Comparison).NotTo(BeNil())
 	})
 
 	It("rejects a candidate ref that maps to multiple recorded scopes", func() {
@@ -173,7 +259,172 @@ var _ = Describe("analyze command", func() {
 		Expect(resp.Rows).To(HaveLen(1))
 		Expect(resp.Rows[0].Comparison).NotTo(BeNil())
 	})
+
+	It("resolves --baseline auto through a candidate-recorded supported predecessor", func() {
+		dir, s := createCLIStoreDir()
+		now := time.Now().UTC()
+		Expect(s.WriteGoal(&entity.Goal{
+			ID:        "G-0001",
+			Status:    entity.GoalStatusActive,
+			CreatedAt: &now,
+			Objective: entity.Objective{Instrument: "timing", Direction: "decrease"},
+		})).To(Succeed())
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:        "H-0001",
+			GoalID:    "G-0001",
+			Claim:     "first win",
+			Status:    entity.StatusSupported,
+			Author:    "test",
+			CreatedAt: now,
+			Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.05},
+		})).To(Succeed())
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:        "H-0002",
+			GoalID:    "G-0001",
+			Parent:    "H-0001",
+			Claim:     "stacked win",
+			Status:    entity.StatusOpen,
+			Author:    "test",
+			CreatedAt: now,
+			Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.05},
+		})).To(Succeed())
+		for _, exp := range []*entity.Experiment{
+			{ID: "E-0001", GoalID: "G-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now},
+			{ID: "E-0002", GoalID: "G-0001", Hypothesis: "H-0002", Status: entity.ExpMeasured, Baseline: entity.Baseline{Ref: "HEAD", Experiment: "E-0001"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now},
+		} {
+			Expect(s.WriteExperiment(exp)).To(Succeed())
+		}
+		Expect(s.WriteObservation(&entity.Observation{
+			ID: "O-0001", Experiment: "E-0001", Instrument: "timing",
+			MeasuredAt: now, Value: 100, Unit: "ns", PerSample: []float64{100, 101, 99}, Samples: 3,
+			CandidateRef: "refs/heads/candidate/E-0001-a1", CandidateSHA: strings.Repeat("1", 40), Attempt: 1, Author: "test",
+		})).To(Succeed())
+		ref := "refs/heads/candidate/E-0002-a1"
+		Expect(s.WriteObservation(&entity.Observation{
+			ID: "O-0002", Experiment: "E-0002", Instrument: "timing",
+			MeasuredAt: now, Value: 90, Unit: "ns", PerSample: []float64{90, 91, 89}, Samples: 3,
+			CandidateRef: ref, CandidateSHA: strings.Repeat("2", 40), Attempt: 1, Author: "test",
+		})).To(Succeed())
+		Expect(s.WriteConclusion(&entity.Conclusion{
+			ID: "C-0001", Hypothesis: "H-0001", Verdict: entity.VerdictSupported,
+			Observations: []string{"O-0001"}, CandidateExp: "E-0001",
+			CandidateAttempt: 1, CandidateRef: "refs/heads/candidate/E-0001-a1", CandidateSHA: strings.Repeat("1", 40),
+			Effect: entity.Effect{Instrument: "timing", DeltaFrac: -0.1}, StatTest: "mann_whitney_u",
+			Author: "test", ReviewedBy: "human:gate", CreatedAt: now,
+		})).To(Succeed())
+
+		resp := runCLIJSON[cliAnalyzeResponse](dir,
+			"analyze", "E-0002",
+			"--candidate-ref", ref,
+			"--baseline", "auto",
+			"--instrument", "timing",
+		)
+
+		Expect(resp.Baseline).To(Equal("E-0001"))
+		Expect(resp.BaselineResolution).NotTo(BeNil())
+		Expect(resp.BaselineResolution.ExperimentID).To(Equal("E-0001"))
+		Expect(resp.BaselineResolution.Source).To(Equal(readmodel.BaselineSourceCandidateRecorded))
+		Expect(resp.BaselineResolution.Attempt).To(Equal(1))
+		Expect(resp.Rows[0].Comparison).NotTo(BeNil())
+	})
+
+	It("reports when --baseline auto has no compatible baseline", func() {
+		dir, s := createCLIStoreDir()
+		now := time.Now().UTC()
+		Expect(s.WriteGoal(&entity.Goal{
+			ID:        "G-0001",
+			Status:    entity.GoalStatusActive,
+			CreatedAt: &now,
+			Objective: entity.Objective{Instrument: "timing", Direction: "decrease"},
+		})).To(Succeed())
+		Expect(s.WriteHypothesis(&entity.Hypothesis{
+			ID:        "H-0001",
+			GoalID:    "G-0001",
+			Claim:     "candidate without baseline",
+			Status:    entity.StatusOpen,
+			Author:    "test",
+			CreatedAt: now,
+			Predicts:  entity.Predicts{Instrument: "timing", Target: "kernel", Direction: "decrease", MinEffect: 0.05},
+		})).To(Succeed())
+		Expect(s.WriteExperiment(&entity.Experiment{
+			ID: "E-0001", GoalID: "G-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured,
+			Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now,
+		})).To(Succeed())
+		ref := "refs/heads/candidate/E-0001-a1"
+		Expect(s.WriteObservation(&entity.Observation{
+			ID: "O-0001", Experiment: "E-0001", Instrument: "timing",
+			MeasuredAt: now, Value: 90, Unit: "ns", PerSample: []float64{90, 91, 89}, Samples: 3,
+			CandidateRef: ref, CandidateSHA: strings.Repeat("1", 40), Attempt: 1, Author: "test",
+		})).To(Succeed())
+
+		_, _, err := runCLIResult(dir,
+			"analyze", "E-0001",
+			"--candidate-ref", ref,
+			"--baseline", "auto",
+			"--instrument", "timing",
+		)
+
+		Expect(err).To(MatchError(ContainSubstring("--baseline auto could not resolve")))
+		Expect(err).To(MatchError(ContainSubstring("goal G-0001 has no recorded baseline experiment")))
+	})
 })
+
+type analyzeScopedBaselineFixture struct {
+	dir          string
+	baselineID   string
+	baselineRefA string
+	baselineRefB string
+	candidateID  string
+	candidateRef string
+}
+
+func setupAnalyzeScopedBaselineFixture() analyzeScopedBaselineFixture {
+	GinkgoHelper()
+
+	dir, s := createCLIStoreDir()
+	now := time.Now().UTC()
+	baselineRefA := "refs/heads/baseline/E-0001-a1"
+	baselineRefB := "refs/heads/baseline/E-0001-a2"
+	candidateRef := "refs/heads/candidate/E-0002-a1"
+	for _, exp := range []*entity.Experiment{
+		{ID: "E-0001", GoalID: "G-0001", IsBaseline: true, Status: entity.ExpMeasured, Baseline: entity.Baseline{Ref: "HEAD"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now},
+		{ID: "E-0002", GoalID: "G-0001", Hypothesis: "H-0001", Status: entity.ExpMeasured, Baseline: entity.Baseline{Ref: "HEAD", Experiment: "E-0001"}, Instruments: []string{"timing"}, Author: "test", CreatedAt: now},
+	} {
+		Expect(s.WriteExperiment(exp)).To(Succeed())
+	}
+	for _, o := range []*entity.Observation{
+		{
+			ID: "O-0001", Experiment: "E-0001", Instrument: "timing", Attempt: 1,
+			CandidateRef: baselineRefA, CandidateSHA: strings.Repeat("a", 40),
+			Value: 100, PerSample: []float64{100, 101, 99},
+		},
+		{
+			ID: "O-0002", Experiment: "E-0001", Instrument: "timing", Attempt: 2,
+			CandidateRef: baselineRefB, CandidateSHA: strings.Repeat("b", 40),
+			Value: 120, PerSample: []float64{120, 121, 119},
+		},
+		{
+			ID: "O-0003", Experiment: "E-0002", Instrument: "timing", Attempt: 1,
+			CandidateRef: candidateRef, CandidateSHA: strings.Repeat("c", 40),
+			Value: 90, PerSample: []float64{90, 91, 89},
+		},
+	} {
+		o.MeasuredAt = now
+		o.Unit = "ns"
+		o.Samples = len(o.PerSample)
+		o.Author = "test"
+		Expect(s.WriteObservation(o)).To(Succeed())
+	}
+
+	return analyzeScopedBaselineFixture{
+		dir:          dir,
+		baselineID:   "E-0001",
+		baselineRefA: baselineRefA,
+		baselineRefB: baselineRefB,
+		candidateID:  "E-0002",
+		candidateRef: candidateRef,
+	}
+}
 
 func setupAnalyzeAmbiguousBaseline() (string, string) {
 	GinkgoHelper()

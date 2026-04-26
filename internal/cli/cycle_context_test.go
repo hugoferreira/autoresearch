@@ -16,10 +16,11 @@ type cliCycleContextAssessment struct {
 }
 
 type cliCycleContextInFlight struct {
-	ID          string   `json:"id"`
-	Hypothesis  string   `json:"hypothesis"`
-	Status      string   `json:"status"`
-	Instruments []string `json:"instruments"`
+	ID                  string                        `json:"id"`
+	Hypothesis          string                        `json:"hypothesis"`
+	Status              string                        `json:"status"`
+	Instruments         []string                      `json:"instruments"`
+	RecommendedBaseline *readmodel.BaselineResolution `json:"recommended_baseline,omitempty"`
 }
 
 type cliCycleContextGoal struct {
@@ -146,6 +147,17 @@ var _ = Describe("cycle-context command", func() {
 		Expect(ctx.GoalAssessment.MetByConclusion).To(Equal(concl.ID))
 		Expect(ctx.OpenHypotheses).To(ContainElement(HaveField("ID", open.HypothesisID)))
 		Expect(ctx.InFlight).To(ContainElement(HaveField("ID", open.ExperimentID)))
+		var openInFlight *cliCycleContextInFlight
+		for i := range ctx.InFlight {
+			if ctx.InFlight[i].ID == open.ExperimentID {
+				openInFlight = &ctx.InFlight[i]
+				break
+			}
+		}
+		Expect(openInFlight).NotTo(BeNil())
+		Expect(openInFlight.RecommendedBaseline).NotTo(BeNil())
+		Expect(openInFlight.RecommendedBaseline.ExperimentID).To(Equal(fixture.BaselineID))
+		Expect(openInFlight.RecommendedBaseline.Source).To(Equal(readmodel.BaselineSourceGoalBaseline))
 		Expect(ctx.ActiveLessons).To(ContainElement(SatisfyAll(
 			HaveField("ID", lesson.ID),
 			HaveField("Status", entity.LessonStatusActive),
