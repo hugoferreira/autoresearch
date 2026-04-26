@@ -40,6 +40,24 @@ type ObservationIndex struct {
 	scopesByExperiment map[string][]ObservationScope
 }
 
+type BaselineCandidate struct {
+	Experiment   string   `json:"experiment"`
+	Attempt      int      `json:"attempt,omitempty"`
+	Ref          string   `json:"ref,omitempty"`
+	SHA          string   `json:"sha,omitempty"`
+	Label        string   `json:"label"`
+	Observations []string `json:"observations"`
+	Instruments  []string `json:"instruments"`
+	Samples      int      `json:"samples"`
+}
+
+type BaselineScopeAmbiguityError struct {
+	Message    string              `json:"-"`
+	Candidates []BaselineCandidate `json:"baseline_candidates"`
+}
+
+func (e *BaselineScopeAmbiguityError) Error() string { return e.Message }
+
 func LoadObservationIndex(s *store.Store) *ObservationIndex {
 	idx, err := LoadObservationIndexStrict(s)
 	if err != nil {
@@ -143,6 +161,13 @@ func (idx *ObservationIndex) ObservationsForScope(scope ObservationScope) []*ent
 	return idx.byScope[scope]
 }
 
+func (idx *ObservationIndex) ObservationByID(id string) *entity.Observation {
+	if idx == nil {
+		return nil
+	}
+	return idx.byID[strings.TrimSpace(id)]
+}
+
 func (idx *ObservationIndex) ScopesForExperiment(expID string) []ObservationScope {
 	if idx == nil {
 		return nil
@@ -166,6 +191,52 @@ func (idx *ObservationIndex) ScopesForExperimentInstrument(expID, instrument str
 			continue
 		}
 		out = append(out, scope)
+	}
+	return out
+}
+
+func (idx *ObservationIndex) BaselineCandidatesForExperimentInstrument(expID, instrument string) []BaselineCandidate {
+	if idx == nil {
+		return []BaselineCandidate{}
+	}
+	scopes := idx.ScopesForExperimentInstrument(expID, instrument)
+	return idx.BaselineCandidatesForScopes(scopes, instrument)
+}
+
+func (idx *ObservationIndex) BaselineCandidatesForScopes(scopes []ObservationScope, instrument string) []BaselineCandidate {
+	if idx == nil {
+		return []BaselineCandidate{}
+	}
+	instrument = strings.TrimSpace(instrument)
+	out := make([]BaselineCandidate, 0, len(scopes))
+	for _, scope := range scopes {
+		obs := idx.ObservationsForScope(scope)
+		var ids []string
+		instruments := map[string]struct{}{}
+		samples := 0
+		for _, o := range obs {
+			if o == nil {
+				continue
+			}
+			if instrument != "" && o.Instrument != instrument {
+				continue
+			}
+			ids = append(ids, o.ID)
+			if o.Instrument != "" {
+				instruments[o.Instrument] = struct{}{}
+			}
+			samples += observationSampleCount(o)
+		}
+		out = append(out, BaselineCandidate{
+			Experiment:   scope.Experiment,
+			Attempt:      scope.Attempt,
+			Ref:          scope.Ref,
+			SHA:          scope.SHA,
+			Label:        FormatObservationScope(scope),
+			Observations: ids,
+			Instruments:  sortedInstrumentKeys(instruments),
+			Samples:      samples,
+		})
 	}
 	return out
 }
@@ -270,6 +341,28 @@ func observationsContainInstrument(obs []*entity.Observation, instrument string)
 		}
 	}
 	return false
+}
+
+func observationSampleCount(o *entity.Observation) int {
+	if o == nil {
+		return 0
+	}
+	if len(o.PerSample) > 0 {
+		return len(o.PerSample)
+	}
+	if o.Samples > 0 {
+		return o.Samples
+	}
+	return 1
+}
+
+func sortedInstrumentKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func shortScopeSHA(sha string) string {

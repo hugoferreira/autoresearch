@@ -238,6 +238,8 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 
 	expClassByID := readmodel.ClassifyExperimentsForReadFromHypotheses(exps, hyps)
 	inFlight, _ := readmodel.BuildExperimentActivity(exps, expClassByID, events, 0, inputs.now)
+	obsIdx := readmodel.NewObservationIndex(obs)
+	inFlight = addCycleContextBaselineRecommendations(s, inFlight, exps, hyps, obsIdx)
 
 	activeLessonViews, err := readmodel.ListLessonsForRead(s, lessons, readmodel.LessonListOptions{Status: entity.LessonStatusActive})
 	if err != nil {
@@ -260,7 +262,7 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 	}
 
 	if goal != nil {
-		frontier := readmodel.BuildFrontierSnapshot(goal, concls, readmodel.NewObservationIndex(obs), expClassByID)
+		frontier := readmodel.BuildFrontierSnapshot(goal, concls, obsIdx, expClassByID)
 		if len(frontier.Rows) > 0 {
 			best := frontier.Rows[0]
 			frontierBest = &best
@@ -284,6 +286,46 @@ func buildCycleContextScope(s *store.Store, inputs *cycleContextInputs, scope go
 
 	counts := readmodel.BuildCountsWithLessons(len(hyps), len(exps), len(obs), len(concls), len(lessons))
 	return payload, counts, nil
+}
+
+func addCycleContextBaselineRecommendations(
+	s *store.Store,
+	inFlight []dashboardInFlight,
+	exps []*entity.Experiment,
+	hyps []*entity.Hypothesis,
+	obsIdx *readmodel.ObservationIndex,
+) []dashboardInFlight {
+	expByID := make(map[string]*entity.Experiment, len(exps))
+	for _, exp := range exps {
+		if exp != nil {
+			expByID[exp.ID] = exp
+		}
+	}
+	hypByID := make(map[string]*entity.Hypothesis, len(hyps))
+	for _, hyp := range hyps {
+		if hyp != nil {
+			hypByID[hyp.ID] = hyp
+		}
+	}
+	out := make([]dashboardInFlight, len(inFlight))
+	copy(out, inFlight)
+	for i := range out {
+		exp := expByID[out[i].ID]
+		if exp == nil {
+			continue
+		}
+		hyp := hypByID[exp.Hypothesis]
+		if hyp == nil {
+			continue
+		}
+		instrument := analyzeBaselineInstrument("", hyp.Predicts.Instrument)
+		res, err := readmodel.ResolveInferredBaselineWithIndex(s, obsIdx, hyp, exp, instrument)
+		if err != nil {
+			res = &readmodel.BaselineResolution{Note: err.Error()}
+		}
+		out[i].RecommendedBaseline = res
+	}
+	return out
 }
 
 func openHypotheses(hyps []*entity.Hypothesis) []*entity.Hypothesis {

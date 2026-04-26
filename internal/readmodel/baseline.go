@@ -210,7 +210,11 @@ func resolveAncestorSupportedBaseline(s *store.Store, hyp *entity.Hypothesis, in
 			for scope := range usableByScope {
 				scopeLabels = append(scopeLabels, scope)
 			}
-			return nil, "", fmt.Errorf("ancestor %s has multiple accepted supported candidate scopes with observations on instrument %q: %s; pass --baseline-experiment explicitly", parentID, instrument, strings.Join(SortedObservationScopeLabels(scopeLabels), ", "))
+			message := fmt.Sprintf("ancestor %s has multiple accepted supported candidate scopes with observations on instrument %q: %s; pass --baseline-experiment explicitly", parentID, instrument, strings.Join(SortedObservationScopeLabels(scopeLabels), ", "))
+			return nil, "", &BaselineScopeAmbiguityError{
+				Message:    message,
+				Candidates: obs.BaselineCandidatesForScopes(scopeLabels, instrument),
+			}
 		}
 
 		parentID = strings.TrimSpace(parent.Parent)
@@ -261,7 +265,11 @@ func resolveGoalBaseline(s *store.Store, goalID, instrument string, obs *Observa
 			Source:       BaselineSourceGoalBaseline,
 		}, joinNotes(notes...), nil
 	default:
-		return nil, "", fmt.Errorf("goal %s has multiple baseline scopes with observations on instrument %q: %s; pass --baseline-experiment explicitly", goalID, instrument, strings.Join(SortedObservationScopeLabels(usable), ", "))
+		message := fmt.Sprintf("goal %s has multiple baseline scopes with observations on instrument %q: %s; pass --baseline-experiment explicitly", goalID, instrument, strings.Join(SortedObservationScopeLabels(usable), ", "))
+		return nil, "", &BaselineScopeAmbiguityError{
+			Message:    message,
+			Candidates: obs.BaselineCandidatesForScopes(usable, instrument),
+		}
 	}
 }
 
@@ -305,7 +313,11 @@ func ResolveExperimentInstrumentScope(s *store.Store, obs *ObservationIndex, exp
 	case 1:
 		return scopes[0], true, "", nil
 	default:
-		return ObservationScope{}, false, "", fmt.Errorf("%s %s has multiple observation scopes on instrument %q: %s", label, expID, instrument, strings.Join(SortedObservationScopeLabels(scopes), ", "))
+		message := fmt.Sprintf("%s %s has multiple observation scopes on instrument %q: %s", label, expID, instrument, strings.Join(SortedObservationScopeLabels(scopes), ", "))
+		return ObservationScope{}, false, "", &BaselineScopeAmbiguityError{
+			Message:    message,
+			Candidates: obs.BaselineCandidatesForScopes(scopes, instrument),
+		}
 	}
 }
 

@@ -40,12 +40,13 @@ type StaleExperimentView struct {
 // InFlightExperimentView is the read model shared by dashboard/TUI for active
 // experiments that still need human or agent attention.
 type InFlightExperimentView struct {
-	ID            string     `json:"id"`
-	Hypothesis    string     `json:"hypothesis"`
-	Status        string     `json:"status"`
-	Instruments   []string   `json:"instruments"`
-	ImplementedAt *time.Time `json:"implemented_at,omitempty"`
-	ElapsedS      float64    `json:"elapsed_s"`
+	ID                  string              `json:"id"`
+	Hypothesis          string              `json:"hypothesis"`
+	Status              string              `json:"status"`
+	Instruments         []string            `json:"instruments"`
+	RecommendedBaseline *BaselineResolution `json:"recommended_baseline,omitempty"`
+	ImplementedAt       *time.Time          `json:"implemented_at,omitempty"`
+	ElapsedS            float64             `json:"elapsed_s"`
 }
 
 func normalizeExperimentReadClass(class ExperimentReadClass) ExperimentReadClass {

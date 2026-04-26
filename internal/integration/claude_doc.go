@@ -140,7 +140,7 @@ For the routine optimization loop, the canonical command spine is:
     autoresearch experiment implement <E-id> --impl-notes "..." --json
     # create a unique reviewable git ref for the measured candidate, then:
     autoresearch observe <E-id> --all --candidate-ref <ref> --json
-    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto] --json
+    autoresearch analyze <E-id> --candidate-ref <ref> [--baseline auto|--baseline <E-id> [--baseline-ref <ref>]|--baseline-observation O-XXXX] --json
     # when drift is a risk, use a paired measurement unit:
     autoresearch observe-pair <E-id> --baseline <baseline-E-id> --instrument NAME --candidate-ref <ref> --samples N --mode interleave --json
     autoresearch analyze-pair <P-id> --json
@@ -293,7 +293,7 @@ observations in the conclusion as usual.
     autoresearch observe  <exp-id> --all --candidate-ref REF [--samples N] [--append]         # all instruments in dependency order
     autoresearch observe-pair <candidate-exp> --baseline <baseline-exp> --instrument NAME --candidate-ref REF [--baseline-ref REF] [--samples N] [--mode interleave|bracket]
     autoresearch observation show <O-id> [--include-raw]                    # read-only; raw samples are bounded
-    autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>|auto] [--instrument NAME] [--iters N]
+    autoresearch analyze  <exp-id> [--candidate-ref REF] [--baseline <baseline-exp-id>|auto] [--baseline-ref REF] [--baseline-observation O-XXXX] [--instrument NAME] [--iters N]
     autoresearch analyze-pair <P-id> [--iters N]                            # read-only paired delta + drift diagnostics
     autoresearch review-packet <C-id>                                       # read-only gate-review evidence bundle
     autoresearch conclude <hyp-id> \
@@ -301,6 +301,11 @@ observations in the conclusion as usual.
         --observations O-XXXX,O-YYYY \
         [--baseline-experiment E-XXXX|auto] \   # strict override; otherwise auto-derive baseline
         [--interpretation "..."]
+        # analyze --baseline auto uses the same inferred absolute baseline order
+        # as conclude. If an explicit baseline experiment has multiple measured
+        # scopes, use --baseline-ref or --baseline-observation; JSON errors include
+        # baseline_candidates with refs, SHAs, observation IDs, instruments, samples.
+        # cycle-context --json also reports recommended_baseline on in-flight work.
         # Dual baseline: absolute prefers candidate-recorded baseline, then the
         # nearest accepted supported ancestor, then the goal baseline; incremental
         # uses the nearest accepted supported lineage predecessor. Output reports
